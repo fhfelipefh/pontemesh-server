@@ -58,6 +58,7 @@
 
 .setup-card--compact {
   width: min(760px, calc(100vw - 48px));
+  padding: clamp(20px, 3vw, 30px);
 }
 
 .setup-card__divider {
@@ -73,6 +74,10 @@
 
 .setup-card--compact .setup-card__content {
   max-width: 640px;
+}
+
+.setup-card--compact .setup-card__divider {
+  margin: 18px 0;
 }
 
 .setup-card h1 {
@@ -91,6 +96,16 @@
   font-size: 1.02rem;
   line-height: 1.65;
   text-align: center;
+}
+
+.setup-card--compact h1 {
+  font-size: clamp(1.7rem, 2.5vw, 2.2rem);
+}
+
+.setup-card--compact p {
+  margin-top: 9px;
+  font-size: 0.94rem;
+  line-height: 1.48;
 }
 
 .brand-header {
@@ -127,6 +142,11 @@
   margin-top: 30px;
 }
 
+.setup-card--compact .form {
+  gap: 12px;
+  margin-top: 20px;
+}
+
 .form--two-column {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -137,6 +157,10 @@
   gap: 14px;
 }
 
+.setup-card--compact .form__footer {
+  gap: 10px;
+}
+
 .storage-summary,
 .advanced-storage {
   grid-column: 1 / -1;
@@ -144,18 +168,18 @@
 
 .storage-summary {
   display: grid;
-  gap: 14px;
-  margin-top: 2px;
+  gap: 10px;
+  margin-top: 0;
   border: 1px solid rgba(215, 222, 232, 0.9);
   border-radius: var(--pm-radius-md);
-  padding: 18px;
+  padding: 14px;
   background: rgba(248, 250, 252, 0.78);
 }
 
 .storage-summary h2 {
   margin: 0;
   color: var(--pm-deep-navy);
-  font-size: 1rem;
+  font-size: 0.94rem;
   line-height: 1.3;
   letter-spacing: 0;
 }
@@ -163,22 +187,22 @@
 .storage-summary p,
 .advanced-storage__panel p {
   max-width: none;
-  margin: 7px 0 0;
+  margin: 5px 0 0;
   color: var(--pm-muted);
-  font-size: 0.91rem;
-  line-height: 1.55;
+  font-size: 0.84rem;
+  line-height: 1.42;
   text-align: left;
 }
 
 .storage-summary__path {
   display: grid;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
 }
 
 .storage-summary__path span {
   color: var(--pm-muted);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -189,17 +213,17 @@
   overflow-wrap: anywhere;
   border: 1px solid rgba(14, 165, 233, 0.16);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   color: var(--pm-deep-navy);
   background: rgba(255, 255, 255, 0.82);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 700;
 }
 
 .advanced-storage {
   border-top: 1px solid rgba(215, 222, 232, 0.8);
-  padding-top: 4px;
+  padding-top: 0;
 }
 
 .advanced-storage__toggle {
@@ -208,12 +232,13 @@
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  min-height: 44px;
+  min-height: 38px;
   border-radius: 10px;
   padding: 0 4px;
   color: var(--pm-deep-navy);
   background: transparent;
   font-weight: 800;
+  font-size: 0.9rem;
   cursor: pointer;
 }
 
@@ -235,20 +260,20 @@
 
 .advanced-storage__panel {
   display: grid;
-  gap: 14px;
-  padding: 6px 0 4px;
+  gap: 10px;
+  padding: 4px 0 2px;
 }
 
 .advanced-storage__help {
   margin-top: -5px !important;
-  font-size: 0.86rem !important;
+  font-size: 0.8rem !important;
 }
 
 .field {
   display: grid;
-  gap: 9px;
+  gap: 7px;
   color: var(--pm-deep-navy);
-  font-size: 0.93rem;
+  font-size: 0.88rem;
   font-weight: 700;
 }
 
@@ -261,13 +286,13 @@
 .input-wrap input,
 .input-wrap select {
   width: 100%;
-  min-height: 50px;
+  min-height: 46px;
   border: 1px solid var(--pm-border);
   border-radius: var(--pm-radius-md);
-  padding: 13px 15px;
+  padding: 11px 13px;
   background: rgba(255, 255, 255, 0.96);
   color: var(--pm-deep-navy);
-  font-size: 0.98rem;
+  font-size: 0.92rem;
   font-weight: 600;
   outline: none;
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
@@ -328,12 +353,13 @@
   justify-content: center;
   gap: 10px;
   width: 100%;
-  min-height: 52px;
+  min-height: 48px;
   border-radius: var(--pm-radius-md);
-  padding: 13px 18px;
+  padding: 11px 16px;
   color: var(--pm-surface);
   background: var(--pm-primary-blue);
   font-weight: 800;
+  font-size: 0.95rem;
   cursor: pointer;
   box-shadow: 0 16px 34px rgba(37, 99, 235, 0.24);
   transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;

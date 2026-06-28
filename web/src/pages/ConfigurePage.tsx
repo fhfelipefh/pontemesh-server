@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { CheckCircle2, ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { CompleteSetupRequest, completeSetup } from "../api/setupApi";
@@ -151,7 +151,7 @@ export function ConfigurePage() {
         </section>
         <div className="form__footer">
           <ErrorMessage message={error} />
-          <Button type="submit" loading={submitting}>
+          <Button type="submit" loading={submitting} icon={<CheckCircle2 size={18} aria-hidden="true" />}>
             {submitting ? t("setup.configure.finishing") : t("setup.configure.finish")}
           </Button>
         </div>
