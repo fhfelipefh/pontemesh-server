@@ -1,0 +1,16 @@
+services:
+  pontemesh-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: pontemesh-server:local
+    environment:
+      PONTEMESH_HOME: /var/pontemesh_home
+      RUST_LOG: pontemesh_server=info,tower_http=info
+    ports:
+      - "8080:8080"
+    volumes:
+      - pontemesh_home:/var/pontemesh_home
+
+volumes:
+  pontemesh_home:

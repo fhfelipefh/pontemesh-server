@@ -77,3 +77,112 @@ O Ponte Mesh Server busca viabilizar uma arquitetura em que:
 A documentação pública e o site do projeto estão disponíveis no repositório:
 
 <https://github.com/fhfelipefh/pontemesh-docs>
+
+## Construção
+
+Para construir o projeto localmente, primeiro gere o build do painel web:
+
+```bash
+cd web
+npm install
+npm run build
+cd ..
+```
+
+Depois compile o servidor Rust:
+
+```bash
+cargo build
+```
+
+Para gerar o binário otimizado:
+
+```bash
+cargo build --release
+```
+
+O executável será gerado em:
+
+```text
+target/release/pontemesh-server
+```
+
+## Execução
+
+Para executar em ambiente local:
+
+```bash
+cargo run
+```
+
+Ou, após o build em modo release:
+
+```bash
+./target/release/pontemesh-server
+```
+
+Por padrão, o servidor utiliza:
+
+```text
+PONTEMESH_HOME=/var/pontemesh_home
+PONTEMESH_HTTP_HOST=0.0.0.0
+PONTEMESH_HTTP_PORT=8080
+```
+
+Também é possível executar com Docker:
+
+```bash
+docker build -t pontemesh-server .
+```
+
+```bash
+docker run \
+  --name pontemesh-server \
+  -p 8080:8080 \
+  -v pontemesh_home:/var/pontemesh_home \
+  pontemesh-server
+```
+
+Acesse:
+
+```text
+http://localhost:8080
+```
+
+## Configuração inicial
+
+Na primeira execução, o Ponte Mesh Server cria um token administrativo inicial.
+
+O token é salvo em:
+
+```text
+/var/pontemesh_home/secrets/initialAdminToken
+```
+
+Ele também aparece nos logs do servidor.
+
+Com Docker, visualize os logs com:
+
+```bash
+docker logs pontemesh-server
+```
+
+Ou leia o token diretamente:
+
+```bash
+docker exec pontemesh-server cat /var/pontemesh_home/secrets/initialAdminToken
+```
+
+Depois, acesse:
+
+```text
+http://localhost:8080
+```
+
+Cole o token inicial no painel web e conclua a configuração da instância.
+
+## Apoie o projeto
+
+Se este projeto for útil para você, considere apoiar o desenvolvimento:
+
+[Patrocinar no GitHub Sponsors](https://github.com/sponsors/fhfelipefh)
