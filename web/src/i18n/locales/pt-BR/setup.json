@@ -46,6 +46,122 @@
     },
     "language": {
       "label": "Idioma"
+    },
+    "auth": {
+      "admin": "Administrador",
+      "loginTitle": "Entrar no Ponte Mesh",
+      "loginDescription": "",
+      "username": "Usuário",
+      "password": "Senha",
+      "signIn": "Entrar",
+      "signingIn": "Entrando...",
+      "loginFailed": "Falha ao entrar.",
+      "logout": "Sair"
+    },
+    "nav": {
+      "primary": "Navegação principal",
+      "dashboard": "Dashboard",
+      "buckets": "Buckets",
+      "objects": "Objects",
+      "replicas": "Replicas",
+      "metrics": "Metrics",
+      "settings": "Settings"
+    },
+    "roles": {
+      "origin": "Origin",
+      "replica-edge": "Replica/Edge"
+    },
+    "environment": {
+      "native": "nativo",
+      "container": "container",
+      "unknown": "desconhecido"
+    },
+    "common": {
+      "loading": "Carregando...",
+      "unavailable": "Indisponível",
+      "yes": "Sim",
+      "no": "Não",
+      "ok": "OK",
+      "failed": "Falhou"
+    },
+    "dashboard": {
+      "instance": "Instância",
+      "overview": "Visão geral real da instância",
+      "role": "Papel:",
+      "environment": "Ambiente:",
+      "version": "Versão",
+      "uptime": "Tempo em execução",
+      "memory": "Memória",
+      "realChecks": "verificações reais",
+      "totalBuckets": "Total de buckets",
+      "totalObjects": "Total de objetos",
+      "totalBytes": "Bytes armazenados",
+      "warnings": "Avisos de coleta",
+      "loadFailed": "Falha ao carregar dashboard.",
+      "cards": {
+        "instance": "Status da instância",
+        "storage": "Armazenamento",
+        "buckets": "Buckets",
+        "objects": "Objetos",
+        "resources": "Recursos",
+        "health": "Saúde"
+      },
+      "storage": {
+        "title": "Uso real de armazenamento",
+        "used": "Usado",
+        "available": "Disponível",
+        "total": "Total",
+        "writable": "Gravável"
+      },
+      "buckets": {
+        "title": "Catálogo de buckets",
+        "description": "Contagem real registrada no catálogo local.",
+        "open": "Abrir buckets"
+      },
+      "health": {
+        "title": "Saúde da instância",
+        "description": "Verificações feitas pelo backend nesta instância.",
+        "database": "Catálogo conectado",
+        "storage": "Storage gravável",
+        "setup": "Setup concluído",
+        "authenticated": "Sessão autenticada"
+      },
+      "duration": {
+        "seconds": "{{count}}s",
+        "minutes": "{{count}}min",
+        "hours": "{{count}}h"
+      }
+    },
+    "buckets": {
+      "title": "Buckets",
+      "description": "Gerencie buckets reais do catálogo.",
+      "name": "Nome do bucket",
+      "namePlaceholder": "documents",
+      "create": "Criar bucket",
+      "delete": "Excluir bucket",
+      "loadFailed": "Falha ao carregar buckets.",
+      "createFailed": "Falha ao criar bucket.",
+      "deleteFailed": "Falha ao excluir bucket.",
+      "emptyTitle": "Nenhum bucket criado ainda.",
+      "emptyDescription": "Crie seu primeiro bucket para começar a armazenar objetos."
+    },
+    "objects": {
+      "description": "Arquivos reais armazenados neste bucket.",
+      "count": "objetos",
+      "key": "Chave do objeto",
+      "keyPlaceholder": "caminho/opcional/arquivo.ext",
+      "file": "Arquivo",
+      "upload": "Enviar objeto",
+      "search": "Buscar objetos",
+      "size": "Tamanho",
+      "state": "Estado",
+      "createdAt": "Criado em",
+      "delete": "Excluir objeto",
+      "loadFailed": "Falha ao carregar objetos.",
+      "uploadFailed": "Falha ao enviar objeto.",
+      "deleteFailed": "Falha ao excluir objeto.",
+      "emptyTitle": "Este bucket ainda não possui objetos.",
+      "emptyDescription": "Envie um arquivo para começar."
     }
   }
 }

@@ -8,6 +8,8 @@ use std::{
 
 pub const DEFAULT_PONTEMESH_HOME: &str = "/var/pontemesh_home";
 pub const PONTEMESH_STORAGE_PATH_ENV: &str = "PONTEMESH_STORAGE_PATH";
+const PONTEMESH_HTTP_HOST_ENV: &str = "PONTEMESH_HTTP_HOST";
+const PONTEMESH_HTTP_PORT_ENV: &str = "PONTEMESH_HTTP_PORT";
 const DEFAULT_HTTP_PORT: u16 = 8080;
 
 #[derive(Debug, Clone)]
@@ -42,6 +44,10 @@ impl PontemeshHome {
 
     pub fn data_dir(&self) -> PathBuf {
         self.root.join("data")
+    }
+
+    pub fn catalog_database_file(&self) -> PathBuf {
+        self.data_dir().join("catalog.sqlite")
     }
 
     pub fn storage_dir(&self) -> PathBuf {
@@ -151,10 +157,7 @@ pub fn load_http_bind_addr(paths: &PontemeshHome) -> anyhow::Result<SocketAddr> 
         return Ok(default_bind_addr());
     }
 
-    let raw_config = fs::read_to_string(paths.config_file())
-        .with_context(|| format!("failed to read {}", paths.config_file().display()))?;
-    let config: InstanceConfig =
-        toml::from_str(&raw_config).context("failed to parse Ponte Mesh config.toml")?;
+    let config = load_instance_config(paths)?;
 
     let ip: IpAddr = config
         .http
@@ -166,5 +169,31 @@ pub fn load_http_bind_addr(paths: &PontemeshHome) -> anyhow::Result<SocketAddr> 
 }
 
 pub fn default_bind_addr() -> SocketAddr {
-    SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), DEFAULT_HTTP_PORT)
+    let host = env::var(PONTEMESH_HTTP_HOST_ENV)
+        .ok()
+        .and_then(|value| value.parse::<IpAddr>().ok())
+        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let port = env::var(PONTEMESH_HTTP_PORT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_HTTP_PORT);
+    SocketAddr::new(host, port)
+}
+
+pub fn load_instance_config(paths: &PontemeshHome) -> anyhow::Result<InstanceConfig> {
+    let raw_config = fs::read_to_string(paths.config_file())
+        .with_context(|| format!("failed to read {}", paths.config_file().display()))?;
+    toml::from_str(&raw_config).context("failed to parse Ponte Mesh config.toml")
+}
+
+pub fn configured_storage_dir(paths: &PontemeshHome) -> anyhow::Result<PathBuf> {
+    if let Some(path) = paths.storage_dir_from_env()? {
+        return Ok(path);
+    }
+
+    if paths.config_file().exists() {
+        return Ok(load_instance_config(paths)?.storage.local.path);
+    }
+
+    Ok(paths.storage_dir())
 }

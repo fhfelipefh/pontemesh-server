@@ -1,7 +1,12 @@
+mod admin;
+mod audit;
+mod auth;
+mod catalog;
 mod config;
 mod http;
 mod security;
 mod setup;
+mod system;
 mod web_assets;
 
 use anyhow::Context;
@@ -14,9 +19,10 @@ async fn main() -> anyhow::Result<()> {
 
     let paths = config::PontemeshHome::from_env()?;
     let setup_state = setup::first_run::initialize(&paths)?;
+    let catalog = catalog::Catalog::initialize(&paths).await?;
 
     let bind_addr = config::load_http_bind_addr(&paths)?;
-    let app = http::router(paths, setup_state);
+    let app = http::router(paths, setup_state, catalog);
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
         .with_context(|| format!("failed to bind HTTP server at {bind_addr}"))?;

@@ -46,6 +46,122 @@
     },
     "language": {
       "label": "Language"
+    },
+    "auth": {
+      "admin": "Administrator",
+      "loginTitle": "Sign in to Ponte Mesh",
+      "loginDescription": "",
+      "username": "Username",
+      "password": "Password",
+      "signIn": "Sign in",
+      "signingIn": "Signing in...",
+      "loginFailed": "Sign in failed.",
+      "logout": "Log out"
+    },
+    "nav": {
+      "primary": "Primary navigation",
+      "dashboard": "Dashboard",
+      "buckets": "Buckets",
+      "objects": "Objects",
+      "replicas": "Replicas",
+      "metrics": "Metrics",
+      "settings": "Settings"
+    },
+    "roles": {
+      "origin": "Origin",
+      "replica-edge": "Replica/Edge"
+    },
+    "environment": {
+      "native": "native",
+      "container": "container",
+      "unknown": "unknown"
+    },
+    "common": {
+      "loading": "Loading...",
+      "unavailable": "Unavailable",
+      "yes": "Yes",
+      "no": "No",
+      "ok": "OK",
+      "failed": "Failed"
+    },
+    "dashboard": {
+      "instance": "Instance",
+      "overview": "Real instance overview",
+      "role": "Role:",
+      "environment": "Environment:",
+      "version": "Version",
+      "uptime": "Process uptime",
+      "memory": "Memory",
+      "realChecks": "real checks",
+      "totalBuckets": "Total buckets",
+      "totalObjects": "Total objects",
+      "totalBytes": "Stored bytes",
+      "warnings": "Collection warnings",
+      "loadFailed": "Failed to load dashboard.",
+      "cards": {
+        "instance": "Instance status",
+        "storage": "Storage",
+        "buckets": "Buckets",
+        "objects": "Objects",
+        "resources": "Resources",
+        "health": "Health"
+      },
+      "storage": {
+        "title": "Real storage usage",
+        "used": "Used",
+        "available": "Available",
+        "total": "Total",
+        "writable": "Writable"
+      },
+      "buckets": {
+        "title": "Bucket catalog",
+        "description": "Real count registered in the local catalog.",
+        "open": "Open buckets"
+      },
+      "health": {
+        "title": "Instance health",
+        "description": "Checks performed by the backend on this instance.",
+        "database": "Catalog connected",
+        "storage": "Storage writable",
+        "setup": "Setup completed",
+        "authenticated": "Authenticated session"
+      },
+      "duration": {
+        "seconds": "{{count}}s",
+        "minutes": "{{count}}min",
+        "hours": "{{count}}h"
+      }
+    },
+    "buckets": {
+      "title": "Buckets",
+      "description": "Manage real catalog buckets.",
+      "name": "Bucket name",
+      "namePlaceholder": "documents",
+      "create": "Create bucket",
+      "delete": "Delete bucket",
+      "loadFailed": "Failed to load buckets.",
+      "createFailed": "Failed to create bucket.",
+      "deleteFailed": "Failed to delete bucket.",
+      "emptyTitle": "No buckets have been created yet.",
+      "emptyDescription": "Create your first bucket to start storing objects."
+    },
+    "objects": {
+      "description": "Real files stored in this bucket.",
+      "count": "objects",
+      "key": "Object key",
+      "keyPlaceholder": "optional/path/file.ext",
+      "file": "File",
+      "upload": "Upload object",
+      "search": "Search objects",
+      "size": "Size",
+      "state": "State",
+      "createdAt": "Created at",
+      "delete": "Delete object",
+      "loadFailed": "Failed to load objects.",
+      "uploadFailed": "Failed to upload object.",
+      "deleteFailed": "Failed to delete object.",
+      "emptyTitle": "This bucket does not have objects yet.",
+      "emptyDescription": "Upload a file to get started."
     }
   }
 }

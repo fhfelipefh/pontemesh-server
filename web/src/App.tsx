@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { ReactElement, useEffect, useState } from "react";
 import { Navigate, Route, BrowserRouter as Router, Routes, useLocation } from "react-router-dom";
+import { AuthUser, getCurrentUser, logout } from "./api/authApi";
 import { getSetupStatus } from "./api/setupApi";
+import { AdminLayout } from "./components/AdminLayout";
+import { BucketsPage } from "./pages/BucketsPage";
 import { ConfigurePage } from "./pages/ConfigurePage";
-import { ReadyPage } from "./pages/ReadyPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { LoginPage } from "./pages/LoginPage";
 import { UnlockPage } from "./pages/UnlockPage";
 
 function SetupRoutes() {
   const location = useLocation();
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authLoaded, setAuthLoaded] = useState(false);
 
   useEffect(() => {
     getSetupStatus()
@@ -15,15 +21,49 @@ function SetupRoutes() {
       .catch(() => setSetupRequired(false));
   }, [location.pathname]);
 
-  if (setupRequired === null) {
+  useEffect(() => {
+    if (setupRequired !== false) {
+      setUser(null);
+      setAuthLoaded(true);
+      return;
+    }
+
+    setAuthLoaded(false);
+    getCurrentUser()
+      .then(setUser)
+      .catch(() => setUser({ authenticated: false, username: null }))
+      .finally(() => setAuthLoaded(true));
+  }, [setupRequired]);
+
+  async function handleLogout() {
+    await logout().catch(() => undefined);
+    setUser({ authenticated: false, username: null });
+  }
+
+  if (setupRequired === null || !authLoaded) {
     return <div className="app-loading" aria-hidden="true" />;
   }
+
+  const authenticated = user?.authenticated === true;
+  const adminElement = (children: ReactElement) => authenticated ? (
+    <AdminLayout username={user.username} onLogout={handleLogout}>
+      {children}
+    </AdminLayout>
+  ) : (
+    <Navigate to="/login" replace />
+  );
 
   return (
     <Routes>
       <Route
         path="/"
-        element={setupRequired ? <Navigate to="/setup" replace /> : <ReadyPage />}
+        element={
+          setupRequired ? (
+            <Navigate to="/setup" replace />
+          ) : (
+            <Navigate to={authenticated ? "/dashboard" : "/login"} replace />
+          )
+        }
       />
       <Route
         path="/setup"
@@ -33,6 +73,20 @@ function SetupRoutes() {
         path="/setup/configure"
         element={setupRequired ? <ConfigurePage /> : <Navigate to="/" replace />}
       />
+      <Route
+        path="/login"
+        element={
+          setupRequired ? (
+            <Navigate to="/setup" replace />
+          ) : authenticated ? (
+            <Navigate to="/dashboard" replace />
+          ) : (
+            <LoginPage onAuthenticated={setUser} />
+          )
+        }
+      />
+      <Route path="/dashboard" element={adminElement(<DashboardPage />)} />
+      <Route path="/buckets" element={adminElement(<BucketsPage />)} />
       <Route path="*" element={<Navigate to={setupRequired ? "/setup" : "/"} replace />} />
     </Routes>
   );

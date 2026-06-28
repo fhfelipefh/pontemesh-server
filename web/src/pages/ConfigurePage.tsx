@@ -42,7 +42,7 @@ export function ConfigurePage() {
 
     try {
       await completeSetup(payload);
-      navigate("/");
+      navigate("/login");
     } catch (setupError) {
       setError(setupError instanceof Error ? setupError.message : t("setup.configure.setupFailed"));
     } finally {
