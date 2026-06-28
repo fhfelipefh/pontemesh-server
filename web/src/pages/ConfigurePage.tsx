@@ -1,15 +1,15 @@
 import { FormEvent, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { CompleteSetupRequest, completeSetup } from "../api/setupApi";
 import { Button } from "../components/Button";
 import { ErrorMessage } from "../components/ErrorMessage";
 import { PageShell } from "../components/PageShell";
 import { TextInput } from "../components/TextInput";
 
-type ConfigurePageProps = {
-  onComplete: () => void;
-};
-
-export function ConfigurePage({ onComplete }: ConfigurePageProps) {
+export function ConfigurePage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const [instanceName, setInstanceName] = useState("Ponte Mesh Local");
   const [role, setRole] = useState<CompleteSetupRequest["role"]>("origin");
   const [adminUsername, setAdminUsername] = useState("admin");
@@ -38,9 +38,9 @@ export function ConfigurePage({ onComplete }: ConfigurePageProps) {
 
     try {
       await completeSetup(payload);
-      onComplete();
+      navigate("/");
     } catch (setupError) {
-      setError(setupError instanceof Error ? setupError.message : "Setup failed.");
+      setError(setupError instanceof Error ? setupError.message : t("setup.configure.setupFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -48,33 +48,36 @@ export function ConfigurePage({ onComplete }: ConfigurePageProps) {
 
   return (
     <PageShell
-      title="Configure Ponte Mesh"
-      description="Create the first administrator and choose how this instance will operate."
+      title={t("setup.configure.title")}
+      description={t("setup.configure.description")}
+      compact
     >
-      <form className="form" onSubmit={handleSubmit}>
+      <form className="form form--two-column" onSubmit={handleSubmit}>
         <TextInput
           id="instanceName"
-          label="Instance name"
+          label={t("setup.configure.instanceName")}
           value={instanceName}
           onChange={setInstanceName}
           required
         />
 
         <label className="field" htmlFor="role">
-          <span>Instance role</span>
-          <select
-            id="role"
-            value={role}
-            onChange={(event) => setRole(event.target.value as CompleteSetupRequest["role"])}
-          >
-            <option value="origin">origin</option>
-            <option value="replica-edge">replica-edge</option>
-          </select>
+          <span>{t("setup.configure.role")}</span>
+          <span className="input-wrap">
+            <select
+              id="role"
+              value={role}
+              onChange={(event) => setRole(event.target.value as CompleteSetupRequest["role"])}
+            >
+              <option value="origin">{t("setup.configure.origin")}</option>
+              <option value="replica-edge">{t("setup.configure.replicaEdge")}</option>
+            </select>
+          </span>
         </label>
 
         <TextInput
           id="adminUsername"
-          label="Initial admin username"
+          label={t("setup.configure.adminUsername")}
           autoComplete="username"
           value={adminUsername}
           onChange={setAdminUsername}
@@ -82,17 +85,18 @@ export function ConfigurePage({ onComplete }: ConfigurePageProps) {
         />
         <TextInput
           id="adminPassword"
-          label="Initial admin password"
+          label={t("setup.configure.adminPassword")}
           type="password"
           autoComplete="new-password"
           value={adminPassword}
           onChange={setAdminPassword}
           minLength={8}
+          revealable
           required
         />
         <TextInput
           id="httpPort"
-          label="HTTP port"
+          label={t("setup.configure.httpPort")}
           type="number"
           min={1}
           max={65535}
@@ -102,15 +106,17 @@ export function ConfigurePage({ onComplete }: ConfigurePageProps) {
         />
         <TextInput
           id="storageLocalPath"
-          label="Local storage path"
+          label={t("setup.configure.storageLocalPath")}
           value={storageLocalPath}
           onChange={setStorageLocalPath}
-          placeholder="Use backend default"
+          placeholder={t("setup.configure.storagePlaceholder")}
         />
-        <ErrorMessage message={error} />
-        <Button type="submit" disabled={submitting}>
-          {submitting ? "Finishing..." : "Finish setup"}
-        </Button>
+        <div className="form__footer">
+          <ErrorMessage message={error} />
+          <Button type="submit" loading={submitting}>
+            {submitting ? t("setup.configure.finishing") : t("setup.configure.finish")}
+          </Button>
+        </div>
       </form>
     </PageShell>
   );

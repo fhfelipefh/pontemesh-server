@@ -1,0 +1,16 @@
+:root {
+  --pm-primary-blue: #2563EB;
+  --pm-deep-navy: #0F172A;
+  --pm-accent-cyan-blue: #0EA5E9;
+  --pm-accent-teal: #14B8A6;
+
+  --pm-bg: #F6F9FC;
+  --pm-surface: #FFFFFF;
+  --pm-border: #D7DEE8;
+  --pm-muted: #64748B;
+  --pm-danger: #DC2626;
+
+  --pm-radius-lg: 24px;
+  --pm-radius-md: 14px;
+  --pm-shadow-card: 0 24px 80px rgba(15, 23, 42, 0.14);
+}

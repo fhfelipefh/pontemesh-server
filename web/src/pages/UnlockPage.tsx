@@ -1,15 +1,14 @@
 import { FormEvent, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { unlockSetup } from "../api/setupApi";
 import { Button } from "../components/Button";
-import { ErrorMessage } from "../components/ErrorMessage";
 import { PageShell } from "../components/PageShell";
 import { TextInput } from "../components/TextInput";
 
-type UnlockPageProps = {
-  onUnlocked: () => void;
-};
-
-export function UnlockPage({ onUnlocked }: UnlockPageProps) {
+export function UnlockPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -21,34 +20,34 @@ export function UnlockPage({ onUnlocked }: UnlockPageProps) {
 
     try {
       await unlockSetup({ token });
-      onUnlocked();
+      navigate("/setup/configure");
     } catch {
-      setError("Invalid initial admin token.");
+      setError(t("setup.unlock.invalidToken"));
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <PageShell
-      title="Unlock Ponte Mesh"
-      description="This Ponte Mesh instance needs the initial admin token before it can be configured."
-    >
+    <PageShell title={t("setup.unlock.title")} description={t("setup.unlock.description")}>
       <form className="form" onSubmit={handleSubmit}>
         <TextInput
           id="token"
-          label="Initial admin token"
+          label={t("setup.unlock.tokenLabel")}
           type="password"
           autoComplete="one-time-code"
+          placeholder={t("setup.unlock.tokenPlaceholder")}
           value={token}
           onChange={setToken}
+          error={error}
+          revealable
           required
           autoFocus
         />
-        <ErrorMessage message={error} />
-        <Button type="submit" disabled={submitting}>
-          {submitting ? "Checking..." : "Continue"}
+        <Button type="submit" disabled={!token.trim()} loading={submitting}>
+          {submitting ? t("setup.unlock.checking") : t("setup.unlock.continue")}
         </Button>
+        <p className="language-hint">{t("setup.unlock.languageHint")}</p>
       </form>
     </PageShell>
   );

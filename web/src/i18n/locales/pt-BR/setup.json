@@ -1,0 +1,43 @@
+{
+  "setup": {
+    "unlock": {
+      "title": "Desbloquear Ponte Mesh",
+      "description": "Esta instância do Ponte Mesh precisa do token administrativo inicial antes de ser configurada.",
+      "tokenLabel": "Token administrativo inicial",
+      "tokenPlaceholder": "Informe o token administrativo inicial",
+      "continue": "Continuar",
+      "checking": "Verificando...",
+      "invalidToken": "Token administrativo inicial inválido.",
+      "languageHint": "Você pode alterar o idioma a qualquer momento.",
+      "showToken": "Mostrar token",
+      "hideToken": "Ocultar token"
+    },
+    "configure": {
+      "title": "Configurar Ponte Mesh",
+      "description": "Finalize a configuração inicial desta instância.",
+      "instanceName": "Nome da instância",
+      "role": "Papel da instância",
+      "origin": "Origin",
+      "replicaEdge": "Replica/Edge",
+      "adminUsername": "Usuário administrador inicial",
+      "adminPassword": "Senha do administrador inicial",
+      "httpPort": "Porta HTTP",
+      "storageLocalPath": "Caminho do armazenamento local",
+      "storagePlaceholder": "Usar caminho padrão de armazenamento",
+      "finish": "Finalizar configuração",
+      "finishing": "Finalizando...",
+      "setupFailed": "Falha ao concluir a configuração."
+    },
+    "ready": {
+      "title": "Ponte Mesh Server",
+      "description": "Esta instância concluiu a configuração inicial."
+    },
+    "help": {
+      "needHelp": "Precisa de ajuda?",
+      "readDocs": "Ler a documentação"
+    },
+    "language": {
+      "label": "Idioma"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "setup": {
+    "unlock": {
+      "title": "Unlock Ponte Mesh",
+      "description": "This Ponte Mesh instance needs the initial admin token before it can be configured.",
+      "tokenLabel": "Initial admin token",
+      "tokenPlaceholder": "Enter initial admin token",
+      "continue": "Continue",
+      "checking": "Checking...",
+      "invalidToken": "Invalid initial admin token.",
+      "languageHint": "You can change the language at any time.",
+      "showToken": "Show token",
+      "hideToken": "Hide token"
+    },
+    "configure": {
+      "title": "Configure Ponte Mesh",
+      "description": "Finish the initial configuration of this instance.",
+      "instanceName": "Instance name",
+      "role": "Instance role",
+      "origin": "Origin",
+      "replicaEdge": "Replica/Edge",
+      "adminUsername": "Initial admin username",
+      "adminPassword": "Initial admin password",
+      "httpPort": "HTTP port",
+      "storageLocalPath": "Local storage path",
+      "storagePlaceholder": "Use default storage path",
+      "finish": "Finish setup",
+      "finishing": "Finishing...",
+      "setupFailed": "Setup failed."
+    },
+    "ready": {
+      "title": "Ponte Mesh Server",
+      "description": "This instance has completed initial setup."
+    },
+    "help": {
+      "needHelp": "Need help?",
+      "readDocs": "Read the docs"
+    },
+    "language": {
+      "label": "Language"
+    }
+  }
+}
