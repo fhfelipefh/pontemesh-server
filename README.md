@@ -149,6 +149,48 @@ Acesse:
 http://localhost:8080
 ```
 
+## Comando único para construção e execução
+
+Todos os comandos acima podem ser resumidos em um script único, que prepara o ambiente e abre o painel web:
+
+```bash
+./scripts/start-panel.sh
+```
+
+Esse comando faz todo o fluxo automaticamente:
+
+* instala dependências do frontend;
+* constrói o frontend React/Vite;
+* constrói o backend Rust em modo release;
+* constrói a imagem Docker;
+* executa o container com volume persistente;
+* espera o servidor responder;
+* abre uma nova guia do navegador em `http://localhost:8080`.
+
+O comando usa, por padrão:
+
+```text
+imagem Docker: pontemesh-server:local
+container: pontemesh-server
+volume: pontemesh_home
+porta local: 8080
+```
+
+É possível sobrescrever esses valores por variáveis de ambiente:
+
+```bash
+PONTEMESH_HOST_PORT=8081 \
+PONTEMESH_CONTAINER_NAME=pontemesh-server-dev \
+PONTEMESH_VOLUME_NAME=pontemesh_home_dev \
+./scripts/start-panel.sh
+```
+
+Nesse exemplo, o navegador será aberto em:
+
+```text
+http://localhost:8081
+```
+
 ## Configuração inicial
 
 Na primeira execução, o Ponte Mesh Server cria um token administrativo inicial.

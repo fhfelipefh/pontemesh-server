@@ -1,0 +1,7 @@
+target
+web/node_modules
+web/dist
+.git
+.gitignore
+.dockerignore
+*.log
