@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { CompleteSetupRequest, completeSetup } from "../api/setupApi";
@@ -6,6 +7,8 @@ import { Button } from "../components/Button";
 import { ErrorMessage } from "../components/ErrorMessage";
 import { PageShell } from "../components/PageShell";
 import { TextInput } from "../components/TextInput";
+
+const DEFAULT_STORAGE_PATH = "/var/pontemesh_home/data/storage";
 
 export function ConfigurePage() {
   const { t } = useTranslation();
@@ -15,7 +18,8 @@ export function ConfigurePage() {
   const [adminUsername, setAdminUsername] = useState("admin");
   const [adminPassword, setAdminPassword] = useState("");
   const [httpPort, setHttpPort] = useState("8080");
-  const [storageLocalPath, setStorageLocalPath] = useState("");
+  const [internalStoragePath, setInternalStoragePath] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -32,8 +36,8 @@ export function ConfigurePage() {
       httpPort: Number(httpPort)
     };
 
-    if (storageLocalPath.trim()) {
-      payload.storageLocalPath = storageLocalPath.trim();
+    if (internalStoragePath.trim()) {
+      payload.internalStoragePath = internalStoragePath.trim();
     }
 
     try {
@@ -104,13 +108,47 @@ export function ConfigurePage() {
           onChange={setHttpPort}
           required
         />
-        <TextInput
-          id="storageLocalPath"
-          label={t("setup.configure.storageLocalPath")}
-          value={storageLocalPath}
-          onChange={setStorageLocalPath}
-          placeholder={t("setup.configure.storagePlaceholder")}
-        />
+
+        <section className="storage-summary" aria-labelledby="storage-summary-title">
+          <div>
+            <h2 id="storage-summary-title">{t("setup.configure.storage.title")}</h2>
+            <p>{t("setup.configure.storage.description")}</p>
+          </div>
+          <div className="storage-summary__path">
+            <span>{t("setup.configure.storage.defaultPathLabel")}</span>
+            <code>{DEFAULT_STORAGE_PATH}</code>
+          </div>
+        </section>
+
+        <section className="advanced-storage">
+          <button
+            className="advanced-storage__toggle"
+            type="button"
+            aria-expanded={advancedOpen}
+            aria-controls="advanced-storage-panel"
+            onClick={() => setAdvancedOpen((current) => !current)}
+          >
+            <span>{t("setup.configure.storage.advancedTitle")}</span>
+            <ChevronDown size={18} aria-hidden="true" />
+          </button>
+
+          {advancedOpen ? (
+            <div id="advanced-storage-panel" className="advanced-storage__panel">
+              <p>{t("setup.configure.storage.advancedDescription")}</p>
+              <TextInput
+                id="internalStoragePath"
+                label={t("setup.configure.storage.internalPathLabel")}
+                value={internalStoragePath}
+                onChange={setInternalStoragePath}
+                placeholder={t("setup.configure.storage.internalPathPlaceholder")}
+              />
+              <p className="advanced-storage__help">
+                {t("setup.configure.storage.internalPathHelp")}
+              </p>
+            </div>
+          ) : null}
+
+        </section>
         <div className="form__footer">
           <ErrorMessage message={error} />
           <Button type="submit" loading={submitting}>

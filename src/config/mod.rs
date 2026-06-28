@@ -7,6 +7,7 @@ use std::{
 };
 
 pub const DEFAULT_PONTEMESH_HOME: &str = "/var/pontemesh_home";
+pub const PONTEMESH_STORAGE_PATH_ENV: &str = "PONTEMESH_STORAGE_PATH";
 const DEFAULT_HTTP_PORT: u16 = 8080;
 
 #[derive(Debug, Clone)]
@@ -47,6 +48,24 @@ impl PontemeshHome {
         self.data_dir().join("storage")
     }
 
+    pub fn storage_dir_from_env(&self) -> anyhow::Result<Option<PathBuf>> {
+        let Some(path) = env::var_os(PONTEMESH_STORAGE_PATH_ENV).map(PathBuf::from) else {
+            return Ok(None);
+        };
+
+        if path.as_os_str().is_empty() {
+            bail!("{PONTEMESH_STORAGE_PATH_ENV} cannot be empty");
+        }
+
+        Ok(Some(path))
+    }
+
+    pub fn effective_storage_dir(&self) -> anyhow::Result<PathBuf> {
+        Ok(self
+            .storage_dir_from_env()?
+            .unwrap_or_else(|| self.storage_dir()))
+    }
+
     pub fn secrets_dir(&self) -> PathBuf {
         self.root.join("secrets")
     }
@@ -70,7 +89,7 @@ impl PontemeshHome {
     pub fn ensure_layout(&self) -> anyhow::Result<()> {
         for dir in [
             self.config_dir(),
-            self.storage_dir(),
+            self.effective_storage_dir()?,
             self.secrets_dir(),
             self.state_dir(),
             self.logs_dir(),

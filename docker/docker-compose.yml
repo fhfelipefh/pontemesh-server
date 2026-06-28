@@ -11,6 +11,11 @@ services:
       - "8080:8080"
     volumes:
       - pontemesh_home:/var/pontemesh_home
+      # To use a specific host directory on Linux, replace the named volume with:
+      # - /mnt/hd/pontemesh:/var/pontemesh_home
+      #
+      # On Windows, use a bind mount such as:
+      # - D:/PonteMesh:/var/pontemesh_home
 
 volumes:
   pontemesh_home:

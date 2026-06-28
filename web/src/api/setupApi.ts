@@ -8,7 +8,7 @@ export type CompleteSetupRequest = {
   adminUsername: string;
   adminPassword: string;
   httpPort: number;
-  storageLocalPath?: string;
+  internalStoragePath?: string;
 };
 
 export type SetupStatusResponse = {

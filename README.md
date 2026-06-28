@@ -125,9 +125,16 @@ Por padrão, o servidor utiliza:
 
 ```text
 PONTEMESH_HOME=/var/pontemesh_home
+PONTEMESH_STORAGE_PATH=/var/pontemesh_home/data/storage
 PONTEMESH_HTTP_HOST=0.0.0.0
 PONTEMESH_HTTP_PORT=8080
 ```
+
+O diretório persistente da instância é `PONTEMESH_HOME`. Em containers, monte um
+volume para `/var/pontemesh_home`; o armazenamento padrão será criado em
+`/var/pontemesh_home/data/storage`. Para usar uma pasta específica do host,
+monte essa pasta como volume em `/var/pontemesh_home`, ou defina
+`PONTEMESH_STORAGE_PATH` para um caminho interno já preparado.
 
 Também é possível executar com Docker:
 

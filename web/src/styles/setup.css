@@ -137,6 +137,113 @@
   gap: 14px;
 }
 
+.storage-summary,
+.advanced-storage {
+  grid-column: 1 / -1;
+}
+
+.storage-summary {
+  display: grid;
+  gap: 14px;
+  margin-top: 2px;
+  border: 1px solid rgba(215, 222, 232, 0.9);
+  border-radius: var(--pm-radius-md);
+  padding: 18px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.storage-summary h2 {
+  margin: 0;
+  color: var(--pm-deep-navy);
+  font-size: 1rem;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+.storage-summary p,
+.advanced-storage__panel p {
+  max-width: none;
+  margin: 7px 0 0;
+  color: var(--pm-muted);
+  font-size: 0.91rem;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.storage-summary__path {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.storage-summary__path span {
+  color: var(--pm-muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.storage-summary__path code {
+  display: block;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(14, 165, 233, 0.16);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--pm-deep-navy);
+  background: rgba(255, 255, 255, 0.82);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.advanced-storage {
+  border-top: 1px solid rgba(215, 222, 232, 0.8);
+  padding-top: 4px;
+}
+
+.advanced-storage__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  border-radius: 10px;
+  padding: 0 4px;
+  color: var(--pm-deep-navy);
+  background: transparent;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.advanced-storage__toggle svg {
+  flex: 0 0 auto;
+  color: var(--pm-muted);
+  transition: transform 160ms ease;
+}
+
+.advanced-storage__toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.advanced-storage__toggle:hover,
+.advanced-storage__toggle:focus-visible {
+  color: var(--pm-primary-blue);
+  outline: none;
+}
+
+.advanced-storage__panel {
+  display: grid;
+  gap: 14px;
+  padding: 6px 0 4px;
+}
+
+.advanced-storage__help {
+  margin-top: -5px !important;
+  font-size: 0.86rem !important;
+}
+
 .field {
   display: grid;
   gap: 9px;

@@ -16,7 +16,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+};
 use tracing::info;
 
 const SETUP_SESSION_COOKIE: &str = "pm_setup_unlock";
@@ -45,7 +49,8 @@ pub struct CompleteSetupRequest {
     admin_username: String,
     admin_password: String,
     http_port: Option<u16>,
-    storage_local_path: Option<PathBuf>,
+    #[serde(alias = "storageLocalPath")]
+    internal_storage_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -148,17 +153,8 @@ fn complete_setup(state: &AppState, payload: CompleteSetupRequest) -> anyhow::Re
     };
 
     let http_port = payload.http_port.unwrap_or(8080);
-    let storage_path = payload
-        .storage_local_path
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| state.paths.storage_dir());
-
-    fs::create_dir_all(&storage_path).with_context(|| {
-        format!(
-            "failed to create storage directory {}",
-            storage_path.display()
-        )
-    })?;
+    let storage_path = resolve_setup_storage_path(state, payload.internal_storage_path)?;
+    validate_storage_path(&storage_path)?;
 
     let password_hash = hash_admin_password(&admin_password)?;
     let config = InstanceConfig {
@@ -197,6 +193,89 @@ fn complete_setup(state: &AppState, payload: CompleteSetupRequest) -> anyhow::Re
     })?;
 
     state.setup.clear_unlock_sessions();
+    Ok(())
+}
+
+fn resolve_setup_storage_path(
+    state: &AppState,
+    setup_storage_path: Option<String>,
+) -> anyhow::Result<PathBuf> {
+    if let Some(storage_path) = state.paths.storage_dir_from_env()? {
+        return Ok(storage_path);
+    }
+
+    if let Some(storage_path) = setup_storage_path {
+        let trimmed = storage_path.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+
+    Ok(state.paths.storage_dir())
+}
+
+fn validate_storage_path(storage_path: &Path) -> anyhow::Result<()> {
+    if !storage_path.is_absolute() {
+        bail!(
+            "storage path must be an absolute internal server path: {}",
+            storage_path.display()
+        );
+    }
+
+    fs::create_dir_all(storage_path).with_context(|| {
+        format!(
+            "failed to create storage directory {}",
+            storage_path.display()
+        )
+    })?;
+
+    let metadata = fs::metadata(storage_path)
+        .with_context(|| format!("failed to inspect storage path {}", storage_path.display()))?;
+    if !metadata.is_dir() {
+        bail!(
+            "storage path is not a directory: {}",
+            storage_path.display()
+        );
+    }
+
+    let probe_path = storage_path.join(format!(
+        ".pontemesh-write-test-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let mut probe_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe_path)
+        .with_context(|| {
+            format!(
+                "failed to create temporary storage test file {}",
+                probe_path.display()
+            )
+        })?;
+
+    probe_file
+        .write_all(b"pontemesh storage validation\n")
+        .with_context(|| {
+            format!(
+                "failed to write temporary storage test file {}",
+                probe_path.display()
+            )
+        })?;
+    probe_file.sync_all().with_context(|| {
+        format!(
+            "failed to sync temporary storage test file {}",
+            probe_path.display()
+        )
+    })?;
+    drop(probe_file);
+
+    fs::remove_file(&probe_path).with_context(|| {
+        format!(
+            "failed to remove temporary storage test file {}",
+            probe_path.display()
+        )
+    })?;
+
     Ok(())
 }
 

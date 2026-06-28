@@ -22,8 +22,16 @@
       "adminUsername": "Initial admin username",
       "adminPassword": "Initial admin password",
       "httpPort": "HTTP port",
-      "storageLocalPath": "Local storage path",
-      "storagePlaceholder": "Use default storage path",
+      "storage": {
+        "title": "Instance storage",
+        "description": "Objects, fragments, and instance data will be stored in the persistent volume configured for Ponte Mesh.",
+        "defaultPathLabel": "Path used by the server",
+        "advancedTitle": "Advanced configuration",
+        "advancedDescription": "Change this only if you have already prepared a specific volume or directory for storage.",
+        "internalPathLabel": "Internal storage path",
+        "internalPathHelp": "In Docker, this path must exist inside the container. To use a host folder, mount it as a volume.",
+        "internalPathPlaceholder": "/var/pontemesh_home/data/storage"
+      },
       "finish": "Finish setup",
       "finishing": "Finishing...",
       "setupFailed": "Setup failed."

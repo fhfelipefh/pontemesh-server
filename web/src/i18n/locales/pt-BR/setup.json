@@ -22,8 +22,16 @@
       "adminUsername": "Usuário administrador inicial",
       "adminPassword": "Senha do administrador inicial",
       "httpPort": "Porta HTTP",
-      "storageLocalPath": "Caminho do armazenamento local",
-      "storagePlaceholder": "Usar caminho padrão de armazenamento",
+      "storage": {
+        "title": "Armazenamento da instância",
+        "description": "Objetos, fragmentos e dados da instância serão salvos no volume persistente configurado para o Ponte Mesh.",
+        "defaultPathLabel": "Caminho usado pelo servidor",
+        "advancedTitle": "Configuração avançada",
+        "advancedDescription": "Altere apenas se você já preparou um volume ou diretório específico para armazenamento.",
+        "internalPathLabel": "Caminho interno de armazenamento",
+        "internalPathHelp": "Em Docker, este caminho deve existir dentro do container. Para usar uma pasta da máquina, monte essa pasta como volume.",
+        "internalPathPlaceholder": "/var/pontemesh_home/data/storage"
+      },
       "finish": "Finalizar configuração",
       "finishing": "Finalizando...",
       "setupFailed": "Falha ao concluir a configuração."
