@@ -4,7 +4,7 @@ use crate::{
 };
 use axum::{
     Router, middleware,
-    routing::{any, get, post, put},
+    routing::{any, delete, get, post, put},
 };
 use std::time::Instant;
 use tower_http::trace::TraceLayer;
@@ -118,6 +118,14 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             get(admin::list_s3_access_keys).post(admin::create_s3_access_key),
         )
         .route(
+            "/api/admin/s3/access-keys",
+            get(admin::list_s3_access_keys).post(admin::create_s3_access_key),
+        )
+        .route(
+            "/api/admin/s3/access-keys/{id}",
+            delete(admin::revoke_s3_access_key_by_id),
+        )
+        .route(
             "/api/admin/s3-access-keys/{access_key_id}/revoke",
             post(admin::revoke_s3_access_key),
         )
@@ -164,7 +172,7 @@ mod tests {
             HttpSection, InstanceConfig, InstanceRole, InstanceSection, LocalStorageSection,
             StorageSection,
         },
-        security::password::hash_admin_password,
+        security::{password::hash_admin_password, s3_secret::s3_secret_encryption_key},
     };
     use axum::{
         body::{Body, to_bytes},
@@ -183,7 +191,7 @@ mod tests {
 
     static TEST_DB_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     const TEST_S3_ACCESS_KEY: &str = "PMTESTACCESSKEY";
-    const TEST_S3_SECRET_KEY: &str = "pm-test-secret-key";
+    const TEST_S3_SECRET_KEY: &str = "pm-test-secret-key-material";
     const TEST_AMZ_DATE: &str = "20260629T120000Z";
     const TEST_DATE: &str = "20260629";
     const TEST_REGION: &str = "us-east-1";
@@ -596,16 +604,13 @@ mod tests {
         assert_eq!(created.status(), StatusCode::CREATED);
         let created_body: serde_json::Value =
             serde_json::from_str(&response_text(created).await).expect("created key JSON");
-        let access_key_id = created_body["key"]["accessKeyId"]
-            .as_str()
-            .expect("access key id");
+        let access_key_id = created_body["accessKeyId"].as_str().expect("access key id");
         let secret_access_key = created_body["secretAccessKey"]
             .as_str()
             .expect("secret access key");
-        assert!(access_key_id.starts_with("PM"));
-        assert!(secret_access_key.starts_with("pm_s3_"));
-        assert_eq!(created_body["key"]["isActive"], true);
-        assert!(created_body["key"]["userId"].as_str().is_some());
+        let id = created_body["id"].as_str().expect("key id");
+        assert!(access_key_id.starts_with("PMK"));
+        assert!(!secret_access_key.is_empty());
 
         let list = app
             .clone()
@@ -653,8 +658,8 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .method(Method::POST)
-                    .uri(format!("/api/admin/s3-access-keys/{access_key_id}/revoke"))
+                    .method(Method::DELETE)
+                    .uri(format!("/api/admin/s3/access-keys/{id}"))
                     .header(header::COOKIE, &admin_cookie)
                     .body(Body::empty())
                     .expect("valid request"),
@@ -715,10 +720,11 @@ mod tests {
         assert_eq!(created.status(), StatusCode::CREATED);
         let created_body: serde_json::Value =
             serde_json::from_str(&response_text(created).await).expect("created key JSON");
-        let access_key_id = created_body["key"]["accessKeyId"]
+        let access_key_id = created_body["accessKeyId"]
             .as_str()
             .expect("access key id")
             .to_owned();
+        let id = created_body["id"].as_str().expect("key id").to_owned();
         let secret_access_key = created_body["secretAccessKey"]
             .as_str()
             .expect("secret access key")
@@ -755,8 +761,8 @@ mod tests {
         let revoke = app
             .oneshot(
                 Request::builder()
-                    .method(Method::POST)
-                    .uri(format!("/api/admin/s3-access-keys/{access_key_id}/revoke"))
+                    .method(Method::DELETE)
+                    .uri(format!("/api/admin/s3/access-keys/{id}"))
                     .header(header::COOKIE, &admin_cookie)
                     .body(Body::empty())
                     .expect("valid request"),
@@ -783,7 +789,7 @@ mod tests {
         assert!(
             response_text(after_revoke)
                 .await
-                .contains("<Code>SignatureDoesNotMatch</Code>")
+                .contains("<Code>InvalidAccessKeyId</Code>")
         );
     }
 
@@ -1048,16 +1054,18 @@ mod tests {
                 .await
                 .expect("catalog");
             unsafe {
-                std::env::set_var("PONTEMESH_S3_BOOTSTRAP_ACCESS_KEY_ID", TEST_S3_ACCESS_KEY);
-                std::env::set_var(
-                    "PONTEMESH_S3_BOOTSTRAP_SECRET_ACCESS_KEY",
-                    TEST_S3_SECRET_KEY,
-                );
+                std::env::remove_var("PONTEMESH_S3_BOOTSTRAP_ACCESS_KEY_ID");
+                std::env::remove_var("PONTEMESH_S3_BOOTSTRAP_SECRET_ACCESS_KEY");
             }
+            let secret_encryption_key =
+                s3_secret_encryption_key(&paths).expect("S3 secret encryption key");
             catalog
                 .ensure_s3_access_key(
+                    None,
+                    Some("test-bootstrap-key"),
                     TEST_S3_ACCESS_KEY,
-                    &sha256_hex(TEST_S3_SECRET_KEY.as_bytes()),
+                    TEST_S3_SECRET_KEY,
+                    &secret_encryption_key,
                 )
                 .await
                 .expect("S3 access key");

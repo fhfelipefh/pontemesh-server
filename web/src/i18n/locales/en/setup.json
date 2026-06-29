@@ -34,7 +34,11 @@
       },
       "finish": "Finish setup",
       "finishing": "Finishing...",
-      "setupFailed": "Setup failed."
+      "setupFailed": "Setup failed.",
+      "s3InitialTitle": "Initial S3 access key",
+      "s3InitialDescription": "Use this key with S3-compatible clients after login.",
+      "s3InitialWarning": "Copy your initial S3 key now. The secret will not be shown again.",
+      "goToLogin": "Go to login"
     },
     "ready": {
       "title": "Ponte Mesh Server",
@@ -178,10 +182,14 @@
         "title": "S3 credentials",
         "description": "Keys for S3-compatible clients.",
         "create": "Create key",
+        "name": "Name",
+        "namePlaceholder": "default-admin-key",
         "createdTitle": "Key created",
-        "createdHint": "The secret is shown only now.",
+        "createdHint": "Copy this secret now. It will not be shown again.",
         "accessKeyId": "Access key",
         "secretAccessKey": "Secret key",
+        "copyAccessKeyId": "Copy access key",
+        "copySecretAccessKey": "Copy secret key",
         "status": "Status",
         "active": "active",
         "revoked": "revoked",

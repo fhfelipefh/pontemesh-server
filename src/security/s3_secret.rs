@@ -1,4 +1,7 @@
-use crate::{config::PontemeshHome, security::random::secure_url_token};
+use crate::{
+    config::PontemeshHome,
+    security::{random::secure_url_token, secrets::restrict_secret_file},
+};
 use anyhow::Context;
 use std::fs;
 
@@ -18,21 +21,4 @@ pub fn s3_secret_encryption_key(paths: &PontemeshHome) -> anyhow::Result<String>
     fs::write(&path, &key).with_context(|| format!("failed to write {}", path.display()))?;
     restrict_secret_file(&path)?;
     Ok(key)
-}
-
-#[cfg(unix)]
-fn restrict_secret_file(path: &std::path::Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut permissions = fs::metadata(path)
-        .with_context(|| format!("failed to inspect {}", path.display()))?
-        .permissions();
-    permissions.set_mode(0o600);
-    fs::set_permissions(path, permissions)
-        .with_context(|| format!("failed to protect {}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn restrict_secret_file(_path: &std::path::Path) -> anyhow::Result<()> {
-    Ok(())
 }

@@ -79,7 +79,9 @@ pub struct CreateReplicaCredentialRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateS3AccessKeyRequest {}
+pub struct CreateS3AccessKeyRequest {
+    name: Option<String>,
+}
 
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
@@ -430,7 +432,7 @@ pub async fn list_s3_access_keys(State(state): State<AppState>) -> Response {
 pub async fn create_s3_access_key(
     State(state): State<AppState>,
     Extension(session): Extension<AdminSession>,
-    Json(_payload): Json<CreateS3AccessKeyRequest>,
+    Json(payload): Json<CreateS3AccessKeyRequest>,
 ) -> Response {
     let secret_encryption_key = match s3_secret_encryption_key(&state.paths) {
         Ok(key) => key,
@@ -438,7 +440,11 @@ pub async fn create_s3_access_key(
     };
     match state
         .catalog
-        .create_s3_access_key(Some(&session.user_id), &secret_encryption_key)
+        .create_s3_access_key(
+            &session.user_id,
+            payload.name.as_deref(),
+            &secret_encryption_key,
+        )
         .await
     {
         Ok(created) => {
@@ -446,17 +452,44 @@ pub async fn create_s3_access_key(
                 "s3_access_key_created",
                 Some(&session.username),
                 "success",
-                &format!("access_key_id={}", created.key.access_key_id),
+                &format!("access_key_id={}", created.access_key_id),
             );
             record_admin_audit(
                 &state,
                 "s3_access_key_created",
                 &session.username,
                 "success",
-                &format!("access_key_id={}", created.key.access_key_id),
+                &format!("access_key_id={}", created.access_key_id),
             )
             .await;
             (StatusCode::CREATED, Json(created)).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn revoke_s3_access_key_by_id(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.catalog.revoke_s3_access_key_by_id(&id).await {
+        Ok(key) => {
+            audit::event(
+                "s3_access_key_revoked",
+                Some(&session.username),
+                "success",
+                &format!("access_key_id={}", key.access_key_id),
+            );
+            record_admin_audit(
+                &state,
+                "s3_access_key_revoked",
+                &session.username,
+                "success",
+                &format!("access_key_id={}", key.access_key_id),
+            )
+            .await;
+            StatusCode::NO_CONTENT.into_response()
         }
         Err(error) => bad_request(error),
     }

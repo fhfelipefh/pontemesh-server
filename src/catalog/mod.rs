@@ -109,6 +109,7 @@ pub struct S3AccessKey {
 #[serde(rename_all = "camelCase")]
 pub struct S3AccessKeySummary {
     pub id: String,
+    pub name: Option<String>,
     pub access_key_id: String,
     pub user_id: Option<String>,
     pub is_active: bool,
@@ -120,8 +121,11 @@ pub struct S3AccessKeySummary {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedS3AccessKey {
-    pub key: S3AccessKeySummary,
+    pub id: String,
+    pub name: Option<String>,
+    pub access_key_id: String,
     pub secret_access_key: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -249,23 +253,25 @@ impl Catalog {
         &self,
         username: &str,
         password_hash: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<String> {
         let mut tx = self
             .pool
             .begin()
             .await
             .context("failed to begin setup transaction")?;
-        query(
+        let user_id: String = query(
             r#"
             INSERT INTO users (username, password_hash, role)
             VALUES ($1, $2, 'admin')
+            RETURNING id::text
             "#,
         )
         .bind(username)
         .bind(password_hash)
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await
-        .context("failed to create initial admin user")?;
+        .context("failed to create initial admin user")?
+        .get("id");
 
         record_audit_event_in_tx(
             &mut tx,
@@ -283,7 +289,7 @@ impl Catalog {
         tx.commit()
             .await
             .context("failed to commit setup transaction")?;
-        Ok(())
+        Ok(user_id)
     }
 
     pub async fn find_active_user_by_username(
@@ -890,22 +896,27 @@ impl Catalog {
 
     pub async fn create_s3_access_key(
         &self,
-        user_id: Option<&str>,
+        user_id: &str,
+        name: Option<&str>,
         secret_encryption_key: &str,
     ) -> anyhow::Result<CreatedS3AccessKey> {
         if secret_encryption_key.trim().is_empty() {
             bail!("S3 secret encryption key cannot be empty");
         }
-        let access_key_id = secure_url_token("PM", 18);
-        let secret_access_key = secure_url_token("pm_s3_", 32);
+        if user_id.trim().is_empty() {
+            bail!("S3 access key user id cannot be empty");
+        }
+        let access_key_id = secure_url_token("PMK", 18);
+        let secret_access_key = secure_url_token("", 40);
         let secret_key_hash = hash_bearer_token(&secret_access_key);
+        let normalized_name = name.and_then(normalize_optional_name);
         let row = query(
             r#"
             INSERT INTO s3_access_keys (
-                access_key_id, secret_key_hash, secret_key_ciphertext, user_id, is_active
+                access_key_id, secret_key_hash, secret_key_ciphertext, user_id, name, is_active
             )
-            VALUES ($1, $2, pgp_sym_encrypt($3, $4), $5::uuid, TRUE)
-            RETURNING id::text, access_key_id, user_id::text, is_active,
+            VALUES ($1, $2, pgp_sym_encrypt($3, $4), $5::uuid, $6, TRUE)
+            RETURNING id::text, name, access_key_id, user_id::text, is_active,
                       created_at, revoked_at, last_used_at
             "#,
         )
@@ -914,20 +925,25 @@ impl Catalog {
         .bind(&secret_access_key)
         .bind(secret_encryption_key)
         .bind(user_id)
+        .bind(normalized_name)
         .fetch_one(&self.pool)
         .await
         .context("failed to create S3 access key")?;
 
+        let key = s3_access_key_summary_from_row(row);
         Ok(CreatedS3AccessKey {
-            key: s3_access_key_summary_from_row(row),
+            id: key.id,
+            name: key.name,
+            access_key_id: key.access_key_id,
             secret_access_key,
+            created_at: key.created_at,
         })
     }
 
     pub async fn list_s3_access_keys(&self) -> anyhow::Result<Vec<S3AccessKeySummary>> {
         let rows = query(
             r#"
-            SELECT id::text, access_key_id, user_id::text, is_active,
+            SELECT id::text, name, access_key_id, user_id::text, is_active,
                    created_at, revoked_at, last_used_at
             FROM s3_access_keys
             ORDER BY created_at DESC, access_key_id ASC
@@ -963,6 +979,28 @@ impl Catalog {
         Ok(())
     }
 
+    pub async fn revoke_s3_access_key_by_id(&self, id: &str) -> anyhow::Result<S3AccessKeySummary> {
+        let row = query(
+            r#"
+            UPDATE s3_access_keys
+            SET is_active = FALSE,
+                revoked_at = COALESCE(revoked_at, now())
+            WHERE id = $1::uuid
+            RETURNING id::text, name, access_key_id, user_id::text, is_active,
+                      created_at, revoked_at, last_used_at
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to revoke S3 access key")?;
+
+        let Some(row) = row else {
+            bail!("S3 access key not found");
+        };
+        Ok(s3_access_key_summary_from_row(row))
+    }
+
     pub async fn find_application_by_token_hash(
         &self,
         token_hash: &str,
@@ -991,30 +1029,47 @@ impl Catalog {
 
     pub async fn ensure_s3_access_key(
         &self,
+        user_id: Option<&str>,
+        name: Option<&str>,
         access_key_id: &str,
-        secret_key_hash: &str,
+        secret_access_key: &str,
+        secret_encryption_key: &str,
     ) -> anyhow::Result<S3AccessKey> {
         let access_key_id = access_key_id.trim();
         if access_key_id.is_empty() {
             bail!("S3 access key id cannot be empty");
         }
-        if secret_key_hash.trim().is_empty() {
-            bail!("S3 secret key hash cannot be empty");
+        if secret_access_key.trim().len() < 20 {
+            bail!("S3 secret access key must have at least 20 characters");
         }
+        if secret_encryption_key.trim().is_empty() {
+            bail!("S3 secret encryption key cannot be empty");
+        }
+        let normalized_name = name.and_then(normalize_optional_name);
+        let secret_key_hash = hash_bearer_token(secret_access_key.trim());
 
         let row = query(
             r#"
-            INSERT INTO s3_access_keys (access_key_id, secret_key_hash, is_active)
-            VALUES ($1, $2, TRUE)
+            INSERT INTO s3_access_keys (
+                access_key_id, secret_key_hash, secret_key_ciphertext, user_id, name, is_active
+            )
+            VALUES ($1, $2, pgp_sym_encrypt($3, $4), $5::uuid, $6, TRUE)
             ON CONFLICT (access_key_id) DO UPDATE SET
                 secret_key_hash = EXCLUDED.secret_key_hash,
+                secret_key_ciphertext = EXCLUDED.secret_key_ciphertext,
+                user_id = COALESCE(EXCLUDED.user_id, s3_access_keys.user_id),
+                name = COALESCE(EXCLUDED.name, s3_access_keys.name),
                 is_active = TRUE,
                 revoked_at = NULL
             RETURNING access_key_id, secret_key_hash
             "#,
         )
         .bind(access_key_id)
-        .bind(secret_key_hash)
+        .bind(&secret_key_hash)
+        .bind(secret_access_key.trim())
+        .bind(secret_encryption_key)
+        .bind(user_id)
+        .bind(normalized_name)
         .fetch_one(&self.pool)
         .await
         .context("failed to upsert S3 access key")?;
@@ -1519,12 +1574,22 @@ fn s3_access_key_summary_from_row(row: PgRow) -> S3AccessKeySummary {
     let last_used_at: Option<chrono::DateTime<chrono::Utc>> = row.get("last_used_at");
     S3AccessKeySummary {
         id: row.get("id"),
+        name: row.get("name"),
         access_key_id: row.get("access_key_id"),
         user_id: row.get("user_id"),
         is_active: row.get("is_active"),
         created_at: format_datetime(row.get("created_at")),
         revoked_at: revoked_at.map(format_datetime),
         last_used_at: last_used_at.map(format_datetime),
+    }
+}
+
+fn normalize_optional_name(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
     }
 }
 

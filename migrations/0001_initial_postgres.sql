@@ -108,6 +108,7 @@ CREATE TABLE s3_access_keys (
     secret_key_hash TEXT NOT NULL,
     secret_key_ciphertext BYTEA NULL,
     user_id UUID NULL REFERENCES users(id) ON DELETE SET NULL,
+    name TEXT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at TIMESTAMPTZ NULL,

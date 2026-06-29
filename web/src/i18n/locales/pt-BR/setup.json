@@ -34,7 +34,11 @@
       },
       "finish": "Finalizar configuração",
       "finishing": "Finalizando...",
-      "setupFailed": "Falha ao concluir a configuração."
+      "setupFailed": "Falha ao concluir a configuração.",
+      "s3InitialTitle": "Chave S3 inicial",
+      "s3InitialDescription": "Use esta chave com clientes S3-compatible após entrar no painel.",
+      "s3InitialWarning": "Copie sua chave S3 inicial agora. O segredo não será exibido novamente.",
+      "goToLogin": "Ir para login"
     },
     "ready": {
       "title": "Ponte Mesh Server",
@@ -178,10 +182,14 @@
         "title": "Credenciais S3",
         "description": "Chaves para clientes S3-compatible.",
         "create": "Criar chave",
+        "name": "Nome",
+        "namePlaceholder": "default-admin-key",
         "createdTitle": "Chave criada",
-        "createdHint": "O secret é exibido apenas agora.",
+        "createdHint": "Copie este segredo agora. Ele não será exibido novamente.",
         "accessKeyId": "Access key",
         "secretAccessKey": "Secret key",
+        "copyAccessKeyId": "Copiar access key",
+        "copySecretAccessKey": "Copiar secret key",
         "status": "Status",
         "active": "ativa",
         "revoked": "revogada",

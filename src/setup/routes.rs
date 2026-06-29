@@ -1,10 +1,14 @@
 use crate::{
+    audit,
     config::{
         HttpSection, InstanceConfig, InstanceRole, InstanceSection, LocalStorageSection,
         StorageSection,
     },
     http::AppState,
-    security::{password::hash_admin_password, random::secure_url_token},
+    security::{
+        password::hash_admin_password, random::secure_url_token,
+        s3_secret::s3_secret_encryption_key,
+    },
     setup::token,
 };
 use anyhow::{Context, bail};
@@ -125,12 +129,15 @@ pub async fn complete(State(state): State<AppState>, headers: HeaderMap, body: B
     };
 
     match complete_setup(&state, payload).await {
-        Ok(()) => {
+        Ok(created_s3_key) => {
             info!("Ponte Mesh initial setup completed");
             (
                 StatusCode::OK,
                 [(header::SET_COOKIE, clear_setup_cookie())],
-                Json(serde_json::json!({ "ready": true })),
+                Json(serde_json::json!({
+                    "ready": true,
+                    "initialS3AccessKey": created_s3_key
+                })),
             )
                 .into_response()
         }
@@ -138,7 +145,10 @@ pub async fn complete(State(state): State<AppState>, headers: HeaderMap, body: B
     }
 }
 
-async fn complete_setup(state: &AppState, payload: CompleteSetupRequest) -> anyhow::Result<()> {
+async fn complete_setup(
+    state: &AppState,
+    payload: CompleteSetupRequest,
+) -> anyhow::Result<crate::catalog::CreatedS3AccessKey> {
     let instance_name = non_empty(payload.instance_name, "instanceName")?;
     let admin_username = non_empty(payload.admin_username, "adminUsername")?;
     let admin_password = non_empty(payload.admin_password, "adminPassword")?;
@@ -157,9 +167,33 @@ async fn complete_setup(state: &AppState, payload: CompleteSetupRequest) -> anyh
     validate_storage_path(&storage_path)?;
 
     let password_hash = hash_admin_password(&admin_password)?;
-    state
+    let admin_user_id = state
         .catalog
         .create_initial_admin_user(&admin_username, &password_hash)
+        .await?;
+    let secret_encryption_key = s3_secret_encryption_key(&state.paths)?;
+    let created_s3_key = state
+        .catalog
+        .create_s3_access_key(
+            &admin_user_id,
+            Some("default-admin-key"),
+            &secret_encryption_key,
+        )
+        .await?;
+    audit::event(
+        "s3_access_key_created",
+        Some(&admin_username),
+        "success",
+        &format!("access_key_id={}", created_s3_key.access_key_id),
+    );
+    state
+        .catalog
+        .record_audit_event(
+            "s3_access_key_created",
+            Some(&admin_username),
+            "success",
+            &format!("access_key_id={}", created_s3_key.access_key_id),
+        )
         .await?;
 
     let config = InstanceConfig {
@@ -193,7 +227,7 @@ async fn complete_setup(state: &AppState, payload: CompleteSetupRequest) -> anyh
     })?;
 
     state.setup.clear_unlock_sessions();
-    Ok(())
+    Ok(created_s3_key)
 }
 
 fn resolve_setup_storage_path(

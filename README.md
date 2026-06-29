@@ -243,31 +243,36 @@ Clientes S3 usam path-style com:
 endpoint_url = http://localhost:9000
 ```
 
-Configure uma credencial S3 bootstrap por ambiente:
+Na primeira configuração, o painel gera uma access key S3 inicial para o admin e
+mostra o segredo uma única vez. Depois disso, novas chaves podem ser criadas ou
+revogadas em `Settings > S3 Access Keys`.
+
+As variáveis de bootstrap são opcionais e servem apenas para importar uma chave
+externa em cenários avançados:
 
 ```bash
-export PONTEMESH_S3_BOOTSTRAP_ACCESS_KEY_ID=pm-local
-export PONTEMESH_S3_BOOTSTRAP_SECRET_ACCESS_KEY='troque-este-segredo'
+export PONTEMESH_S3_BOOTSTRAP_ACCESS_KEY_ID=PMKEXTERNALACCESSKEY
+export PONTEMESH_S3_BOOTSTRAP_SECRET_ACCESS_KEY='<secret-gerado-fora-do-pontemesh>'
 ./scripts/start-panel.sh
 ```
 
 Exemplos com AWS CLI:
 
 ```bash
-AWS_ACCESS_KEY_ID=pm-local \
-AWS_SECRET_ACCESS_KEY='troque-este-segredo' \
+AWS_ACCESS_KEY_ID='<access-key-gerada-no-painel>' \
+AWS_SECRET_ACCESS_KEY='<secret-exibido-uma-unica-vez>' \
 aws --endpoint-url http://localhost:9000 s3api list-buckets
 ```
 
 ```bash
-AWS_ACCESS_KEY_ID=pm-local \
-AWS_SECRET_ACCESS_KEY='troque-este-segredo' \
+AWS_ACCESS_KEY_ID='<access-key-gerada-no-painel>' \
+AWS_SECRET_ACCESS_KEY='<secret-exibido-uma-unica-vez>' \
 aws --endpoint-url http://localhost:9000 s3api create-bucket --bucket test-bucket
 ```
 
 ```bash
-AWS_ACCESS_KEY_ID=pm-local \
-AWS_SECRET_ACCESS_KEY='troque-este-segredo' \
+AWS_ACCESS_KEY_ID='<access-key-gerada-no-painel>' \
+AWS_SECRET_ACCESS_KEY='<secret-exibido-uma-unica-vez>' \
 aws --endpoint-url http://localhost:9000 s3api put-object --bucket test-bucket --key hello.txt --body ./hello.txt
 ```
 

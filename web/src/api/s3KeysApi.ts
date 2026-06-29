@@ -2,6 +2,7 @@ import { ensureOk } from "./http";
 
 export type S3AccessKeySummary = {
   id: string;
+  name: string | null;
   accessKeyId: string;
   userId: string | null;
   isActive: boolean;
@@ -11,12 +12,15 @@ export type S3AccessKeySummary = {
 };
 
 export type CreatedS3AccessKey = {
-  key: S3AccessKeySummary;
+  id: string;
+  name: string | null;
+  accessKeyId: string;
   secretAccessKey: string;
+  createdAt: string;
 };
 
 export async function listS3AccessKeys(): Promise<S3AccessKeySummary[]> {
-  const response = await fetch("/api/admin/s3-access-keys", {
+  const response = await fetch("/api/admin/s3/access-keys", {
     headers: {
       accept: "application/json"
     }
@@ -25,21 +29,21 @@ export async function listS3AccessKeys(): Promise<S3AccessKeySummary[]> {
   return response.json() as Promise<S3AccessKeySummary[]>;
 }
 
-export async function createS3AccessKey(): Promise<CreatedS3AccessKey> {
-  const response = await fetch("/api/admin/s3-access-keys", {
+export async function createS3AccessKey(name?: string): Promise<CreatedS3AccessKey> {
+  const response = await fetch("/api/admin/s3/access-keys", {
     method: "POST",
     headers: {
       "content-type": "application/json"
     },
-    body: "{}"
+    body: JSON.stringify({ name: name?.trim() || null })
   });
   await ensureOk(response);
   return response.json() as Promise<CreatedS3AccessKey>;
 }
 
-export async function revokeS3AccessKey(accessKeyId: string): Promise<void> {
-  const response = await fetch(`/api/admin/s3-access-keys/${encodeURIComponent(accessKeyId)}/revoke`, {
-    method: "POST"
+export async function revokeS3AccessKey(id: string): Promise<void> {
+  const response = await fetch(`/api/admin/s3/access-keys/${encodeURIComponent(id)}`, {
+    method: "DELETE"
   });
   await ensureOk(response);
 }

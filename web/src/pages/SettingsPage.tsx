@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Plus, RotateCcw } from "lucide-react";
+import { Clipboard, KeyRound, Plus, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   CreatedS3AccessKey,
@@ -15,6 +15,7 @@ export function SettingsPage() {
   const { t } = useTranslation();
   const [keys, setKeys] = useState<S3AccessKeySummary[]>([]);
   const [createdKey, setCreatedKey] = useState<CreatedS3AccessKey | null>(null);
+  const [keyName, setKeyName] = useState("default-admin-key");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
@@ -40,7 +41,7 @@ export function SettingsPage() {
     setCreating(true);
     setError("");
     try {
-      const nextKey = await createS3AccessKey();
+      const nextKey = await createS3AccessKey(keyName);
       setCreatedKey(nextKey);
       await refreshKeys();
     } catch (createError) {
@@ -50,11 +51,11 @@ export function SettingsPage() {
     }
   }
 
-  async function handleRevokeKey(accessKeyId: string) {
-    setRevoking(accessKeyId);
+  async function handleRevokeKey(id: string) {
+    setRevoking(id);
     setError("");
     try {
-      await revokeS3AccessKey(accessKeyId);
+      await revokeS3AccessKey(id);
       await refreshKeys();
     } catch (revokeError) {
       setError(revokeError instanceof Error ? revokeError.message : t("setup.settings.s3.revokeFailed"));
@@ -89,6 +90,15 @@ export function SettingsPage() {
             {t("setup.settings.s3.create")}
           </Button>
         </div>
+        <div className="inline-form">
+          <input
+            type="text"
+            value={keyName}
+            onChange={(event) => setKeyName(event.target.value)}
+            placeholder={t("setup.settings.s3.namePlaceholder")}
+            aria-label={t("setup.settings.s3.name")}
+          />
+        </div>
 
         <ErrorMessage message={error} />
 
@@ -101,11 +111,17 @@ export function SettingsPage() {
             <dl>
               <div>
                 <dt>{t("setup.settings.s3.accessKeyId")}</dt>
-                <dd>{createdKey.key.accessKeyId}</dd>
+                <dd>
+                  <code>{createdKey.accessKeyId}</code>
+                  <CopyButton value={createdKey.accessKeyId} label={t("setup.settings.s3.copyAccessKeyId")} />
+                </dd>
               </div>
               <div>
                 <dt>{t("setup.settings.s3.secretAccessKey")}</dt>
-                <dd>{createdKey.secretAccessKey}</dd>
+                <dd>
+                  <code>{createdKey.secretAccessKey}</code>
+                  <CopyButton value={createdKey.secretAccessKey} label={t("setup.settings.s3.copySecretAccessKey")} />
+                </dd>
               </div>
             </dl>
             <p>{t("setup.settings.s3.createdHint")}</p>
@@ -122,6 +138,7 @@ export function SettingsPage() {
         ) : (
           <div className="object-table s3-keys-table">
             <div className="object-table__head">
+              <span>{t("setup.settings.s3.name")}</span>
               <span>{t("setup.settings.s3.accessKeyId")}</span>
               <span>{t("setup.settings.s3.status")}</span>
               <span>{t("setup.settings.s3.lastUsed")}</span>
@@ -130,7 +147,11 @@ export function SettingsPage() {
             </div>
             {keys.map((key) => (
               <div className="object-table__row" key={key.id}>
-                <span>{key.accessKeyId}</span>
+                <span>{key.name ?? t("setup.common.unavailable")}</span>
+                <span>
+                  <code>{key.accessKeyId}</code>
+                  <CopyButton value={key.accessKeyId} label={t("setup.settings.s3.copyAccessKeyId")} />
+                </span>
                 <span>{key.isActive ? t("setup.settings.s3.active") : t("setup.settings.s3.revoked")}</span>
                 <span>{key.lastUsedAt ? formatDate(key.lastUsedAt) : t("setup.common.unavailable")}</span>
                 <span>{formatDate(key.createdAt)}</span>
@@ -141,8 +162,8 @@ export function SettingsPage() {
                       type="button"
                       title={t("setup.settings.s3.revoke")}
                       aria-label={t("setup.settings.s3.revoke")}
-                      disabled={revoking === key.accessKeyId}
-                      onClick={() => handleRevokeKey(key.accessKeyId)}
+                      disabled={revoking === key.id}
+                      onClick={() => handleRevokeKey(key.id)}
                     >
                       <RotateCcw size={17} aria-hidden="true" />
                     </button>
@@ -162,4 +183,16 @@ function formatDate(value: string): string {
     dateStyle: "short",
     timeStyle: "short"
   }).format(new Date(value));
+}
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  async function handleCopy() {
+    await navigator.clipboard?.writeText(value);
+  }
+
+  return (
+    <button className="icon-button" type="button" title={label} aria-label={label} onClick={handleCopy}>
+      <Clipboard size={16} aria-hidden="true" />
+    </button>
+  );
 }

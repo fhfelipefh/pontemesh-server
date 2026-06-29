@@ -1,0 +1,2 @@
+ALTER TABLE s3_access_keys
+    ADD COLUMN IF NOT EXISTS name TEXT NULL;

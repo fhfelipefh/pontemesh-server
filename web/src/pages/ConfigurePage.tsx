@@ -1,8 +1,8 @@
 import { FormEvent, useState } from "react";
-import { CheckCircle2, ChevronDown } from "lucide-react";
+import { CheckCircle2, ChevronDown, Clipboard, KeyRound } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { CompleteSetupRequest, completeSetup } from "../api/setupApi";
+import { CompleteSetupRequest, CompleteSetupResponse, completeSetup } from "../api/setupApi";
 import { Button } from "../components/Button";
 import { ErrorMessage } from "../components/ErrorMessage";
 import { PageShell } from "../components/PageShell";
@@ -22,6 +22,7 @@ export function ConfigurePage() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [setupResult, setSetupResult] = useState<CompleteSetupResponse | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -41,13 +42,51 @@ export function ConfigurePage() {
     }
 
     try {
-      await completeSetup(payload);
-      navigate("/login");
+      setSetupResult(await completeSetup(payload));
     } catch (setupError) {
       setError(setupError instanceof Error ? setupError.message : t("setup.configure.setupFailed"));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (setupResult) {
+    return (
+      <PageShell
+        title={t("setup.configure.s3InitialTitle")}
+        description={t("setup.configure.s3InitialDescription")}
+        compact
+      >
+        <div className="secret-panel" role="status">
+          <div>
+            <KeyRound size={18} aria-hidden="true" />
+            <strong>{t("setup.configure.s3InitialWarning")}</strong>
+          </div>
+          <dl>
+            <div>
+              <dt>{t("setup.settings.s3.accessKeyId")}</dt>
+              <dd>
+                <code>{setupResult.initialS3AccessKey.accessKeyId}</code>
+                <CopyButton value={setupResult.initialS3AccessKey.accessKeyId} label={t("setup.settings.s3.copyAccessKeyId")} />
+              </dd>
+            </div>
+            <div>
+              <dt>{t("setup.settings.s3.secretAccessKey")}</dt>
+              <dd>
+                <code>{setupResult.initialS3AccessKey.secretAccessKey}</code>
+                <CopyButton value={setupResult.initialS3AccessKey.secretAccessKey} label={t("setup.settings.s3.copySecretAccessKey")} />
+              </dd>
+            </div>
+          </dl>
+          <p>{t("setup.settings.s3.createdHint")}</p>
+        </div>
+        <div className="form__footer">
+          <Button type="button" onClick={() => navigate("/login")} icon={<CheckCircle2 size={18} aria-hidden="true" />}>
+            {t("setup.configure.goToLogin")}
+          </Button>
+        </div>
+      </PageShell>
+    );
   }
 
   return (
@@ -157,5 +196,17 @@ export function ConfigurePage() {
         </div>
       </form>
     </PageShell>
+  );
+}
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  async function handleCopy() {
+    await navigator.clipboard?.writeText(value);
+  }
+
+  return (
+    <button className="icon-button" type="button" title={label} aria-label={label} onClick={handleCopy}>
+      <Clipboard size={16} aria-hidden="true" />
+    </button>
   );
 }

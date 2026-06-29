@@ -15,6 +15,19 @@ export type SetupStatusResponse = {
   setupRequired: boolean;
 };
 
+export type InitialS3AccessKey = {
+  id: string;
+  name: string | null;
+  accessKeyId: string;
+  secretAccessKey: string;
+  createdAt: string;
+};
+
+export type CompleteSetupResponse = {
+  ready: boolean;
+  initialS3AccessKey: InitialS3AccessKey;
+};
+
 export async function getSetupStatus(): Promise<SetupStatusResponse> {
   const response = await fetch("/api/setup/status", {
     headers: {
@@ -36,7 +49,7 @@ export async function unlockSetup(payload: UnlockRequest): Promise<void> {
   await ensureOk(response);
 }
 
-export async function completeSetup(payload: CompleteSetupRequest): Promise<void> {
+export async function completeSetup(payload: CompleteSetupRequest): Promise<CompleteSetupResponse> {
   const response = await fetch("/api/setup/complete", {
     method: "POST",
     headers: {
@@ -45,6 +58,7 @@ export async function completeSetup(payload: CompleteSetupRequest): Promise<void
     body: JSON.stringify(payload)
   });
   await ensureOk(response);
+  return response.json() as Promise<CompleteSetupResponse>;
 }
 
 async function ensureOk(response: Response): Promise<void> {
