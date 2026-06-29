@@ -1,6 +1,13 @@
 target
+!target/
+target/*
+!target/release/
+target/release/*
+!target/release/pontemesh-server
 web/node_modules
 web/dist
+!web/dist/
+!web/dist/**
 .git
 .gitignore
 .dockerignore

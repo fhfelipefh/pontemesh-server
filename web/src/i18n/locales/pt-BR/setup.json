@@ -35,9 +35,9 @@
       "finish": "Finalizar configuração",
       "finishing": "Finalizando...",
       "setupFailed": "Falha ao concluir a configuração.",
-      "s3InitialTitle": "Chave S3 inicial",
+      "s3InitialTitle": "Chave S3",
       "s3InitialDescription": "Use esta chave com clientes S3-compatible após entrar no painel.",
-      "s3InitialWarning": "Copie sua chave S3 inicial agora. O segredo não será exibido novamente.",
+      "s3InitialWarning": "Copie sua chave S3 agora. Esse segredo não será exibido novamente.",
       "goToLogin": "Ir para login"
     },
     "ready": {
