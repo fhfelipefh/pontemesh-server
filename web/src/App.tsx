@@ -7,6 +7,8 @@ import { BucketsPage } from "./pages/BucketsPage";
 import { ConfigurePage } from "./pages/ConfigurePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { MetricsPage } from "./pages/MetricsPage";
+import { ReplicasPage } from "./pages/ReplicasPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UnlockPage } from "./pages/UnlockPage";
 
@@ -88,6 +90,8 @@ function SetupRoutes() {
       />
       <Route path="/dashboard" element={adminElement(<DashboardPage />)} />
       <Route path="/buckets" element={adminElement(<BucketsPage />)} />
+      <Route path="/replicas" element={adminElement(<ReplicasPage />)} />
+      <Route path="/metrics" element={adminElement(<MetricsPage />)} />
       <Route path="/settings" element={adminElement(<SettingsPage />)} />
       <Route path="*" element={<Navigate to={setupRequired ? "/setup" : "/"} replace />} />
     </Routes>

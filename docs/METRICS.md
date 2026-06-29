@@ -34,6 +34,10 @@ Resposta:
 Esses valores são calculados a partir de eventos persistidos em PostgreSQL para
 transferências diretas pelo Origin.
 
+As leituras diretas pelo endpoint S3-compatible e as leituras autorizadas por
+pacote de acesso registram eventos de tráfego Origin com quantidade de bytes,
+status HTTP e intervalo de bytes quando houver `Range`.
+
 Métricas de Replica/Edge e peers dependem dos contratos de reporte operacional.
 
 ## Métrica principal do projeto

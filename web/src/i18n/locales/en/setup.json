@@ -177,6 +177,37 @@
       "emptyTitle": "This bucket does not have objects yet.",
       "emptyDescription": "Upload a file to get started."
     },
+    "metrics": {
+      "title": "Origin traffic",
+      "overview": "Operational metrics",
+      "description": "Traffic served directly by the Origin data plane.",
+      "totalRequests": "Total requests",
+      "fullObjectRequests": "Full object requests",
+      "rangeRequests": "Range requests",
+      "totalBytesServed": "Bytes served",
+      "loadFailed": "Failed to load Origin metrics."
+    },
+    "replicas": {
+      "title": "Replicas",
+      "description": "Manage Replica/Edge identities authorized by the Origin.",
+      "credentials": "Replica credentials",
+      "credentialsDescription": "Create scoped credentials for Replica/Edge synchronization.",
+      "name": "Replica name",
+      "namePlaceholder": "edge-1",
+      "allowedBuckets": "Allowed buckets",
+      "allowedBucketsPlaceholder": "media, documents",
+      "create": "Create replica",
+      "createdTitle": "Replica token created",
+      "replicaId": "Replica ID",
+      "token": "Replica token",
+      "copyToken": "Copy replica token",
+      "revoke": "Revoke replica",
+      "loadFailed": "Failed to load replicas.",
+      "createFailed": "Failed to create replica.",
+      "revokeFailed": "Failed to revoke replica.",
+      "emptyTitle": "No replicas have been registered yet.",
+      "emptyDescription": "Create a Replica/Edge identity before synchronizing edge nodes."
+    },
     "settings": {
       "title": "Settings",
       "description": "Manage instance credentials and operational parameters.",

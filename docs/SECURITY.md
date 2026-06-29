@@ -165,6 +165,10 @@ O contrato inicial implementa credencial Bearer própria por réplica, armazenad
 somente como hash no catálogo. Essa credencial é separada da sessão
 administrativa e das credenciais de aplicação/SDK.
 
+A chamada operacional de Replica/Edge também usa assinatura de requisição com
+timestamp e nonce. O Origin valida a janela temporal, rejeita nonce repetido e
+audita falhas de autenticação.
+
 A comunicação entre Origin e Replica/Edge deve exigir:
 
 * registro de identidade de cada réplica;

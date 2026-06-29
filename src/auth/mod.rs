@@ -15,10 +15,14 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::net::IpAddr;
 
 const AUTH_SESSION_COOKIE: &str = "pm_admin_session";
+const REPLICA_SIGNATURE_WINDOW_SECONDS: i64 = 300;
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone)]
 pub struct AdminSession {
@@ -312,6 +316,47 @@ pub async fn require_replica_credential(
     let token_hash = hash_bearer_token(&token);
     match state.catalog.find_replica_by_token_hash(&token_hash).await {
         Ok(Some(replica)) => {
+            if let Err(message) = validate_replica_request_signature(&headers, &request, &token) {
+                audit::failure("replica_auth_failed", Some(&replica.name), &message);
+                record_auth_audit(
+                    &state,
+                    "replica_auth_failed",
+                    Some(&replica.name),
+                    "failure",
+                    &message,
+                )
+                .await;
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ErrorResponse { error: message }),
+                )
+                    .into_response();
+            }
+            let nonce = headers
+                .get("x-pontemesh-nonce")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default();
+            if let Err(error) = state
+                .catalog
+                .record_replica_request_nonce(&replica.id, nonce)
+                .await
+            {
+                let message = error.to_string();
+                audit::failure("replica_auth_failed", Some(&replica.name), &message);
+                record_auth_audit(
+                    &state,
+                    "replica_auth_failed",
+                    Some(&replica.name),
+                    "failure",
+                    &message,
+                )
+                .await;
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ErrorResponse { error: message }),
+                )
+                    .into_response();
+            }
             request.extensions_mut().insert(ReplicaIdentity {
                 id: replica.id,
                 name: replica.name,
@@ -343,6 +388,71 @@ pub async fn require_replica_credential(
         }
         Err(error) => internal_error(error),
     }
+}
+
+fn validate_replica_request_signature(
+    headers: &HeaderMap,
+    request: &Request,
+    token: &str,
+) -> Result<(), String> {
+    let timestamp = required_header(headers, "x-pontemesh-date")?;
+    let nonce = required_header(headers, "x-pontemesh-nonce")?;
+    let signature = required_header(headers, "x-pontemesh-signature")?;
+    if nonce.len() < 16 || nonce.len() > 128 {
+        return Err("replica nonce must be between 16 and 128 characters".to_owned());
+    }
+    validate_replica_timestamp(timestamp)?;
+    let path_and_query = request
+        .uri()
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or(request.uri().path());
+    let signing_payload = format!(
+        "{}\n{}\n{}\n{}",
+        request.method(),
+        path_and_query,
+        timestamp,
+        nonce
+    );
+    let expected = hex_hmac(token.as_bytes(), signing_payload.as_bytes());
+    if !constant_time_eq(signature.as_bytes(), expected.as_bytes()) {
+        return Err("replica request signature could not be verified".to_owned());
+    }
+    Ok(())
+}
+
+fn required_header<'a>(headers: &'a HeaderMap, name: &'static str) -> Result<&'a str, String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("missing {name}"))
+}
+
+fn validate_replica_timestamp(timestamp: &str) -> Result<(), String> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map_err(|_| "invalid x-pontemesh-date".to_owned())?
+        .with_timezone(&chrono::Utc);
+    let skew = (chrono::Utc::now() - parsed).num_seconds().abs();
+    if skew > REPLICA_SIGNATURE_WINDOW_SECONDS {
+        return Err("x-pontemesh-date is outside the allowed signature window".to_owned());
+    }
+    Ok(())
+}
+
+fn hex_hmac(key: &[u8], data: &[u8]) -> String {
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts keys of any length");
+    mac.update(data);
+    mac.finalize()
+        .into_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    use subtle::ConstantTimeEq;
+    left.ct_eq(right).into()
 }
 
 pub fn read_auth_session(headers: &HeaderMap) -> Option<String> {

@@ -13,7 +13,7 @@ COPY migrations ./migrations
 COPY web/dist ./web/dist
 
 USER pontemesh
-EXPOSE 8080
+EXPOSE 8080 9000
 VOLUME ["/var/pontemesh_home"]
 
 ENTRYPOINT ["/usr/local/bin/pontemesh-server"]

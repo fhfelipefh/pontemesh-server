@@ -1,17 +1,20 @@
 use crate::{
     audit,
     auth::ApplicationIdentity,
-    catalog::{BucketPolicy, ObjectManifest},
+    catalog::{BucketPolicy, ObjectManifest, ObjectRecord},
     http::AppState,
+    security::token::hash_bearer_token,
 };
 use anyhow::bail;
 use axum::{
     Extension, Json,
+    body::Body,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
+use std::fs;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,6 +148,105 @@ pub async fn create_access_package(
         }
         Err(error) => bad_request(error),
     }
+}
+
+pub async fn get_object_with_access_package(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((package_id, bucket_name, object_key)): Path<(String, String, String)>,
+) -> Response {
+    let Some(package_token) = read_bearer_token(&headers) else {
+        return unauthorized("access package bearer token required");
+    };
+    match get_object_with_access_package_inner(
+        &state,
+        &headers,
+        &package_id,
+        &bucket_name,
+        object_key.trim_start_matches('/'),
+        &package_token,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => bad_request(error),
+    }
+}
+
+async fn get_object_with_access_package_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    package_id: &str,
+    bucket_name: &str,
+    object_key: &str,
+    package_token: &str,
+) -> anyhow::Result<Response> {
+    let authorization = state
+        .catalog
+        .authorize_access_package(
+            package_id,
+            &hash_bearer_token(package_token),
+            bucket_name,
+            object_key,
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("access package is invalid, expired or revoked"))?;
+    let object = state
+        .catalog
+        .get_object_record(bucket_name, object_key)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("object not found"))?;
+    if object.state != "AVAILABLE" {
+        bail!("object is not available");
+    }
+    let bytes = fs::read(&object.storage_path)
+        .map_err(|_| anyhow::anyhow!("object data is unavailable"))?;
+    let total_size = bytes.len() as u64;
+    let (status, body, range) = if let Some(range_header) = headers.get(header::RANGE) {
+        let range_header = range_header
+            .to_str()
+            .map_err(|_| anyhow::anyhow!("Range header is not valid UTF-8"))?;
+        let range = parse_range(range_header, total_size)?;
+        let start = usize::try_from(range.start)
+            .map_err(|_| anyhow::anyhow!("range start is too large"))?;
+        let end =
+            usize::try_from(range.end).map_err(|_| anyhow::anyhow!("range end is too large"))?;
+        (
+            StatusCode::PARTIAL_CONTENT,
+            bytes[start..=end].to_vec(),
+            Some(range),
+        )
+    } else {
+        (StatusCode::OK, bytes, None)
+    };
+
+    state
+        .catalog
+        .record_origin_transfer(
+            Some(&authorization.application_id),
+            &authorization.bucket_name,
+            &authorization.object_key,
+            i64::try_from(body.len()).map_err(|_| anyhow::anyhow!("response body is too large"))?,
+            range.map(|value| (value.start, value.end)),
+            status.as_u16(),
+        )
+        .await?;
+    record_mesh_audit(
+        state,
+        "access_package_object_served",
+        &authorization.application_id,
+        "success",
+        &format!(
+            "package_id={}; manifest_id={}; bucket={}; key={}",
+            authorization.package_id,
+            authorization.manifest_id,
+            authorization.bucket_name,
+            authorization.object_key
+        ),
+    )
+    .await;
+
+    Ok(object_body_response(&object, status, body, range))
 }
 
 async fn create_access_package_inner(
@@ -349,18 +451,109 @@ fn has_scope(application: &ApplicationIdentity, required: &str) -> bool {
         .any(|scope| scope == "*" || scope == required)
 }
 
+fn read_bearer_token(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let token = value.strip_prefix("Bearer ")?;
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_owned())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ResolvedRange {
+    start: u64,
+    end: u64,
+}
+
+fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
+    if total_size == 0 {
+        bail!("cannot apply Range to empty object");
+    }
+    let range = raw
+        .strip_prefix("bytes=")
+        .ok_or_else(|| anyhow::anyhow!("only bytes ranges are supported"))?;
+    if range.contains(',') {
+        bail!("multiple ranges are not supported");
+    }
+    let (start, end) = range
+        .split_once('-')
+        .ok_or_else(|| anyhow::anyhow!("invalid Range header"))?;
+    let (start, end) = if start.is_empty() {
+        let suffix_len: u64 = end
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid suffix byte range"))?;
+        if suffix_len == 0 {
+            bail!("suffix byte range must be greater than zero");
+        }
+        (total_size.saturating_sub(suffix_len), total_size - 1)
+    } else {
+        let start: u64 = start
+            .parse()
+            .map_err(|_| anyhow::anyhow!("invalid range start"))?;
+        let end = if end.is_empty() {
+            total_size - 1
+        } else {
+            end.parse()
+                .map_err(|_| anyhow::anyhow!("invalid range end"))?
+        };
+        (start, end)
+    };
+    if start >= total_size || end >= total_size || start > end {
+        bail!("requested range is not satisfiable");
+    }
+    Ok(ResolvedRange { start, end })
+}
+
+fn object_body_response(
+    object: &ObjectRecord,
+    status: StatusCode,
+    bytes: Vec<u8>,
+    range: Option<ResolvedRange>,
+) -> Response {
+    let mut builder = Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, object.content_type.as_str())
+        .header(header::CONTENT_LENGTH, bytes.len().to_string())
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header("ETag", format!("\"{}\"", object.sha256))
+        .header("x-pontemesh-object-state", object.state.as_str());
+    if let Some(range) = range {
+        builder = builder.header(
+            header::CONTENT_RANGE,
+            format!("bytes {}-{}/{}", range.start, range.end, object.size_bytes),
+        );
+    }
+    builder
+        .body(Body::from(bytes))
+        .expect("valid access package object response")
+}
+
 fn bad_request(error: anyhow::Error) -> Response {
-    let status = if error.to_string() == "object not found" {
+    let message = error.to_string();
+    let status = if message == "object not found" {
         StatusCode::NOT_FOUND
-    } else if error.to_string() == "object is not available" {
+    } else if message == "object is not available" {
         StatusCode::FORBIDDEN
+    } else if message == "access package is invalid, expired or revoked" {
+        StatusCode::UNAUTHORIZED
+    } else if message == "requested range is not satisfiable" {
+        StatusCode::RANGE_NOT_SATISFIABLE
     } else {
         StatusCode::BAD_REQUEST
     };
+    let mut response = (status, Json(ErrorResponse { error: message })).into_response();
+    if status == StatusCode::RANGE_NOT_SATISFIABLE {
+        response
+            .headers_mut()
+            .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    }
+    response
+}
+
+fn unauthorized(message: &str) -> Response {
     (
-        status,
+        StatusCode::UNAUTHORIZED,
         Json(ErrorResponse {
-            error: error.to_string(),
+            error: message.to_owned(),
         }),
     )
         .into_response()

@@ -209,6 +209,15 @@ pub struct ReplicaCredential {
     pub allowed_buckets: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AccessPackageAuthorization {
+    pub package_id: String,
+    pub application_id: String,
+    pub bucket_name: String,
+    pub object_key: String,
+    pub manifest_id: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedReplicaCredential {
@@ -1431,6 +1440,41 @@ impl Catalog {
         .transpose()
     }
 
+    pub async fn record_replica_request_nonce(
+        &self,
+        replica_id: &str,
+        nonce: &str,
+    ) -> anyhow::Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin replica nonce transaction")?;
+        query("DELETE FROM replica_request_nonces WHERE seen_at < now() - interval '10 minutes'")
+            .execute(&mut *tx)
+            .await
+            .context("failed to prune replica request nonces")?;
+        let result = query(
+            r#"
+            INSERT INTO replica_request_nonces (replica_id, nonce)
+            VALUES ($1::uuid, $2)
+            ON CONFLICT (replica_id, nonce) DO NOTHING
+            "#,
+        )
+        .bind(replica_id)
+        .bind(nonce)
+        .execute(&mut *tx)
+        .await
+        .context("failed to record replica request nonce")?;
+        if result.rows_affected() == 0 {
+            bail!("replica request nonce has already been used");
+        }
+        tx.commit()
+            .await
+            .context("failed to commit replica nonce transaction")?;
+        Ok(())
+    }
+
     pub async fn list_replica_sync_objects(
         &self,
         allowed_buckets: &[String],
@@ -1526,6 +1570,57 @@ impl Catalog {
         })
     }
 
+    pub async fn authorize_access_package(
+        &self,
+        package_id: &str,
+        package_token_hash: &str,
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<Option<AccessPackageAuthorization>> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let row = query(
+            r#"
+            SELECT
+                ap.id::text AS package_id,
+                ap.application_id::text AS application_id,
+                b.name AS bucket_name,
+                o.object_key,
+                ap.object_manifest_id::text AS manifest_id
+            FROM access_packages ap
+            JOIN buckets b ON b.id = ap.bucket_id
+            JOIN objects o ON o.id = ap.object_id
+            JOIN object_versions v ON v.id = o.current_version_id
+            JOIN object_manifests m ON m.object_version_id = v.id
+            WHERE ap.id = $1::uuid
+              AND ap.package_token_hash = $2
+              AND b.name = $3
+              AND o.object_key = $4
+              AND ap.expires_at > now()
+              AND ap.revoked_at IS NULL
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+              AND ap.object_manifest_id = m.id
+            "#,
+        )
+        .bind(package_id)
+        .bind(package_token_hash)
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to authorize access package")?;
+
+        Ok(row.map(|row| AccessPackageAuthorization {
+            package_id: row.get("package_id"),
+            application_id: row.get("application_id"),
+            bucket_name: row.get("bucket_name"),
+            object_key: row.get("object_key"),
+            manifest_id: row.get("manifest_id"),
+        }))
+    }
+
     pub async fn record_audit_event(
         &self,
         event: &str,
@@ -1571,10 +1666,9 @@ impl Catalog {
         Ok(rows.into_iter().map(audit_event_from_row).collect())
     }
 
-    #[allow(dead_code)]
     pub async fn record_origin_transfer(
         &self,
-        application_id: &str,
+        application_id: Option<&str>,
         bucket_name: &str,
         object_key: &str,
         bytes_served: i64,

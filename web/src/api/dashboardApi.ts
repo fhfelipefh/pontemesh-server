@@ -43,6 +43,13 @@ export type InstanceSummary = {
   uptimeSeconds: number;
 };
 
+export type OriginTrafficMetrics = {
+  totalRequests: number;
+  fullObjectRequests: number;
+  rangeRequests: number;
+  totalBytesServed: number;
+};
+
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   const response = await fetch("/api/admin/dashboard/summary", {
     headers: {
@@ -61,4 +68,14 @@ export async function getInstanceSummary(): Promise<InstanceSummary> {
   });
   await ensureOk(response);
   return response.json() as Promise<InstanceSummary>;
+}
+
+export async function getOriginTrafficMetrics(): Promise<OriginTrafficMetrics> {
+  const response = await fetch("/api/admin/metrics/origin-traffic", {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<OriginTrafficMetrics>;
 }

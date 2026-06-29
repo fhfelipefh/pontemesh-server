@@ -177,6 +177,37 @@
       "emptyTitle": "Este bucket ainda não possui objetos.",
       "emptyDescription": "Envie um arquivo para começar."
     },
+    "metrics": {
+      "title": "Tráfego do Origin",
+      "overview": "Métricas operacionais",
+      "description": "Tráfego servido diretamente pelo plano de dados do Origin.",
+      "totalRequests": "Total de requisições",
+      "fullObjectRequests": "Requisições de objeto completo",
+      "rangeRequests": "Requisições por intervalo",
+      "totalBytesServed": "Bytes servidos",
+      "loadFailed": "Falha ao carregar métricas do Origin."
+    },
+    "replicas": {
+      "title": "Réplicas",
+      "description": "Gerencie identidades Replica/Edge autorizadas pelo Origin.",
+      "credentials": "Credenciais de réplica",
+      "credentialsDescription": "Crie credenciais escopadas para sincronização de Replica/Edge.",
+      "name": "Nome da réplica",
+      "namePlaceholder": "edge-1",
+      "allowedBuckets": "Buckets permitidos",
+      "allowedBucketsPlaceholder": "media, documents",
+      "create": "Criar réplica",
+      "createdTitle": "Token de réplica criado",
+      "replicaId": "ID da réplica",
+      "token": "Token da réplica",
+      "copyToken": "Copiar token da réplica",
+      "revoke": "Revogar réplica",
+      "loadFailed": "Falha ao carregar réplicas.",
+      "createFailed": "Falha ao criar réplica.",
+      "revokeFailed": "Falha ao revogar réplica.",
+      "emptyTitle": "Nenhuma réplica registrada ainda.",
+      "emptyDescription": "Crie uma identidade Replica/Edge antes de sincronizar nós auxiliares."
+    },
     "settings": {
       "title": "Configurações",
       "description": "Gerencie as credenciais e parâmetros operacionais da instância.",

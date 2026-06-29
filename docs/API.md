@@ -42,6 +42,14 @@ Internamente, o Origin aplica autorização, catálogo, versionamento, auditoria
 
 A compatibilidade S3-like deve ser entendida como uma interface de entrada familiar para operações comuns de objeto, não como uma limitação arquitetural.
 
+Na implementação atual, a API S3-compatible roda em listener próprio, por padrão
+em `:9000`, e expõe buckets e objetos na raiz do endpoint. O painel web/admin
+permanece separado, por padrão em `:8080`.
+
+Pacotes de acesso emitidos pelo Origin são consumidos por rotas próprias da API
+Ponte Mesh em `/pontemesh/access-packages/...`. Esse fluxo atende SDKs e usa
+autorização temporária separada das credenciais S3.
+
 ## Recursos da API Ponte Mesh
 
 Recursos de distribuição híbrida ficam em APIs próprias:

@@ -165,6 +165,10 @@ O Docker Compose sobe o projeto `ponte-mesh` com os serviços `server` e
 fica na rede interna do Compose. Com PostgreSQL 18, o volume
 `pontemesh_postgres` é montado em `/var/lib/postgresql`.
 
+O Compose local usa `docker/Dockerfile.local`, que empacota o binário e o build
+web já gerados pelo script. A imagem multi-stage em `docker/Dockerfile` constrói
+frontend e backend dentro do próprio build da imagem.
+
 Acesse:
 
 ```text
@@ -242,6 +246,13 @@ Clientes S3 usam path-style com:
 ```text
 endpoint_url = http://localhost:9000
 ```
+
+As rotas S3-compatible ficam na raiz do endpoint S3. Clientes S3 devem trocar o
+endpoint para `http://localhost:9000` e usar paths no formato `/{bucket}/{key}`.
+
+SDKs Ponte Mesh podem usar pacotes de acesso temporários emitidos pelo Origin
+para obter objetos por rotas próprias em `/pontemesh/access-packages/...`,
+mantendo o endpoint S3-compatible separado para clientes S3.
 
 Na primeira configuração, o painel gera uma access key S3 inicial para o admin e
 mostra o segredo uma única vez. Depois disso, novas chaves podem ser criadas ou

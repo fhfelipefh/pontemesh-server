@@ -144,6 +144,22 @@ fn admin_routes(state: AppState) -> Router<AppState> {
 }
 
 fn pontemesh_routes(state: AppState) -> Router<AppState> {
+    let package_routes = Router::new().route(
+        "/access-packages/{package_id}/objects/{bucket_name}/{*object_key}",
+        get(mesh::get_object_with_access_package),
+    );
+
+    let application_routes = Router::new()
+        .route("/access-packages", post(mesh::create_access_package))
+        .route(
+            "/objects/{bucket_name}/manifest/{*object_key}",
+            get(mesh::get_manifest),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_application_credential,
+        ));
+
     let replica_routes = Router::new()
         .route("/replicas/{replica_id}/sync-plan", get(replica::sync_plan))
         .route_layer(middleware::from_fn_with_state(
@@ -152,15 +168,8 @@ fn pontemesh_routes(state: AppState) -> Router<AppState> {
         ));
 
     Router::new()
-        .route("/access-packages", post(mesh::create_access_package))
-        .route(
-            "/objects/{bucket_name}/manifest/{*object_key}",
-            get(mesh::get_manifest),
-        )
-        .route_layer(middleware::from_fn_with_state(
-            state,
-            auth::require_application_credential,
-        ))
+        .merge(package_routes)
+        .merge(application_routes)
         .merge(replica_routes)
 }
 
@@ -192,8 +201,6 @@ mod tests {
     static TEST_DB_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     const TEST_S3_ACCESS_KEY: &str = "PMTESTACCESSKEY";
     const TEST_S3_SECRET_KEY: &str = "pm-test-secret-key-material";
-    const TEST_AMZ_DATE: &str = "20260629T120000Z";
-    const TEST_DATE: &str = "20260629";
     const TEST_REGION: &str = "us-east-1";
     type HmacSha256 = Hmac<Sha256>;
 
@@ -301,6 +308,28 @@ mod tests {
             response_text(unsigned)
                 .await
                 .contains("<Code>SignatureDoesNotMatch</Code>")
+        );
+
+        let stale_signature = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request_with_date(
+                    Request::builder().uri("/").body(Body::empty()),
+                    b"",
+                    TEST_S3_ACCESS_KEY,
+                    TEST_S3_SECRET_KEY,
+                    "20200101T000000Z",
+                    "20200101",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(stale_signature.status(), StatusCode::FORBIDDEN);
+        assert!(
+            response_text(stale_signature)
+                .await
+                .contains("outside the allowed signature window")
         );
 
         let create_bucket = s3_app
@@ -990,6 +1019,42 @@ mod tests {
         .expect("access package manifest id");
         assert_eq!(package_manifest_id.as_deref(), Some(manifest_id.as_str()));
 
+        let package_id = package_body["id"].as_str().expect("access package id");
+        let package_token = package_body["packageToken"]
+            .as_str()
+            .expect("access package token");
+        let package_object = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_id}/objects/test-bucket/folder/hello.txt"
+                    ))
+                    .header(header::AUTHORIZATION, format!("Bearer {package_token}"))
+                    .header(header::RANGE, "bytes=6-10")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(package_object.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response_text(package_object).await, "world");
+
+        let invalid_package_object = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_id}/objects/test-bucket/folder/hello.txt"
+                    ))
+                    .header(header::AUTHORIZATION, "Bearer invalid-token")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(invalid_package_object.status(), StatusCode::UNAUTHORIZED);
+
         let metrics = app
             .clone()
             .oneshot(
@@ -1002,7 +1067,11 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(metrics.status(), StatusCode::OK);
-        assert!(response_text(metrics).await.contains(r#""totalRequests""#));
+        let metrics_body: serde_json::Value =
+            serde_json::from_str(&response_text(metrics).await).expect("metrics JSON");
+        assert_eq!(metrics_body["totalRequests"], 2);
+        assert_eq!(metrics_body["rangeRequests"], 2);
+        assert_eq!(metrics_body["totalBytesServed"], 10);
 
         let create_replica = app
             .clone()
@@ -1024,16 +1093,18 @@ mod tests {
             serde_json::from_str(&response_text(create_replica).await).expect("replica JSON");
         let replica_id = replica_body["replica"]["id"].as_str().expect("replica id");
         let replica_token = replica_body["token"].as_str().expect("replica token");
-        let replica_authorization = format!("Bearer {replica_token}");
 
         let sync_plan = app
             .clone()
             .oneshot(
-                Request::builder()
-                    .uri(format!("/pontemesh/replicas/{replica_id}/sync-plan"))
-                    .header(header::AUTHORIZATION, &replica_authorization)
-                    .body(Body::empty())
-                    .expect("valid request"),
+                signed_replica_request(
+                    Request::builder()
+                        .uri(format!("/pontemesh/replicas/{replica_id}/sync-plan"))
+                        .body(Body::empty()),
+                    replica_token,
+                    "nonce-sync-plan-0001",
+                )
+                .expect("valid request"),
             )
             .await
             .expect("router response");
@@ -1074,12 +1145,16 @@ mod tests {
         assert_eq!(revoked_get.status(), StatusCode::FORBIDDEN);
 
         let sync_plan_after_revocation = app
+            .clone()
             .oneshot(
-                Request::builder()
-                    .uri(format!("/pontemesh/replicas/{replica_id}/sync-plan"))
-                    .header(header::AUTHORIZATION, &replica_authorization)
-                    .body(Body::empty())
-                    .expect("valid request"),
+                signed_replica_request(
+                    Request::builder()
+                        .uri(format!("/pontemesh/replicas/{replica_id}/sync-plan"))
+                        .body(Body::empty()),
+                    replica_token,
+                    "nonce-sync-plan-0002",
+                )
+                .expect("valid request"),
             )
             .await
             .expect("router response");
@@ -1089,6 +1164,21 @@ mod tests {
                 .await
                 .contains(r#""key":"folder/hello.txt""#)
         );
+
+        let replayed_sync_plan = app
+            .oneshot(
+                signed_replica_request(
+                    Request::builder()
+                        .uri(format!("/pontemesh/replicas/{replica_id}/sync-plan"))
+                        .body(Body::empty()),
+                    replica_token,
+                    "nonce-sync-plan-0002",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replayed_sync_plan.status(), StatusCode::UNAUTHORIZED);
     }
 
     struct TestContext {
@@ -1240,15 +1330,33 @@ mod tests {
         access_key_id: &str,
         secret_access_key: &str,
     ) -> Result<Request<Body>, axum::http::Error> {
+        let now = chrono::Utc::now();
+        let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+        let date = now.format("%Y%m%d").to_string();
+        signed_s3_request_with_date(
+            request,
+            payload,
+            access_key_id,
+            secret_access_key,
+            &amz_date,
+            &date,
+        )
+    }
+
+    fn signed_s3_request_with_date(
+        request: Result<Request<Body>, axum::http::Error>,
+        payload: &[u8],
+        access_key_id: &str,
+        secret_access_key: &str,
+        amz_date: &str,
+        date: &str,
+    ) -> Result<Request<Body>, axum::http::Error> {
         let mut request = request?;
         let payload_hash = sha256_hex(payload);
         {
             let headers = request.headers_mut();
             headers.insert(header::HOST, "localhost:9000".parse().expect("host header"));
-            headers.insert(
-                "x-amz-date",
-                TEST_AMZ_DATE.parse().expect("x-amz-date header"),
-            );
+            headers.insert("x-amz-date", amz_date.parse().expect("x-amz-date header"));
             headers.insert(
                 "x-amz-content-sha256",
                 payload_hash.parse().expect("payload hash header"),
@@ -1262,10 +1370,10 @@ mod tests {
         let signed_headers = signed_headers.join(";");
         let canonical_request = test_canonical_request(&request, &signed_headers, &payload_hash);
         let canonical_hash = sha256_hex(canonical_request.as_bytes());
-        let credential_scope = format!("{TEST_DATE}/{TEST_REGION}/s3/aws4_request");
+        let credential_scope = format!("{date}/{TEST_REGION}/s3/aws4_request");
         let string_to_sign =
-            format!("AWS4-HMAC-SHA256\n{TEST_AMZ_DATE}\n{credential_scope}\n{canonical_hash}");
-        let signing_key = test_signing_key(secret_access_key, TEST_DATE, TEST_REGION);
+            format!("AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{canonical_hash}");
+        let signing_key = test_signing_key(secret_access_key, date, TEST_REGION);
         let signature = to_hex(&hmac_bytes(&signing_key, string_to_sign.as_bytes()));
         let authorization = format!(
             "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
@@ -1274,6 +1382,50 @@ mod tests {
         request.headers_mut().insert(
             header::AUTHORIZATION,
             authorization.parse().expect("authorization header"),
+        );
+        Ok(request)
+    }
+
+    fn signed_replica_request(
+        request: Result<Request<Body>, axum::http::Error>,
+        replica_token: &str,
+        nonce: &str,
+    ) -> Result<Request<Body>, axum::http::Error> {
+        let mut request = request?;
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let path_and_query = request
+            .uri()
+            .path_and_query()
+            .map(|value| value.as_str())
+            .unwrap_or(request.uri().path());
+        let signing_payload = format!(
+            "{}\n{}\n{}\n{}",
+            request.method(),
+            path_and_query,
+            timestamp,
+            nonce
+        );
+        let signature = to_hex(&hmac_bytes(
+            replica_token.as_bytes(),
+            signing_payload.as_bytes(),
+        ));
+        request.headers_mut().insert(
+            header::AUTHORIZATION,
+            format!("Bearer {replica_token}")
+                .parse()
+                .expect("authorization header"),
+        );
+        request.headers_mut().insert(
+            "x-pontemesh-date",
+            timestamp.parse().expect("replica date header"),
+        );
+        request.headers_mut().insert(
+            "x-pontemesh-nonce",
+            nonce.parse().expect("replica nonce header"),
+        );
+        request.headers_mut().insert(
+            "x-pontemesh-signature",
+            signature.parse().expect("replica signature header"),
         );
         Ok(request)
     }

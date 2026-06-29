@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 type HmacSha256 = Hmac<Sha256>;
+const SIGV4_MAX_CLOCK_SKEW_SECONDS: i64 = 900;
 
 #[derive(Debug, Clone)]
 pub struct S3Identity {
@@ -106,6 +107,7 @@ async fn validate_sigv4(
         .get("x-amz-date")
         .and_then(|value| value.to_str().ok())
         .ok_or_else(|| S3AuthError::signature("missing x-amz-date"))?;
+    validate_amz_date(amz_date, date)?;
     let payload_hash = headers
         .get("x-amz-content-sha256")
         .and_then(|value| value.to_str().ok())
@@ -140,6 +142,31 @@ async fn validate_sigv4(
     Ok(S3Identity {
         access_key_id: key.access_key_id,
     })
+}
+
+fn validate_amz_date(amz_date: &str, credential_date: &str) -> Result<(), S3AuthError> {
+    if amz_date.len() != 16 || !amz_date.ends_with('Z') {
+        return Err(S3AuthError::signature("invalid x-amz-date"));
+    }
+    let request_date = amz_date
+        .get(0..8)
+        .ok_or_else(|| S3AuthError::signature("invalid x-amz-date"))?;
+    if request_date != credential_date {
+        return Err(S3AuthError::signature(
+            "x-amz-date must match Credential date",
+        ));
+    }
+    let naive = chrono::NaiveDateTime::parse_from_str(amz_date, "%Y%m%dT%H%M%SZ")
+        .map_err(|_| S3AuthError::signature("invalid x-amz-date"))?;
+    let request_time =
+        chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive, chrono::Utc);
+    let skew = (chrono::Utc::now() - request_time).num_seconds().abs();
+    if skew > SIGV4_MAX_CLOCK_SKEW_SECONDS {
+        return Err(S3AuthError::signature(
+            "x-amz-date is outside the allowed signature window",
+        ));
+    }
+    Ok(())
 }
 
 struct S3AuthError {

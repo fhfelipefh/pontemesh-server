@@ -30,7 +30,7 @@ COPY --from=rust-build /app/target/release/pontemesh-server /usr/local/bin/ponte
 COPY --from=rust-build /app/migrations ./migrations
 
 USER pontemesh
-EXPOSE 8080
+EXPOSE 8080 9000
 VOLUME ["/var/pontemesh_home"]
 
 ENTRYPOINT ["/usr/local/bin/pontemesh-server"]

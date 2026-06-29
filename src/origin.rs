@@ -185,11 +185,40 @@ pub async fn head_object(
 
 pub async fn get_object(
     State(state): State<AppState>,
+    Extension(identity): Extension<S3Identity>,
     headers: HeaderMap,
     Path((bucket_name, object_key)): Path<(String, String)>,
 ) -> Response {
     match get_object_inner(&state, &bucket_name, &object_key, &headers).await {
-        Ok(response) => response,
+        Ok(served) => {
+            record_origin_audit(
+                &state,
+                "s3_object_get",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}"),
+            )
+            .await;
+            if let Err(error) = state
+                .catalog
+                .record_origin_transfer(
+                    None,
+                    &bucket_name,
+                    &object_key,
+                    served.bytes_served,
+                    served.range,
+                    served.status_code,
+                )
+                .await
+            {
+                audit::failure(
+                    "origin_transfer_metric_failed",
+                    Some(&identity.access_key_id),
+                    &error.to_string(),
+                );
+            }
+            served.response
+        }
         Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
     }
 }
@@ -308,7 +337,7 @@ async fn get_object_inner(
     bucket_name: &str,
     object_key: &str,
     headers: &HeaderMap,
-) -> anyhow::Result<Response> {
+) -> anyhow::Result<ServedObjectResponse> {
     let object = state
         .catalog
         .get_object_record(bucket_name, object_key)
@@ -322,7 +351,13 @@ async fn get_object_inner(
 
     let total_size = bytes.len() as u64;
     let Some(range_header) = headers.get(header::RANGE) else {
-        return Ok(object_body_response(&object, StatusCode::OK, bytes, None));
+        let bytes_served = i64::try_from(bytes.len()).context("object response is too large")?;
+        return Ok(ServedObjectResponse {
+            response: object_body_response(&object, StatusCode::OK, bytes, None),
+            bytes_served,
+            range: None,
+            status_code: StatusCode::OK.as_u16(),
+        });
     };
 
     let range_header = range_header
@@ -332,12 +367,20 @@ async fn get_object_inner(
     let start = usize::try_from(range.start).context("range start is too large")?;
     let end = usize::try_from(range.end).context("range end is too large")?;
     let partial = bytes[start..=end].to_vec();
-    Ok(object_body_response(
-        &object,
-        StatusCode::PARTIAL_CONTENT,
-        partial,
-        Some(range),
-    ))
+    let bytes_served = i64::try_from(partial.len()).context("object response is too large")?;
+    Ok(ServedObjectResponse {
+        response: object_body_response(&object, StatusCode::PARTIAL_CONTENT, partial, Some(range)),
+        bytes_served,
+        range: Some((range.start, range.end)),
+        status_code: StatusCode::PARTIAL_CONTENT.as_u16(),
+    })
+}
+
+struct ServedObjectResponse {
+    response: Response,
+    bytes_served: i64,
+    range: Option<(u64, u64)>,
+    status_code: u16,
 }
 
 fn object_metadata_response(object: &ObjectRecord, head_only: bool) -> Response {
