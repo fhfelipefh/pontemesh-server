@@ -7,7 +7,7 @@ A arquitetura considera dois papéis principais:
 * **Origin**;
 * **Replica/Edge**.
 
-Não existe um modo separado para representar execução sem peers, sem réplicas ou sem malha distribuída ativa. Quando não houver fontes auxiliares disponíveis, o **Origin** continua operando normalmente, servindo objetos diretamente e preservando as mesmas regras de autenticação, autorização, manifesto, integridade, métricas e revogação.
+Quando não há fontes auxiliares elegíveis, o **Origin** serve objetos diretamente e preserva as mesmas regras de autenticação, autorização, manifesto, integridade, métricas e revogação.
 
 ## Origin
 
@@ -35,7 +35,7 @@ Responsabilidades principais:
 
 O Origin deve participar do início de toda obtenção. Nenhum SDK, peer ou Replica/Edge deve obter ou servir conteúdo sem autorização prévia emitida pelo Origin.
 
-A ausência de peers ou Replica/Edge não representa falha do Origin. Nesse cenário, o servidor continua cumprindo seu papel, entregando conteúdo diretamente e mantendo o controle centralizado da operação.
+Na entrega direta, o Origin mantém o controle centralizado da operação.
 
 ## Replica/Edge
 
@@ -58,13 +58,7 @@ Responsabilidades principais:
 * respeitar mudanças de política emitidas pelo Origin;
 * registrar eventos relevantes para auditoria.
 
-Replica/Edge não deve aceitar upload arbitrário de clientes.
-
-Replica/Edge não deve emitir autorização própria de acesso.
-
-Replica/Edge não deve decidir autonomamente quais objetos pode distribuir fora das políticas emitidas pelo Origin.
-
-A autoridade continua sendo sempre o Origin.
+Replica/Edge distribui apenas conteúdo autorizado pelas políticas emitidas pelo Origin. A autoridade continua no Origin.
 
 ## Relação entre Origin e Replica/Edge
 

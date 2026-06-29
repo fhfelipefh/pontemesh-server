@@ -1,7 +1,7 @@
 use crate::{
     config::{
-        AdminSection, HttpSection, InstanceConfig, InstanceRole, InstanceSection,
-        LocalStorageSection, StorageSection,
+        HttpSection, InstanceConfig, InstanceRole, InstanceSection, LocalStorageSection,
+        StorageSection,
     },
     http::AppState,
     security::{password::hash_admin_password, random::secure_url_token},
@@ -124,7 +124,7 @@ pub async fn complete(State(state): State<AppState>, headers: HeaderMap, body: B
         Err(error) => return bad_request(anyhow::anyhow!("invalid JSON payload: {error}")),
     };
 
-    match complete_setup(&state, payload) {
+    match complete_setup(&state, payload).await {
         Ok(()) => {
             info!("Ponte Mesh initial setup completed");
             (
@@ -138,7 +138,7 @@ pub async fn complete(State(state): State<AppState>, headers: HeaderMap, body: B
     }
 }
 
-fn complete_setup(state: &AppState, payload: CompleteSetupRequest) -> anyhow::Result<()> {
+async fn complete_setup(state: &AppState, payload: CompleteSetupRequest) -> anyhow::Result<()> {
     let instance_name = non_empty(payload.instance_name, "instanceName")?;
     let admin_username = non_empty(payload.admin_username, "adminUsername")?;
     let admin_password = non_empty(payload.admin_password, "adminPassword")?;
@@ -157,6 +157,11 @@ fn complete_setup(state: &AppState, payload: CompleteSetupRequest) -> anyhow::Re
     validate_storage_path(&storage_path)?;
 
     let password_hash = hash_admin_password(&admin_password)?;
+    state
+        .catalog
+        .create_initial_admin_user(&admin_username, &password_hash)
+        .await?;
+
     let config = InstanceConfig {
         instance: InstanceSection {
             name: instance_name,
@@ -168,11 +173,6 @@ fn complete_setup(state: &AppState, payload: CompleteSetupRequest) -> anyhow::Re
         },
         storage: StorageSection {
             local: LocalStorageSection { path: storage_path },
-        },
-        admin: AdminSection {
-            username: admin_username,
-            password_hash,
-            created_at: chrono::Utc::now(),
         },
     };
 

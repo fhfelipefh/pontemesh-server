@@ -10,7 +10,7 @@ Servidor central e autoridade principal do sistema.
 
 O Origin é responsável pelo plano de controle, incluindo ingestão, armazenamento primário, catálogo, autenticação, autorização, emissão de pacotes de acesso, geração de manifestos, controle de disponibilidade, revogação, expiração, métricas, auditoria e fallback.
 
-Mesmo quando não houver peers ou nós Replica/Edge disponíveis, o Origin continua capaz de entregar objetos diretamente.
+Quando não há fontes auxiliares elegíveis, o Origin entrega objetos diretamente.
 
 ## Replica/Edge
 
@@ -18,7 +18,7 @@ Nó servidor auxiliar, mais estável que peers comuns, utilizado para reforçar 
 
 O Replica/Edge pode replicar objetos ou fragmentos autorizados a partir do Origin e auxiliar na entrega de conteúdo para clientes.
 
-Ele não é uma autoridade independente. Toda operação de Replica/Edge deve ser autenticada, autorizada, auditável e revogável pelo Origin.
+Toda operação de Replica/Edge é autenticada, autorizada, auditável e revogável pelo Origin.
 
 ## SDK
 
@@ -26,13 +26,13 @@ Biblioteca externa consumida por aplicações cliente.
 
 O SDK abstrai a complexidade da obtenção híbrida, sendo responsável por consultar o Origin, obter pacote de acesso, interpretar manifestos, selecionar fragmentos, escolher fontes autorizadas, validar integridade, controlar progresso e acionar fallback quando necessário.
 
-O SDK não deve permitir obtenção de conteúdo sem autorização prévia do Origin.
+O SDK obtém conteúdo com autorização prévia do Origin.
 
 ## Client
 
 Aplicação consumidora do conteúdo.
 
-O Client utiliza o SDK ou a API compatível para obter objetos digitais. Ele não deve precisar lidar diretamente com descoberta de peers, validação de fragmentos, seleção de fontes, fallback ou reconstrução de objetos.
+O Client utiliza o SDK ou a API compatível para obter objetos digitais. Descoberta de peers, validação de fragmentos, seleção de fontes, fallback e reconstrução ficam no SDK.
 
 Quando permitido pelas políticas do Origin, o Client pode colaborar temporariamente compartilhando fragmentos já obtidos por meio do SDK.
 
@@ -40,7 +40,7 @@ Quando permitido pelas políticas do Origin, o Client pode colaborar temporariam
 
 Cliente autorizado que pode compartilhar temporariamente fragmentos já obtidos.
 
-Um peer não é uma fonte confiável por padrão. Todo fragmento recebido de um peer deve ser validado por integridade antes de ser aceito.
+Todo fragmento recebido de um peer deve ser validado por integridade antes de ser aceito.
 
 A participação de peers depende de autorização, política aplicável, disponibilidade, conectividade e condições técnicas adequadas.
 
@@ -86,7 +86,7 @@ Interface inspirada no modelo S3 para operações fundamentais de buckets e obje
 
 Deve cobrir operações como criar e listar buckets, enviar objeto, listar objetos, consultar metadados, recuperar objeto, recuperar intervalos de bytes, remover logicamente objeto e gerar URL temporária ou mecanismo equivalente.
 
-A API S3-like deve ser usada para operações base de objeto, mas não deve limitar funcionalidades específicas da arquitetura Ponte Mesh.
+A API S3-like cobre operações base de objeto. Funcionalidades específicas da arquitetura ficam na API Ponte Mesh.
 
 ## API Ponte Mesh
 

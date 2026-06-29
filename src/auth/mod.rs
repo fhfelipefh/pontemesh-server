@@ -1,7 +1,11 @@
 use crate::{
-    audit, config,
+    audit,
     http::AppState,
-    security::{password::verify_admin_password, random::secure_url_token},
+    security::{
+        password::verify_admin_password,
+        random::secure_url_token,
+        token::{hash_bearer_token, hash_session_token},
+    },
 };
 use axum::{
     Json,
@@ -12,21 +16,29 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::net::IpAddr;
 
 const AUTH_SESSION_COOKIE: &str = "pm_admin_session";
 
 #[derive(Debug, Clone)]
-pub struct AuthState {
-    sessions: Arc<Mutex<HashMap<String, AdminSession>>>,
+pub struct AdminSession {
+    pub user_id: String,
+    pub username: String,
+    pub role: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct AdminSession {
-    pub username: String,
+pub struct ApplicationIdentity {
+    pub id: String,
+    pub name: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplicaIdentity {
+    pub id: String,
+    pub name: String,
+    pub allowed_buckets: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,40 +60,6 @@ pub struct ErrorResponse {
     error: String,
 }
 
-impl AuthState {
-    pub fn new() -> Self {
-        Self {
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    pub fn create_session(&self, username: String) -> String {
-        let token = secure_url_token("", 32);
-        self.sessions
-            .lock()
-            .expect("poisoned auth session lock")
-            .insert(token.clone(), AdminSession { username });
-        token
-    }
-
-    pub fn get_session(&self, token: Option<&str>) -> Option<AdminSession> {
-        let token = token?;
-        self.sessions
-            .lock()
-            .expect("poisoned auth session lock")
-            .get(token)
-            .cloned()
-    }
-
-    pub fn remove_session(&self, token: Option<&str>) -> Option<AdminSession> {
-        let token = token?;
-        self.sessions
-            .lock()
-            .expect("poisoned auth session lock")
-            .remove(token)
-    }
-}
-
 pub async fn login(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
     let payload: LoginRequest = match serde_json::from_slice(&body) {
         Ok(payload) => payload,
@@ -89,37 +67,91 @@ pub async fn login(State(state): State<AppState>, headers: HeaderMap, body: Byte
     };
     let username = payload.username.trim();
 
-    let config = match config::load_instance_config(&state.paths) {
-        Ok(config) => config,
+    let user = match state.catalog.find_active_user_by_username(username).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            audit::failure(
+                "login_failed",
+                Some(username),
+                "unknown or inactive username",
+            );
+            record_auth_audit(
+                &state,
+                "login_failed",
+                Some(username),
+                "failure",
+                "unknown or inactive username",
+            )
+            .await;
+            return unauthorized("invalid username or password");
+        }
         Err(error) => return internal_error(error),
     };
 
-    if username != config.admin.username {
-        audit::failure("login_failed", Some(username), "unknown admin username");
+    if user.role != "admin" {
+        audit::failure("login_failed", Some(username), "non-admin login rejected");
+        record_auth_audit(
+            &state,
+            "login_failed",
+            Some(username),
+            "failure",
+            "non-admin login rejected",
+        )
+        .await;
         return unauthorized("invalid username or password");
     }
 
-    match verify_admin_password(&payload.password, &config.admin.password_hash) {
+    match verify_admin_password(&payload.password, &user.password_hash) {
         Ok(true) => {
-            let token = state.auth.create_session(username.to_owned());
+            let token = secure_url_token("", 32);
+            let token_hash = hash_session_token(&token);
+            if let Err(error) = state
+                .catalog
+                .create_user_session(
+                    &user.id,
+                    &token_hash,
+                    user_agent(&headers),
+                    client_ip(&headers),
+                )
+                .await
+            {
+                return internal_error(error);
+            }
+
             audit::event(
                 "login_success",
-                Some(username),
+                Some(&user.username),
                 "success",
                 "admin session created",
             );
+            record_auth_audit(
+                &state,
+                "login_success",
+                Some(&user.username),
+                "success",
+                "admin session created",
+            )
+            .await;
             (
                 StatusCode::OK,
                 [(header::SET_COOKIE, session_cookie(&headers, &token))],
                 Json(AuthUserResponse {
                     authenticated: true,
-                    username: Some(username.to_owned()),
+                    username: Some(user.username),
                 }),
             )
                 .into_response()
         }
         Ok(false) => {
             audit::failure("login_failed", Some(username), "invalid password");
+            record_auth_audit(
+                &state,
+                "login_failed",
+                Some(username),
+                "failure",
+                "invalid password",
+            )
+            .await;
             unauthorized("invalid username or password")
         }
         Err(error) => internal_error(error),
@@ -127,15 +159,35 @@ pub async fn login(State(state): State<AppState>, headers: HeaderMap, body: Byte
 }
 
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let session = state
-        .auth
-        .remove_session(read_auth_session(&headers).as_deref());
+    let token = read_auth_session(&headers);
+    let session = match session_from_cookie(&state, token.as_deref()).await {
+        Ok(session) => session,
+        Err(error) => return internal_error(error),
+    };
+    if let Some(token) = token.as_deref() {
+        if let Err(error) = state
+            .catalog
+            .revoke_session_by_token_hash(&hash_session_token(token))
+            .await
+        {
+            return internal_error(error);
+        }
+    }
+
     audit::event(
         "logout",
         session.as_ref().map(|session| session.username.as_str()),
         "success",
         "admin session invalidated",
     );
+    record_auth_audit(
+        &state,
+        "logout",
+        session.as_ref().map(|session| session.username.as_str()),
+        "success",
+        "admin session invalidated",
+    )
+    .await;
     (
         StatusCode::OK,
         [(header::SET_COOKIE, clear_auth_cookie())],
@@ -145,16 +197,13 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
 }
 
 pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    match state
-        .auth
-        .get_session(read_auth_session(&headers).as_deref())
-    {
-        Some(session) => Json(AuthUserResponse {
+    match session_from_cookie(&state, read_auth_session(&headers).as_deref()).await {
+        Ok(Some(session)) => Json(AuthUserResponse {
             authenticated: true,
             username: Some(session.username),
         })
         .into_response(),
-        None => (
+        Ok(None) => (
             StatusCode::UNAUTHORIZED,
             Json(AuthUserResponse {
                 authenticated: false,
@@ -162,6 +211,7 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
             }),
         )
             .into_response(),
+        Err(error) => internal_error(error),
     }
 }
 
@@ -171,21 +221,127 @@ pub async fn require_admin_session(
     mut request: Request,
     next: Next,
 ) -> Response {
-    match state
-        .auth
-        .get_session(read_auth_session(&headers).as_deref())
-    {
-        Some(session) => {
+    match session_from_cookie(&state, read_auth_session(&headers).as_deref()).await {
+        Ok(Some(session)) if session.role == "admin" => {
             request.extensions_mut().insert(session);
             next.run(request).await
         }
-        None => (
+        Ok(_) => (
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
                 error: "authentication required".to_owned(),
             }),
         )
             .into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn require_application_credential(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let Some(token) = read_bearer_token(&headers) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "application bearer token required".to_owned(),
+            }),
+        )
+            .into_response();
+    };
+
+    let token_hash = hash_bearer_token(&token);
+    match state
+        .catalog
+        .find_application_by_token_hash(&token_hash)
+        .await
+    {
+        Ok(Some(application)) => {
+            request.extensions_mut().insert(ApplicationIdentity {
+                id: application.id,
+                name: application.name,
+                scopes: application.scopes,
+            });
+            next.run(request).await
+        }
+        Ok(None) => {
+            audit::failure(
+                "application_auth_failed",
+                None,
+                "invalid or revoked application bearer token",
+            );
+            record_auth_audit(
+                &state,
+                "application_auth_failed",
+                None,
+                "failure",
+                "invalid or revoked application bearer token",
+            )
+            .await;
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponse {
+                    error: "invalid application bearer token".to_owned(),
+                }),
+            )
+                .into_response()
+        }
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn require_replica_credential(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let Some(token) = read_bearer_token(&headers) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "replica bearer token required".to_owned(),
+            }),
+        )
+            .into_response();
+    };
+
+    let token_hash = hash_bearer_token(&token);
+    match state.catalog.find_replica_by_token_hash(&token_hash).await {
+        Ok(Some(replica)) => {
+            request.extensions_mut().insert(ReplicaIdentity {
+                id: replica.id,
+                name: replica.name,
+                allowed_buckets: replica.allowed_buckets,
+            });
+            next.run(request).await
+        }
+        Ok(None) => {
+            audit::failure(
+                "replica_auth_failed",
+                None,
+                "invalid or revoked replica bearer token",
+            );
+            record_auth_audit(
+                &state,
+                "replica_auth_failed",
+                None,
+                "failure",
+                "invalid or revoked replica bearer token",
+            )
+            .await;
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponse {
+                    error: "invalid replica bearer token".to_owned(),
+                }),
+            )
+                .into_response()
+        }
+        Err(error) => internal_error(error),
     }
 }
 
@@ -195,6 +351,34 @@ pub fn read_auth_session(headers: &HeaderMap) -> Option<String> {
         let (name, value) = part.trim().split_once('=')?;
         (name == AUTH_SESSION_COOKIE).then(|| value.to_owned())
     })
+}
+
+async fn session_from_cookie(
+    state: &AppState,
+    token: Option<&str>,
+) -> anyhow::Result<Option<AdminSession>> {
+    let Some(token) = token else {
+        return Ok(None);
+    };
+    let Some(session) = state
+        .catalog
+        .find_admin_session_by_token_hash(&hash_session_token(token))
+        .await?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(AdminSession {
+        user_id: session.user_id,
+        username: session.username,
+        role: session.role,
+    }))
+}
+
+fn read_bearer_token(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let token = value.strip_prefix("Bearer ")?;
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_owned())
 }
 
 fn session_cookie(headers: &HeaderMap, token: &str) -> HeaderValue {
@@ -216,6 +400,25 @@ fn request_is_https(headers: &HeaderMap) -> bool {
         .and_then(|value| value.to_str().ok())
         .map(|value| value.eq_ignore_ascii_case("https"))
         .unwrap_or(false)
+}
+
+fn user_agent(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+}
+
+fn client_ip(headers: &HeaderMap) -> Option<IpAddr> {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok())
+        })
+        .and_then(|value| value.trim().parse().ok())
 }
 
 fn bad_request(error: anyhow::Error) -> Response {
@@ -246,4 +449,20 @@ fn internal_error(error: anyhow::Error) -> Response {
         }),
     )
         .into_response()
+}
+
+async fn record_auth_audit(
+    state: &AppState,
+    event: &str,
+    principal: Option<&str>,
+    outcome: &str,
+    detail: &str,
+) {
+    if let Err(error) = state
+        .catalog
+        .record_audit_event(event, principal, outcome, detail)
+        .await
+    {
+        audit::failure("audit_persist_failed", principal, &error.to_string());
+    }
 }

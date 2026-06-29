@@ -11,11 +11,9 @@ O plano de dados pode utilizar:
 * entrega direta pelo Origin;
 * entrega por nós Replica/Edge;
 * entrega por peers autorizados via SDK;
-* fallback automático para o Origin quando a distribuição por fontes auxiliares falhar, não estiver disponível ou não for tecnicamente vantajosa.
+* fallback automático para o Origin quando fontes auxiliares não forem aplicáveis.
 
-A proposta não substitui o controle central por P2P. O P2P deve ser tratado como mecanismo de aceleração, redução de carga e aproveitamento de fontes auxiliares, sempre subordinado à autorização, ao manifesto, às políticas e à revogação emitidas pelo Origin.
-
-A ausência de peers não representa falha do servidor nem exige um modo especial de execução. Nesse cenário, o Origin continua cumprindo sua função principal, servindo os objetos diretamente e mantendo o controle sobre autenticação, autorização, disponibilidade, manifestos, métricas e revogação.
+O P2P é mecanismo de aceleração e redução de carga, subordinado à autorização, ao manifesto, às políticas e à revogação emitidas pelo Origin. A entrega direta pelo Origin é o comportamento padrão quando não há fontes auxiliares elegíveis.
 
 ## Planos da arquitetura
 
@@ -52,7 +50,7 @@ Ele pode operar de forma híbrida, combinando:
 
 O SDK deve validar cada fragmento por hash antes de aceitá-lo. Sempre que possível, o fallback deve ocorrer no nível do fragmento, preservando o progresso já validado e evitando reiniciar a obtenção completa do objeto.
 
-Quando não houver peers ou réplicas disponíveis, o plano de dados continua funcional por meio do Origin. Nesse caso, a entrega ocorre diretamente pelo servidor de origem, sem comprometer o modelo arquitetural.
+Quando não há peers ou réplicas disponíveis, a entrega ocorre diretamente pelo Origin.
 
 ## Componentes
 
@@ -77,7 +75,7 @@ Responsabilidades principais:
 * registrar métricas e auditoria;
 * expor APIs administrativas e operacionais.
 
-O Origin não é apenas uma alternativa de fallback. Ele é o núcleo da arquitetura e deve permanecer capaz de entregar conteúdo mesmo quando não houver peers, réplicas ou fontes auxiliares disponíveis.
+O Origin é o núcleo da arquitetura e permanece capaz de entregar conteúdo diretamente.
 
 ### Replica/Edge
 
@@ -85,9 +83,7 @@ O **Replica/Edge** é um nó servidor auxiliar, mais estável que peers comuns, 
 
 Ele replica conteúdos a partir do Origin conforme políticas definidas, considerando fatores como demanda, recorrência de acesso, validade temporal, tamanho do objeto, custo estimado de redistribuição e relevância operacional.
 
-A réplica não deve ser tratada como confiável apenas por estar em infraestrutura própria. Toda comunicação entre Origin e Replica/Edge deve ser autenticada, autorizada, auditável e revogável.
-
-O Replica/Edge não atua como autoridade independente. Ele deve operar dentro das regras emitidas pelo Origin.
+Toda comunicação entre Origin e Replica/Edge deve ser autenticada, autorizada, auditável e revogável. Replica/Edge opera dentro das regras emitidas pelo Origin.
 
 ### SDK
 
@@ -106,10 +102,10 @@ Responsabilidades esperadas do SDK:
 * preservar fragmentos já validados;
 * trocar de fonte em caso de falha;
 * acionar fallback para o Origin quando necessário;
-* operar diretamente com o Origin quando não houver peers ou réplicas disponíveis;
+* operar diretamente com o Origin quando necessário;
 * revalidar expiração e revogação em transferências prolongadas.
 
-O SDK não deve assumir que sempre existirá uma malha distribuída disponível. A distribuição híbrida é uma otimização controlada, não uma dependência obrigatória para o funcionamento do servidor.
+O SDK trata a distribuição híbrida como otimização controlada.
 
 ### Client
 
@@ -155,7 +151,7 @@ Pode conter:
 * endpoints de fallback;
 * restrições aplicáveis ao acesso.
 
-O pacote de acesso pode indicar peers e réplicas quando existirem fontes auxiliares elegíveis. Caso não existam, o pacote ainda pode autorizar a obtenção direta pelo Origin.
+O pacote de acesso pode indicar peers, réplicas ou obtenção direta pelo Origin.
 
 ### Estado de disponibilidade
 
@@ -215,7 +211,7 @@ Fragmentos marcados como `VALIDATED` não devem ser baixados novamente.
 13. O SDK remonta logicamente o objeto apenas com fragmentos validados.
 14. O objeto final é entregue ao Client.
 
-Se não houver peers ou Replica/Edge disponíveis, o fluxo permanece válido. O SDK obtém os fragmentos diretamente do Origin, mantendo as mesmas regras de autorização, manifesto e validação.
+O SDK obtém fragmentos diretamente do Origin quando essa for a fonte elegível.
 
 ## Seleção de fontes
 
@@ -239,11 +235,11 @@ O SDK deve considerar, no mínimo:
 
 O objetivo da seleção de fontes é aproveitar P2P e Replica/Edge quando houver benefício técnico, mas sem comprometer previsibilidade, segurança ou continuidade da obtenção.
 
-A seleção de fontes não deve tornar peers ou réplicas obrigatórios. O servidor deve continuar funcional mesmo quando a única fonte disponível for o Origin.
+A seleção de fontes preserva o Origin como fonte elegível de garantia.
 
 ## Replicação
 
-Replica/Edge deve utilizar replicação seletiva, não cópia indiscriminada de todos os objetos.
+Replica/Edge utiliza replicação seletiva conforme política.
 
 Critérios possíveis:
 
@@ -262,13 +258,11 @@ Toda replicação deve ser autenticada, autorizada, auditável e revogável.
 
 O Origin deve continuar sendo a autoridade sobre quais objetos podem ser replicados, por quanto tempo, sob quais condições e para quais réplicas.
 
-A inexistência de réplicas não impede o funcionamento do servidor. Ela apenas reduz as possibilidades de entrega auxiliar no plano de dados.
-
 ## Relação com a API S3-like
 
 A API S3-like deve cobrir as operações fundamentais de buckets e objetos, como envio, leitura, listagem, consulta de metadados, recuperação parcial e remoção lógica.
 
-Essas operações devem funcionar mesmo sem peers ou Replica/Edge, pois o Origin é capaz de atender diretamente as requisições base.
+Essas operações são atendidas diretamente pelo Origin.
 
 As funcionalidades específicas da arquitetura híbrida, como políticas de fragmentação, priorização, fallback, Replica/Edge, métricas, auditoria e fontes autorizadas, devem ser expostas por APIs próprias do Ponte Mesh quando não se encaixarem naturalmente no modelo S3.
 
@@ -277,14 +271,13 @@ As funcionalidades específicas da arquitetura híbrida, como políticas de frag
 A arquitetura assume os seguintes limites:
 
 * o Origin precisa estar acessível no início da operação;
-* P2P pode não estar disponível por NAT, firewall, churn, baixa densidade de peers ou restrições do ambiente;
-* Replica/Edge aumenta disponibilidade, mas não elimina a necessidade de controle central;
+* P2P depende de NAT, firewall, churn, densidade de peers e restrições do ambiente;
+* Replica/Edge aumenta disponibilidade sob controle central;
 * revogação impede novas autorizações, mas não garante apagamento físico imediato de cópias transitórias já distribuídas;
-* peers não devem ser tratados como fontes confiáveis sem validação;
+* peers exigem validação de fragmentos;
 * fragmentos devem ser validados antes de serem aceitos;
-* o objetivo é reduzir a carga do Origin quando possível, não eliminar o Origin;
+* o objetivo é reduzir a carga do Origin quando possível;
 * a distribuição híbrida deve ser usada apenas quando for autorizada, segura e tecnicamente vantajosa;
-* a ausência de peers ou réplicas não caracteriza falha, apenas faz com que a entrega ocorra diretamente pelo Origin.
 
 ## Síntese
 
@@ -296,8 +289,8 @@ O **plano de dados** pode usar Origin, Replica/Edge e peers autorizados para dis
 
 O **SDK** esconde a complexidade da obtenção híbrida e garante validação, seleção de fontes e fallback.
 
-O **P2P** é um mecanismo de aceleração, não uma substituição do controle central.
+O **P2P** é um mecanismo de aceleração subordinado ao controle central.
 
-O **Replica/Edge** é um reforço de disponibilidade, não uma autoridade independente.
+O **Replica/Edge** é um reforço de disponibilidade autorizado pelo Origin.
 
-O **Origin** continua plenamente funcional mesmo sem peers ou réplicas, pois a distribuição híbrida é uma otimização controlada, não uma condição obrigatória para o servidor cumprir sua finalidade.
+O **Origin** atende diretamente quando a distribuição híbrida não for aplicável.

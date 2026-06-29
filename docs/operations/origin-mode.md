@@ -4,7 +4,7 @@ Este documento descreve a operação do `pontemesh-server` quando executado no p
 
 O **Origin** é a autoridade central do Ponte Mesh. Ele concentra o plano de controle, mantém o armazenamento primário, emite autorizações, gera ou disponibiliza manifestos, controla políticas, aplica revogações e atua como fonte direta ou fonte final de garantia no plano de dados.
 
-A ausência de peers ou Replica/Edge não representa falha de operação. Quando não houver fontes auxiliares disponíveis, o Origin continua servindo objetos diretamente, preservando autenticação, autorização, manifesto, integridade, métricas e auditoria.
+Quando não há fontes auxiliares elegíveis, o Origin serve objetos diretamente, preservando autenticação, autorização, manifesto, integridade, métricas e auditoria.
 
 ## Papel do Origin
 
@@ -12,7 +12,7 @@ O Origin é responsável por garantir que toda obtenção de conteúdo ocorra de
 
 Nenhum SDK, Client, peer ou Replica/Edge deve obter ou servir conteúdo sem autorização prévia emitida pelo Origin.
 
-O Origin também deve continuar funcional mesmo quando a distribuição híbrida não estiver disponível, não for autorizada ou não for tecnicamente vantajosa.
+O Origin atende diretamente quando a distribuição híbrida não for aplicável.
 
 ## Responsabilidades
 
@@ -68,7 +68,7 @@ Isso inclui:
 
 O plano de controle deve permanecer centralizado no Origin.
 
-Replica/Edge e peers podem participar do plano de dados, mas não devem assumir decisões de autorização, revogação, manifesto ou política.
+Replica/Edge e peers participam do plano de dados sob decisões de autorização, revogação, manifesto e política emitidas pelo Origin.
 
 ## Plano de dados
 
@@ -81,9 +81,9 @@ No plano de dados, o Origin pode atuar como:
 * fonte para recuperação por intervalo de bytes;
 * fonte de sincronização para Replica/Edge;
 * fonte final de garantia em caso de fallback;
-* fonte única quando não houver peers ou Replica/Edge disponíveis.
+* fonte direta quando necessário.
 
-O objetivo da distribuição híbrida é reduzir carga do Origin quando houver fontes auxiliares autorizadas e vantajosas, não eliminar a função do Origin.
+O objetivo da distribuição híbrida é reduzir carga do Origin quando houver fontes auxiliares autorizadas e vantajosas.
 
 ## Ingestão de objetos
 
@@ -102,7 +102,7 @@ Durante a ingestão, o Origin deve:
 * preparar dados necessários para manifesto;
 * registrar métricas e auditoria quando aplicável.
 
-Replica/Edge não deve aceitar upload arbitrário de clientes.
+Clientes enviam objetos ao Origin.
 
 ## Catálogo e metadados
 
@@ -219,7 +219,7 @@ Toda réplica deve possuir identidade e credencial próprias.
 
 O Origin deve negar comunicação de réplica desconhecida, expirada, sem escopo, com credencial inválida ou revogada.
 
-Replica/Edge não deve emitir autorização própria e não deve substituir o Origin como autoridade.
+Replica/Edge opera com autorização emitida pelo Origin.
 
 ## Fallback
 
@@ -237,16 +237,14 @@ O Origin deve preservar suporte a `Range requests` para permitir:
 * redução de desperdício de banda;
 * preservação de progresso validado.
 
-O fallback não deve permitir bypass de autorização. Mesmo quando a obtenção recair para o Origin, a operação deve permanecer dentro do escopo autorizado.
+O fallback permanece dentro do escopo autorizado.
 
 ## Recuperação direta pelo Origin
 
 O Origin deve conseguir atender diretamente operações de leitura de objetos.
 
-Isso é necessário porque:
+Casos comuns:
 
-* pode não haver peers disponíveis;
-* pode não haver Replica/Edge disponível;
 * a política pode bloquear distribuição por fontes auxiliares;
 * a rede pode impedir P2P por NAT ou firewall;
 * o SDK pode decidir que fontes auxiliares não são vantajosas;
@@ -254,8 +252,6 @@ Isso é necessário porque:
 * o fallback pode exigir recuperação direta.
 
 A entrega direta pelo Origin é comportamento normal da arquitetura.
-
-Não deve existir modo separado para representar execução sem fontes auxiliares.
 
 ## Métricas
 
@@ -332,7 +328,6 @@ O Origin deve seguir as seguintes regras:
 * recuperação por range deve ser preservada;
 * operações administrativas devem ser auditadas;
 * configurações inseguras devem negar acesso por padrão;
-* ausência de peers ou Replica/Edge não deve impedir o funcionamento do Origin.
 
 ## Segurança
 
@@ -347,8 +342,8 @@ Regras importantes:
 * permitir revogação;
 * validar integridade por fragmento;
 * auditar operações sensíveis;
-* não confiar em peers;
-* não tratar Replica/Edge como autoridade;
+* validar fragmentos recebidos de peers;
+* manter Replica/Edge sob autoridade do Origin;
 * usar bibliotecas e frameworks consolidados de segurança;
 * evitar mecanismos caseiros de autenticação, assinatura, token, criptografia ou hashing seguro.
 
@@ -365,9 +360,9 @@ O SDK deve conseguir:
 * obter endpoints de fallback;
 * reportar métricas;
 * revalidar autorização em transferências prolongadas;
-* operar diretamente com o Origin quando não houver peers ou Replica/Edge.
+* operar diretamente com o Origin quando essa for a fonte elegível.
 
-O SDK não deve obter conteúdo de peers ou Replica/Edge sem autorização emitida pelo Origin.
+O SDK obtém conteúdo de peers ou Replica/Edge dentro da autorização emitida pelo Origin.
 
 ## Relação com o Client
 
@@ -375,7 +370,7 @@ O Client é a aplicação consumidora.
 
 Do ponto de vista do Client, a integração deve ser de alto nível, preferencialmente familiar ao modelo S3-like para operações fundamentais de objeto.
 
-O Client não deve precisar lidar diretamente com:
+O Client delega ao SDK:
 
 * descoberta de peers;
 * seleção de fontes;
@@ -394,6 +389,4 @@ No papel de Origin, o `pontemesh-server` é o centro de controle do Ponte Mesh.
 
 Ele recebe objetos, mantém catálogo, autentica entidades, autoriza acessos, gera manifestos, emite pacotes de acesso, controla revogação, coordena Replica/Edge, serve fallback e registra métricas e auditoria.
 
-O Origin deve continuar funcional mesmo sem peers ou Replica/Edge, pois fontes auxiliares são otimizações controladas, não dependências obrigatórias.
-
-O objetivo é permitir distribuição híbrida quando houver condições seguras e vantajosas, preservando sempre o controle centralizado do Origin.
+O objetivo é permitir distribuição híbrida quando houver condições seguras e vantajosas, preservando o controle centralizado do Origin.

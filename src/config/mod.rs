@@ -8,9 +8,13 @@ use std::{
 
 pub const DEFAULT_PONTEMESH_HOME: &str = "/var/pontemesh_home";
 pub const PONTEMESH_STORAGE_PATH_ENV: &str = "PONTEMESH_STORAGE_PATH";
+pub const PONTEMESH_DATABASE_URL_ENV: &str = "PONTEMESH_DATABASE_URL";
 const PONTEMESH_HTTP_HOST_ENV: &str = "PONTEMESH_HTTP_HOST";
 const PONTEMESH_HTTP_PORT_ENV: &str = "PONTEMESH_HTTP_PORT";
+const PONTEMESH_WEB_PORT_ENV: &str = "PONTEMESH_WEB_PORT";
+const PONTEMESH_S3_PORT_ENV: &str = "PONTEMESH_S3_PORT";
 const DEFAULT_HTTP_PORT: u16 = 8080;
+const DEFAULT_S3_PORT: u16 = 9000;
 
 #[derive(Debug, Clone)]
 pub struct PontemeshHome {
@@ -49,10 +53,6 @@ impl PontemeshHome {
 
     pub fn data_dir(&self) -> PathBuf {
         self.root.join("data")
-    }
-
-    pub fn catalog_database_file(&self) -> PathBuf {
-        self.data_dir().join("catalog.sqlite")
     }
 
     pub fn storage_dir(&self) -> PathBuf {
@@ -118,7 +118,6 @@ pub struct InstanceConfig {
     pub instance: InstanceSection,
     pub http: HttpSection,
     pub storage: StorageSection,
-    pub admin: AdminSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,13 +149,6 @@ pub struct LocalStorageSection {
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdminSection {
-    pub username: String,
-    pub password_hash: String,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-}
-
 pub fn load_http_bind_addr(paths: &PontemeshHome) -> anyhow::Result<SocketAddr> {
     if !paths.setup_lock_file().exists() || !paths.config_file().exists() {
         return Ok(default_bind_addr());
@@ -174,14 +166,31 @@ pub fn load_http_bind_addr(paths: &PontemeshHome) -> anyhow::Result<SocketAddr> 
 }
 
 pub fn default_bind_addr() -> SocketAddr {
+    default_web_bind_addr()
+}
+
+pub fn default_web_bind_addr() -> SocketAddr {
     let host = env::var(PONTEMESH_HTTP_HOST_ENV)
         .ok()
         .and_then(|value| value.parse::<IpAddr>().ok())
         .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let port = env::var(PONTEMESH_HTTP_PORT_ENV)
+    let port = env::var(PONTEMESH_WEB_PORT_ENV)
+        .or_else(|_| env::var(PONTEMESH_HTTP_PORT_ENV))
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(DEFAULT_HTTP_PORT);
+    SocketAddr::new(host, port)
+}
+
+pub fn default_s3_bind_addr() -> SocketAddr {
+    let host = env::var(PONTEMESH_HTTP_HOST_ENV)
+        .ok()
+        .and_then(|value| value.parse::<IpAddr>().ok())
+        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let port = env::var(PONTEMESH_S3_PORT_ENV)
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_S3_PORT);
     SocketAddr::new(host, port)
 }
 
@@ -201,4 +210,16 @@ pub fn configured_storage_dir(paths: &PontemeshHome) -> anyhow::Result<PathBuf> 
     }
 
     Ok(paths.storage_dir())
+}
+
+pub fn database_url_from_env() -> anyhow::Result<String> {
+    let url = env::var(PONTEMESH_DATABASE_URL_ENV)
+        .with_context(|| format!("{PONTEMESH_DATABASE_URL_ENV} must be set to a PostgreSQL URL"))?;
+    if url.trim().is_empty() {
+        bail!("{PONTEMESH_DATABASE_URL_ENV} cannot be empty");
+    }
+    if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
+        bail!("{PONTEMESH_DATABASE_URL_ENV} must use postgres:// or postgresql://");
+    }
+    Ok(url)
 }

@@ -2,9 +2,7 @@
 
 Este documento consolida os requisitos derivados da proposta arquitetural e do escopo do repositório `pontemesh-server`.
 
-O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a separação entre plano de controle e plano de dados.
-
-Não deve existir modo Standalone. A ausência de peers, réplicas ou fontes auxiliares disponíveis não caracteriza um modo separado de operação. Nesses casos, o Origin continua funcionando normalmente, servindo objetos diretamente e mantendo as mesmas regras de autenticação, autorização, manifesto, integridade, métricas e revogação.
+O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a separação entre plano de controle e plano de dados. Quando não há fontes auxiliares elegíveis, o Origin serve objetos diretamente com as mesmas regras de autenticação, autorização, manifesto, integridade, métricas e revogação.
 
 ## Requisitos funcionais
 
@@ -12,8 +10,8 @@ Não deve existir modo Standalone. A ausência de peers, réplicas ou fontes aux
 
 * **RF01:** O servidor deve operar como **Origin** ou **Replica/Edge**.
 * **RF02:** O papel operacional do servidor deve ser configurado explicitamente.
-* **RF03:** O servidor não deve implementar um modo Standalone separado.
-* **RF04:** O Origin deve continuar funcional mesmo sem peers ou Replica/Edge disponíveis.
+* **RF03:** O Origin deve servir objetos diretamente quando não houver fontes auxiliares elegíveis.
+* **RF04:** O Origin deve preservar autorização, manifesto, integridade, métricas e revogação na entrega direta.
 * **RF05:** O Replica/Edge deve operar somente como fonte auxiliar autorizada pelo Origin.
 
 ### API S3-like

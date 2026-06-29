@@ -107,6 +107,13 @@ Acesso, réplica, objeto, usuário, aplicação, pacote de acesso e política de
 
 Revogação deve impedir novas autorizações e remover fontes revogadas da lista de fontes elegíveis.
 
+Na implementação inicial, a revogação de objeto marca o item como `REVOKED` no
+catálogo. Esse estado impede novas leituras diretas pelo Origin, emissão de
+manifesto, emissão de pacote de acesso e inclusão em sync-plan de Replica/Edge.
+
+Réplicas possuem credenciais próprias e revogáveis. Uma réplica revogada não
+consegue mais autenticar chamadas operacionais como consulta de sync-plan.
+
 ### Separação entre autenticação e autorização
 
 Autenticação prova identidade.
@@ -153,6 +160,10 @@ Sempre que possível, devem ser usados padrões e frameworks consolidados, como 
 A autenticação entre Origin e Replica/Edge é requisito explícito deste repositório.
 
 Replica/Edge é um servidor auxiliar de distribuição, mas não pode conversar com o Origin sem identidade própria, credencial válida, escopo explícito e auditoria.
+
+O contrato inicial implementa credencial Bearer própria por réplica, armazenada
+somente como hash no catálogo. Essa credencial é separada da sessão
+administrativa e das credenciais de aplicação/SDK.
 
 A comunicação entre Origin e Replica/Edge deve exigir:
 

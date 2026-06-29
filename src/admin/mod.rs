@@ -1,9 +1,10 @@
 use crate::{
     audit,
     auth::AdminSession,
-    catalog::{self, BucketSummary, NewObject, ObjectSummary, ObjectTotals},
+    catalog::{self, BucketPolicyUpdate, BucketSummary, NewObject, ObjectSummary, ObjectTotals},
     config::{self, InstanceRole},
     http::AppState,
+    security::s3_secret::s3_secret_encryption_key,
     system::{environment, resources, storage},
 };
 use anyhow::Context;
@@ -52,6 +53,33 @@ struct HealthSummary {
 pub struct CreateBucketRequest {
     name: String,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateApplicationCredentialRequest {
+    name: String,
+    scopes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateBucketPolicyRequest {
+    access_package_ttl_seconds: i64,
+    fragment_size_bytes: i64,
+    allow_replica_edge: bool,
+    allow_peer_sharing: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReplicaCredentialRequest {
+    name: String,
+    allowed_buckets: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateS3AccessKeyRequest {}
 
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
@@ -116,6 +144,20 @@ pub async fn storage_status(
     }
 }
 
+pub async fn list_audit_events(State(state): State<AppState>) -> Response {
+    match state.catalog.list_audit_events(100).await {
+        Ok(events) => Json(events).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn origin_traffic_metrics(State(state): State<AppState>) -> Response {
+    match state.catalog.origin_traffic_summary().await {
+        Ok(summary) => Json(summary).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
 pub async fn list_buckets(State(state): State<AppState>) -> Response {
     match state.catalog.list_buckets().await {
         Ok(buckets) => Json(buckets).into_response(),
@@ -136,6 +178,14 @@ pub async fn create_bucket(
                 "success",
                 &format!("bucket={}", bucket.name),
             );
+            record_admin_audit(
+                &state,
+                "bucket_created",
+                &session.username,
+                "success",
+                &format!("bucket={}", bucket.name),
+            )
+            .await;
             (StatusCode::CREATED, Json(bucket)).into_response()
         }
         Err(error) => bad_request(error),
@@ -166,7 +216,63 @@ pub async fn delete_bucket(
                 "success",
                 &format!("bucket={bucket_name}"),
             );
+            record_admin_audit(
+                &state,
+                "bucket_deleted",
+                &session.username,
+                "success",
+                &format!("bucket={bucket_name}"),
+            )
+            .await;
             Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn get_bucket_policy(
+    State(state): State<AppState>,
+    Path(bucket_name): Path<String>,
+) -> Response {
+    match state.catalog.get_bucket_policy(&bucket_name).await {
+        Ok(policy) => Json(policy).into_response(),
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn update_bucket_policy(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Path(bucket_name): Path<String>,
+    Json(payload): Json<UpdateBucketPolicyRequest>,
+) -> Response {
+    let update = BucketPolicyUpdate {
+        access_package_ttl_seconds: payload.access_package_ttl_seconds,
+        fragment_size_bytes: payload.fragment_size_bytes,
+        allow_replica_edge: payload.allow_replica_edge,
+        allow_peer_sharing: payload.allow_peer_sharing,
+    };
+    match state
+        .catalog
+        .update_bucket_policy(&bucket_name, update)
+        .await
+    {
+        Ok(policy) => {
+            audit::event(
+                "bucket_policy_updated",
+                Some(&session.username),
+                "success",
+                &format!("bucket={bucket_name}"),
+            );
+            record_admin_audit(
+                &state,
+                "bucket_policy_updated",
+                &session.username,
+                "success",
+                &format!("bucket={bucket_name}"),
+            )
+            .await;
+            Json(policy).into_response()
         }
         Err(error) => bad_request(error),
     }
@@ -196,6 +302,14 @@ pub async fn upload_object(
                 "success",
                 &format!("bucket={bucket_name}; key={}", object.key),
             );
+            record_admin_audit(
+                &state,
+                "object_uploaded",
+                &session.username,
+                "success",
+                &format!("bucket={bucket_name}; key={}", object.key),
+            )
+            .await;
             (StatusCode::CREATED, Json(object)).into_response()
         }
         Err(error) => bad_request(error),
@@ -226,9 +340,233 @@ pub async fn delete_object(
                 "success",
                 &format!("bucket={bucket_name}; key={object_key}"),
             );
+            record_admin_audit(
+                &state,
+                "object_deleted",
+                &session.username,
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}"),
+            )
+            .await;
             Json(serde_json::json!({ "ok": true })).into_response()
         }
         Err(error) => bad_request(error),
+    }
+}
+
+pub async fn revoke_object(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Path((bucket_name, object_key)): Path<(String, String)>,
+) -> Response {
+    match state.catalog.revoke_object(&bucket_name, &object_key).await {
+        Ok(()) => {
+            audit::event(
+                "object_revoked",
+                Some(&session.username),
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}"),
+            );
+            record_admin_audit(
+                &state,
+                "object_revoked",
+                &session.username,
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}"),
+            )
+            .await;
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn list_application_credentials(State(state): State<AppState>) -> Response {
+    match state.catalog.list_application_credentials().await {
+        Ok(credentials) => Json(credentials).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn create_application_credential(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<CreateApplicationCredentialRequest>,
+) -> Response {
+    let scopes = payload.scopes.unwrap_or_else(default_application_scopes);
+    match state
+        .catalog
+        .create_application_credential(&payload.name, scopes)
+        .await
+    {
+        Ok(created) => {
+            audit::event(
+                "application_credential_created",
+                Some(&session.username),
+                "success",
+                &format!("application_id={}", created.credential.id),
+            );
+            record_admin_audit(
+                &state,
+                "application_credential_created",
+                &session.username,
+                "success",
+                &format!("application_id={}", created.credential.id),
+            )
+            .await;
+            (StatusCode::CREATED, Json(created)).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn list_s3_access_keys(State(state): State<AppState>) -> Response {
+    match state.catalog.list_s3_access_keys().await {
+        Ok(keys) => Json(keys).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn create_s3_access_key(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(_payload): Json<CreateS3AccessKeyRequest>,
+) -> Response {
+    let secret_encryption_key = match s3_secret_encryption_key(&state.paths) {
+        Ok(key) => key,
+        Err(error) => return internal_error(error),
+    };
+    match state
+        .catalog
+        .create_s3_access_key(Some(&session.user_id), &secret_encryption_key)
+        .await
+    {
+        Ok(created) => {
+            audit::event(
+                "s3_access_key_created",
+                Some(&session.username),
+                "success",
+                &format!("access_key_id={}", created.key.access_key_id),
+            );
+            record_admin_audit(
+                &state,
+                "s3_access_key_created",
+                &session.username,
+                "success",
+                &format!("access_key_id={}", created.key.access_key_id),
+            )
+            .await;
+            (StatusCode::CREATED, Json(created)).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn revoke_s3_access_key(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Path(access_key_id): Path<String>,
+) -> Response {
+    match state.catalog.revoke_s3_access_key(&access_key_id).await {
+        Ok(()) => {
+            audit::event(
+                "s3_access_key_revoked",
+                Some(&session.username),
+                "success",
+                &format!("access_key_id={access_key_id}"),
+            );
+            record_admin_audit(
+                &state,
+                "s3_access_key_revoked",
+                &session.username,
+                "success",
+                &format!("access_key_id={access_key_id}"),
+            )
+            .await;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn list_replicas(State(state): State<AppState>) -> Response {
+    match state.catalog.list_replicas().await {
+        Ok(replicas) => Json(replicas).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn create_replica_credential(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<CreateReplicaCredentialRequest>,
+) -> Response {
+    match state
+        .catalog
+        .create_replica_credential(&payload.name, payload.allowed_buckets)
+        .await
+    {
+        Ok(created) => {
+            audit::event(
+                "replica_credential_created",
+                Some(&session.username),
+                "success",
+                &format!("replica_id={}", created.replica.id),
+            );
+            record_admin_audit(
+                &state,
+                "replica_credential_created",
+                &session.username,
+                "success",
+                &format!("replica_id={}", created.replica.id),
+            )
+            .await;
+            (StatusCode::CREATED, Json(created)).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn revoke_replica(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Path(replica_id): Path<String>,
+) -> Response {
+    match state.catalog.revoke_replica(&replica_id).await {
+        Ok(()) => {
+            audit::event(
+                "replica_revoked",
+                Some(&session.username),
+                "success",
+                &format!("replica_id={replica_id}"),
+            );
+            record_admin_audit(
+                &state,
+                "replica_revoked",
+                &session.username,
+                "success",
+                &format!("replica_id={replica_id}"),
+            )
+            .await;
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+async fn record_admin_audit(
+    state: &AppState,
+    event: &str,
+    username: &str,
+    outcome: &str,
+    detail: &str,
+) {
+    if let Err(error) = state
+        .catalog
+        .record_audit_event(event, Some(username), outcome, detail)
+        .await
+    {
+        audit::failure("audit_persist_failed", Some(username), &error.to_string());
     }
 }
 
@@ -352,6 +690,15 @@ async fn upload_object_inner(
 
 fn bucket_storage_dir(storage_path: PathBuf, bucket_name: &str) -> PathBuf {
     storage_path.join("buckets").join(bucket_name)
+}
+
+fn default_application_scopes() -> Vec<String> {
+    vec![
+        "origin:objects:read".to_owned(),
+        "origin:objects:write".to_owned(),
+        "pontemesh:access-package:create".to_owned(),
+        "pontemesh:manifest:read".to_owned(),
+    ]
 }
 
 fn bad_request(error: anyhow::Error) -> Response {

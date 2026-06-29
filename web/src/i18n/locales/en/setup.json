@@ -170,6 +170,30 @@
       "deleteFailed": "Failed to delete object.",
       "emptyTitle": "This bucket does not have objects yet.",
       "emptyDescription": "Upload a file to get started."
+    },
+    "settings": {
+      "title": "Settings",
+      "description": "Instance credentials and operational settings.",
+      "s3": {
+        "title": "S3 credentials",
+        "description": "Keys for S3-compatible clients.",
+        "create": "Create key",
+        "createdTitle": "Key created",
+        "createdHint": "The secret is shown only now.",
+        "accessKeyId": "Access key",
+        "secretAccessKey": "Secret key",
+        "status": "Status",
+        "active": "active",
+        "revoked": "revoked",
+        "lastUsed": "Last used",
+        "createdAt": "Created at",
+        "revoke": "Revoke key",
+        "loadFailed": "Failed to load S3 keys.",
+        "createFailed": "Failed to create S3 key.",
+        "revokeFailed": "Failed to revoke S3 key.",
+        "emptyTitle": "No S3 keys created.",
+        "emptyDescription": "Create a key to connect AWS CLI or SDKs."
+      }
     }
   }
 }

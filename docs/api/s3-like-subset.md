@@ -4,9 +4,7 @@ A proposta utiliza o modelo S3 como inspiração prática para reduzir a barreir
 
 O objetivo é permitir que aplicações já familiarizadas com armazenamento de objetos possam interagir com o **Origin** por meio de operações conhecidas, como criação de buckets, envio de objetos, consulta de metadados, leitura, recuperação por intervalo de bytes e remoção lógica.
 
-A API S3-like deve ser entendida como o contrato principal para operações fundamentais de buckets e objetos. Ela não deve, porém, limitar os recursos específicos da arquitetura Ponte Mesh.
-
-Funcionalidades próprias da distribuição híbrida, como manifestos, pacotes de acesso, políticas de fragmentação, Replica/Edge, seleção de fontes, fallback, métricas e auditoria, devem ser expostas por APIs próprias quando não houver correspondência natural no modelo S3.
+A API S3-like é o contrato principal para operações fundamentais de buckets e objetos. Manifestos, pacotes de acesso, políticas de fragmentação, Replica/Edge, seleção de fontes, fallback, métricas e auditoria ficam em APIs próprias.
 
 ## Objetivo
 
@@ -21,7 +19,7 @@ endpoint = https://s3.amazonaws.com
 poderia ser substituído por:
 
 ```text
-endpoint = https://origin.exemplo.com
+endpoint = https://origin-s3.exemplo.com
 ```
 
 Desde que a aplicação utilize apenas o subconjunto suportado, a lógica principal de envio, leitura e consulta de objetos deve permanecer familiar.
@@ -42,6 +40,24 @@ O subconjunto S3-like deve contemplar, no mínimo:
 * DELETE Object como deleção lógica;
 * URL temporária ou mecanismo equivalente.
 
+Na implementação atual, o painel web/admin e a API S3-compatible usam endpoints
+separados. O painel usa `http://localhost:8080`; o endpoint S3-compatible usa
+`http://localhost:9000`:
+
+```http
+GET /
+PUT /{bucket}
+GET /{bucket}?list-type=2
+HEAD /{bucket}
+DELETE /{bucket}
+PUT /{bucket}/{objectKey}
+HEAD /{bucket}/{objectKey}
+GET /{bucket}/{objectKey}
+DELETE /{bucket}/{objectKey}
+```
+
+Todas exigem credenciais S3 próprias e AWS Signature Version 4.
+
 Essas operações representam o núcleo de armazenamento e recuperação de objetos.
 
 ## Create Bucket
@@ -56,7 +72,7 @@ A criação de bucket deve respeitar autenticação, autorização, política ad
 
 Operação responsável por listar buckets visíveis para a entidade autenticada.
 
-A listagem deve respeitar escopos e políticas de visibilidade. Um usuário ou aplicação não deve conseguir enumerar buckets fora de sua autorização.
+A listagem respeita escopos e políticas de visibilidade.
 
 ## PUT Object
 
@@ -73,7 +89,7 @@ Ao receber um objeto, o Origin deve:
 * aplicar política de bucket ou objeto;
 * registrar métricas e eventos de auditoria quando aplicável.
 
-O envio do objeto deve ocorrer pelo Origin. Replica/Edge não deve aceitar upload arbitrário de clientes.
+O envio de objeto ocorre pelo Origin.
 
 ## List Objects
 
@@ -155,8 +171,6 @@ No Ponte Mesh, `DELETE Object` deve ser tratado como deleção lógica ou altera
 
 A deleção lógica deve impedir novas autorizações de obtenção pelo Origin.
 
-Ela não deve prometer apagamento físico imediato de cópias transitórias já existentes em peers ou Replica/Edge.
-
 Após a deleção lógica, o Origin deve:
 
 * impedir novos pacotes de acesso;
@@ -182,7 +196,7 @@ Independentemente do formato, o mecanismo deve possuir:
 
 * escopo;
 * expiração;
-* não previsibilidade;
+* imprevisibilidade;
 * possibilidade de revogação;
 * proteção contra replay quando necessário;
 * vínculo com política aplicável.
@@ -191,13 +205,13 @@ A implementação deve usar bibliotecas e mecanismos consolidados para assinatur
 
 ## Compatibilidade
 
-O objetivo da compatibilidade S3-like é facilitar adoção, não reproduzir integralmente todos os recursos do Amazon S3.
+O objetivo da compatibilidade S3-like é facilitar adoção com um subconjunto prático do Amazon S3.
 
 A compatibilidade deve ser entendida como um subconjunto prático e documentado.
 
 Aplicações já baseadas em clientes S3 devem conseguir trocar principalmente o endpoint quando utilizarem apenas as operações suportadas.
 
-Entretanto, recursos avançados do S3 que não forem necessários ao escopo inicial podem ser deixados fora do projeto ou documentados como não suportados.
+Recursos avançados podem ser documentados conforme entrarem no escopo.
 
 ## Diferença interna
 
@@ -221,11 +235,9 @@ No Ponte Mesh, a operação externa pode parecer semelhante, mas internamente o 
 
 Assim, a API S3-like reduz a barreira de integração, enquanto a API Ponte Mesh permite controlar os comportamentos específicos da distribuição híbrida.
 
-## Limites do subconjunto S3-like
+## Recursos da API Ponte Mesh
 
-O Ponte Mesh não deve forçar conceitos próprios da arquitetura híbrida dentro da API S3-like quando eles não se encaixarem naturalmente no modelo S3.
-
-Exemplos de recursos que devem ficar fora do contrato S3-like e pertencer à API Ponte Mesh:
+Recursos específicos da arquitetura híbrida pertencem à API Ponte Mesh:
 
 * emissão de pacote de acesso;
 * consulta de manifesto autorizado;
@@ -240,8 +252,6 @@ Exemplos de recursos que devem ficar fora do contrato S3-like e pertencer à API
 * revalidação de autorização durante transferências longas;
 * controle de peers autorizados;
 * políticas específicas de distribuição híbrida.
-
-Essa separação evita distorcer a API S3-like e preserva liberdade para evoluir o Ponte Mesh.
 
 ## Relação com a API Ponte Mesh
 
@@ -264,7 +274,7 @@ Regras obrigatórias:
 
 * autenticação quando exigida pela política;
 * autorização por bucket e objeto;
-* negação por padrão quando não houver política válida;
+* autorização explícita;
 * validação de escopo;
 * expiração de acessos temporários;
 * auditoria de operações sensíveis;
@@ -272,9 +282,9 @@ Regras obrigatórias:
 * validação de nomes de buckets e chaves de objetos;
 * validação de ranges;
 * limites de tamanho e taxa quando necessário;
-* respostas de erro que não exponham segredos ou detalhes internos sensíveis.
+* respostas de erro sem segredos ou detalhes internos sensíveis.
 
-A compatibilidade S3-like não deve reduzir o nível de segurança da arquitetura.
+A compatibilidade S3-like preserva o modelo de segurança da arquitetura.
 
 ## Síntese
 

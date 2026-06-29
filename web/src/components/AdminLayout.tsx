@@ -30,7 +30,7 @@ export function AdminLayout({ children, instanceName, username, onLogout }: Admi
     { to: "/objects", label: t("setup.nav.objects"), icon: HardDrive, enabled: false },
     { to: "/replicas", label: t("setup.nav.replicas"), icon: Share2, enabled: false },
     { to: "/metrics", label: t("setup.nav.metrics"), icon: BarChart3, enabled: false },
-    { to: "/settings", label: t("setup.nav.settings"), icon: Settings, enabled: false }
+    { to: "/settings", label: t("setup.nav.settings"), icon: Settings, enabled: true }
   ];
 
   useEffect(() => {

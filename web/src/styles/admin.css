@@ -364,6 +364,11 @@
   gap: 18px;
 }
 
+.settings-layout {
+  display: grid;
+  gap: 18px;
+}
+
 .bucket-sidebar,
 .object-panel {
   min-height: calc(100dvh - 128px);
@@ -476,6 +481,59 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 800;
+}
+
+.s3-keys-table .object-table__head,
+.s3-keys-table .object-table__row {
+  grid-template-columns: minmax(220px, 1fr) 120px 180px 180px 52px;
+}
+
+.secret-panel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(20, 184, 166, 0.3);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(20, 184, 166, 0.07);
+}
+
+.secret-panel > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--pm-deep-navy);
+}
+
+.secret-panel dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.secret-panel dl div {
+  display: grid;
+  gap: 4px;
+}
+
+.secret-panel dt {
+  color: var(--pm-muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.secret-panel dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--pm-deep-navy);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.secret-panel p {
+  margin: 0;
+  color: var(--pm-muted);
 }
 
 .empty-state,

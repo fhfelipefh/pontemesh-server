@@ -9,6 +9,33 @@ As métricas devem permitir comparar o comportamento do Ponte Mesh em dois cená
 
 O objetivo das métricas não é apenas medir velocidade de download, mas também avaliar se a distribuição híbrida reduz a carga do Origin sem comprometer segurança, integridade, disponibilidade e previsibilidade operacional.
 
+## Contrato implementado inicialmente
+
+O Origin registra métricas persistentes de tráfego servido diretamente pelo
+servidor central.
+
+Contrato administrativo inicial:
+
+```http
+GET /api/admin/metrics/origin-traffic
+```
+
+Resposta:
+
+```json
+{
+  "totalRequests": 2,
+  "fullObjectRequests": 1,
+  "rangeRequests": 1,
+  "totalBytesServed": 16
+}
+```
+
+Esses valores são calculados a partir de eventos persistidos em PostgreSQL para
+transferências diretas pelo Origin.
+
+Métricas de Replica/Edge e peers dependem dos contratos de reporte operacional.
+
 ## Métrica principal do projeto
 
 A métrica principal do projeto é a redução de carga no Origin.
@@ -244,7 +271,7 @@ Essas métricas indicam se objetos, fragmentos e fontes estão disponíveis para
 * tempo médio de indisponibilidade;
 * falhas por ausência de fonte elegível.
 
-A ausência de peers ou Replica/Edge não deve ser tratada como falha do servidor. Ela deve ser registrada como condição operacional em que a entrega ocorre diretamente pelo Origin.
+Quando não há peers ou Replica/Edge elegíveis, a entrega ocorre diretamente pelo Origin.
 
 ## Métricas de segurança
 

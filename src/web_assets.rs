@@ -1,4 +1,4 @@
-use crate::{auth, http::AppState};
+use crate::{auth, http::AppState, security::token::hash_session_token};
 use axum::{
     body::Body,
     extract::State,
@@ -12,12 +12,18 @@ static WEB_DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/web/dist");
 pub async fn serve(State(state): State<AppState>, headers: HeaderMap, uri: Uri) -> Response {
     let path = normalize_path(uri.path());
 
-    if route_requires_admin_session(path)
-        && state
-            .auth
-            .get_session(auth::read_auth_session(&headers).as_deref())
-            .is_none()
-    {
+    let has_admin_session = match auth::read_auth_session(&headers) {
+        Some(token) => state
+            .catalog
+            .find_admin_session_by_token_hash(&hash_session_token(&token))
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|session| session.role == "admin"),
+        None => false,
+    };
+
+    if route_requires_admin_session(path) && !has_admin_session {
         return Response::builder()
             .status(StatusCode::FOUND)
             .header(header::LOCATION, "/login")

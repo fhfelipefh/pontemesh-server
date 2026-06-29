@@ -14,7 +14,7 @@ Arquiteturas tradicionais cliente-servidor concentram todo o tráfego no servido
 
 O Ponte Mesh busca oferecer um modelo intermediário: preservar o **Origin** como ponto central de controle e, ao mesmo tempo, permitir que a transferência dos dados seja parcialmente descentralizada por meio de fragmentos.
 
-Dessa forma, o sistema pode reduzir a dependência exclusiva do servidor de origem quando houver fontes auxiliares confiáveis e autorizadas. Caso a distribuição híbrida não seja possível, apresente falhas ou não ofereça desempenho adequado, o fallback para o **Origin** garante a continuidade da obtenção do conteúdo.
+Dessa forma, o sistema reduz a dependência exclusiva do servidor de origem quando houver fontes auxiliares confiáveis e autorizadas. O **Origin** garante a continuidade da obtenção quando a entrega auxiliar não for aplicável.
 
 ## Componentes principais
 
@@ -32,7 +32,7 @@ Nó auxiliar com maior estabilidade operacional.
 
 Seu papel é replicar conteúdos autorizados e auxiliar na entrega de fragmentos, reduzindo a dependência exclusiva do Origin e de peers comuns.
 
-O Replica/Edge não substitui o Origin e não deve atuar como atalho de segurança. Sua comunicação com o Origin deve ser autenticada, autorizada, auditável e revogável.
+O Replica/Edge opera sob autorização do Origin, com comunicação autenticada, auditável e revogável.
 
 ### SDK
 
@@ -50,10 +50,10 @@ O Client utiliza o SDK para acessar conteúdos sem precisar lidar diretamente co
 
 * Toda obtenção de conteúdo deve começar com autorização do Origin.
 * O Origin é a autoridade central sobre publicação, disponibilidade, autenticação, autorização e revogação.
-* O P2P deve ser utilizado como mecanismo de aceleração, não como substituto do controle central.
-* Nós Replica/Edge devem atuar como reforço de disponibilidade, não como fonte autônoma de autorização.
+* O P2P é mecanismo de aceleração subordinado ao controle central.
+* Nós Replica/Edge reforçam disponibilidade dentro do escopo autorizado pelo Origin.
 * Todo fragmento recebido de qualquer fonte deve ser validado por integridade antes de ser aceito.
-* Fragmentos inválidos, incompletos ou não autorizados devem ser descartados.
+* Fragmentos aceitos precisam corresponder ao manifesto autorizado.
 * Revogação e expiração devem impedir novas autorizações de acesso.
 * O fallback para o Origin deve preservar fragmentos já validados, evitando reiniciar a obtenção completa do objeto.
 * A arquitetura deve manter comportamento previsível mesmo quando peers estiverem indisponíveis, instáveis ou atrás de NAT e firewalls.
@@ -95,6 +95,18 @@ Depois compile o servidor Rust:
 cargo build
 ```
 
+O servidor exige PostgreSQL. Defina obrigatoriamente:
+
+```text
+PONTEMESH_DATABASE_URL=postgres://pontemesh:pontemesh@postgres:5432/pontemesh
+```
+
+Em Docker, `postgres` é o nome do serviço na rede dedicada. Em execução direta
+fora do Docker, substitua o host da URL pelo endereço do PostgreSQL acessível ao
+processo local.
+
+O servidor usa PostgreSQL como banco da aplicação e falha na inicialização se a conexão estiver indisponível.
+
 Para gerar o binário otimizado:
 
 ```bash
@@ -125,9 +137,11 @@ Por padrão, o servidor utiliza:
 
 ```text
 PONTEMESH_HOME=/var/pontemesh_home
+PONTEMESH_DATABASE_URL=<obrigatório>
 PONTEMESH_STORAGE_PATH=/var/pontemesh_home/data/storage
 PONTEMESH_HTTP_HOST=0.0.0.0
-PONTEMESH_HTTP_PORT=8080
+PONTEMESH_WEB_PORT=8080
+PONTEMESH_S3_PORT=9000
 ```
 
 O diretório persistente da instância é `PONTEMESH_HOME`. Em containers, monte um
@@ -139,21 +153,23 @@ monte essa pasta como volume em `/var/pontemesh_home`, ou defina
 Também é possível executar com Docker:
 
 ```bash
-docker build -t pontemesh-server .
+docker compose -p ponte-mesh -f docker/docker-compose.yml up -d --build
 ```
 
-```bash
-docker run \
-  --name pontemesh-server \
-  -p 8080:8080 \
-  -v pontemesh_home:/var/pontemesh_home \
-  pontemesh-server
-```
+O `docker-compose.yml` sobe o PostgreSQL e passa
+`PONTEMESH_DATABASE_URL=postgres://pontemesh:pontemesh@postgres:5432/pontemesh`
+para o servidor.
+
+O Docker Compose sobe o projeto `ponte-mesh` com os serviços `server` e
+`postgres`, agrupados como uma única aplicação no Docker Desktop. O PostgreSQL
+fica na rede interna do Compose. Com PostgreSQL 18, o volume
+`pontemesh_postgres` é montado em `/var/lib/postgresql`.
 
 Acesse:
 
 ```text
-http://localhost:8080
+Painel web: http://localhost:8080
+Endpoint S3-compatible: http://localhost:9000
 ```
 
 ## Comando único para construção e execução
@@ -164,13 +180,14 @@ Todos os comandos acima podem ser resumidos em um script único, que prepara o a
 ./scripts/start-panel.sh
 ```
 
-Esse comando faz todo o fluxo automaticamente:
+Esse comando executa o fluxo local:
 
-* instala dependências do frontend;
-* constrói o frontend React/Vite;
+* instala dependências e constrói o frontend;
 * constrói o backend Rust em modo release;
-* constrói a imagem Docker;
-* executa o container com volume persistente;
+* chama Docker Compose com o projeto `ponte-mesh`;
+* constrói a imagem Docker pelo Compose;
+* sobe `server` e `postgres` como serviços do mesmo projeto;
+* aguarda o PostgreSQL saudável;
 * espera o servidor responder;
 * abre uma nova guia do navegador em `http://localhost:8080`.
 
@@ -178,17 +195,16 @@ O comando usa, por padrão:
 
 ```text
 imagem Docker: pontemesh-server:local
-container: pontemesh-server
-volume: pontemesh_home
-porta local: 8080
+projeto Compose: ponte-mesh
+serviços: server, postgres
+painel web: http://localhost:8080
+endpoint S3-compatible: http://localhost:9000
 ```
 
 É possível sobrescrever esses valores por variáveis de ambiente:
 
 ```bash
-PONTEMESH_HOST_PORT=8081 \
-PONTEMESH_CONTAINER_NAME=pontemesh-server-dev \
-PONTEMESH_VOLUME_NAME=pontemesh_home_dev \
+PONTEMESH_WEB_HOST_PORT=8081 \
 ./scripts/start-panel.sh
 ```
 
@@ -196,6 +212,63 @@ Nesse exemplo, o navegador será aberto em:
 
 ```text
 http://localhost:8081
+```
+
+Para reiniciar um ambiente de desenvolvimento sem afetar outros projetos, use:
+
+```bash
+./scripts/start-panel.sh --reset-dev
+```
+
+Essa opção executa o reset do projeto Compose:
+
+```bash
+docker compose -p ponte-mesh -f docker/docker-compose.yml down --volumes --remove-orphans
+```
+
+Em produção, faça backup ou migração antes de remover volumes.
+
+## Endpoint S3-compatible
+
+O painel web/admin e a API S3-compatible usam portas separadas:
+
+```text
+Painel web/admin: http://localhost:8080
+API S3-compatible: http://localhost:9000
+```
+
+Clientes S3 usam path-style com:
+
+```text
+endpoint_url = http://localhost:9000
+```
+
+Configure uma credencial S3 bootstrap por ambiente:
+
+```bash
+export PONTEMESH_S3_BOOTSTRAP_ACCESS_KEY_ID=pm-local
+export PONTEMESH_S3_BOOTSTRAP_SECRET_ACCESS_KEY='troque-este-segredo'
+./scripts/start-panel.sh
+```
+
+Exemplos com AWS CLI:
+
+```bash
+AWS_ACCESS_KEY_ID=pm-local \
+AWS_SECRET_ACCESS_KEY='troque-este-segredo' \
+aws --endpoint-url http://localhost:9000 s3api list-buckets
+```
+
+```bash
+AWS_ACCESS_KEY_ID=pm-local \
+AWS_SECRET_ACCESS_KEY='troque-este-segredo' \
+aws --endpoint-url http://localhost:9000 s3api create-bucket --bucket test-bucket
+```
+
+```bash
+AWS_ACCESS_KEY_ID=pm-local \
+AWS_SECRET_ACCESS_KEY='troque-este-segredo' \
+aws --endpoint-url http://localhost:9000 s3api put-object --bucket test-bucket --key hello.txt --body ./hello.txt
 ```
 
 ## Configuração inicial
@@ -210,16 +283,16 @@ O token é salvo em:
 
 Ele também aparece nos logs do servidor.
 
-Com Docker, visualize os logs com:
+Com Docker Compose, visualize os logs com:
 
 ```bash
-docker logs pontemesh-server
+docker compose -p ponte-mesh -f docker/docker-compose.yml logs server
 ```
 
 Ou leia o token diretamente:
 
 ```bash
-docker exec pontemesh-server cat /var/pontemesh_home/secrets/initialAdminToken
+docker compose -p ponte-mesh -f docker/docker-compose.yml exec server cat /var/pontemesh_home/secrets/initialAdminToken
 ```
 
 Depois, acesse:

@@ -1,15 +1,16 @@
-use crate::config::PontemeshHome;
+use crate::{
+    config,
+    security::{random::secure_url_token, token::hash_bearer_token},
+};
 use anyhow::{Context, bail};
 use serde::Serialize;
-use sqlx::{
-    Row, SqlitePool,
-    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
-};
-use std::{path::Path, str::FromStr};
+use sqlx::{PgPool, PgPoolOptions, PgRow, Postgres};
+use sqlx_core::{query::query, query_scalar::query_scalar, row::Row, transaction::Transaction};
+use std::{net::IpAddr, path::Path};
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,12 +33,42 @@ pub struct ObjectSummary {
     pub state: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ObjectRecord {
+    pub key: String,
+    pub size_bytes: i64,
+    pub content_type: String,
+    pub sha256: String,
+    pub storage_path: String,
+    pub created_at: String,
+    pub state: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectTotals {
     pub total_buckets: i64,
     pub total_objects: i64,
     pub total_object_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketPolicy {
+    pub bucket_name: String,
+    pub access_package_ttl_seconds: i64,
+    pub fragment_size_bytes: i64,
+    pub allow_replica_edge: bool,
+    pub allow_peer_sharing: bool,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BucketPolicyUpdate {
+    pub access_package_ttl_seconds: i64,
+    pub fragment_size_bytes: i64,
+    pub allow_replica_edge: bool,
+    pub allow_peer_sharing: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -50,88 +81,328 @@ pub struct NewObject {
     pub storage_path: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationCredentialSummary {
+    pub id: String,
+    pub name: String,
+    pub scopes: Vec<String>,
+    pub created_at: String,
+    pub revoked: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApplicationCredential {
+    pub id: String,
+    pub name: String,
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct S3AccessKey {
+    pub access_key_id: String,
+    pub secret_key_hash: String,
+    pub secret_access_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S3AccessKeySummary {
+    pub id: String,
+    pub access_key_id: String,
+    pub user_id: Option<String>,
+    pub is_active: bool,
+    pub created_at: String,
+    pub revoked_at: Option<String>,
+    pub last_used_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedS3AccessKey {
+    pub key: S3AccessKeySummary,
+    pub secret_access_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedApplicationCredential {
+    pub credential: ApplicationCredentialSummary,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaSummary {
+    pub id: String,
+    pub name: String,
+    pub allowed_buckets: Vec<String>,
+    pub created_at: String,
+    pub revoked: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplicaCredential {
+    pub id: String,
+    pub name: String,
+    pub allowed_buckets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedReplicaCredential {
+    pub replica: ReplicaSummary,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaSyncObject {
+    pub bucket: String,
+    pub key: String,
+    pub size_bytes: i64,
+    pub content_type: String,
+    pub sha256: String,
+    pub state: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessPackageRecord {
+    pub id: String,
+    pub package_token: String,
+    pub application_id: String,
+    pub bucket_name: String,
+    pub object_key: String,
+    pub expires_at: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEventRecord {
+    pub id: String,
+    pub event: String,
+    pub principal: Option<String>,
+    pub outcome: String,
+    pub detail: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OriginTrafficSummary {
+    pub total_requests: i64,
+    pub full_object_requests: i64,
+    pub range_requests: i64,
+    pub total_bytes_served: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct UserRecord {
+    pub id: String,
+    pub username: String,
+    pub password_hash: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdminSessionRecord {
+    pub user_id: String,
+    pub username: String,
+    pub role: String,
+}
+
 impl Catalog {
-    pub async fn initialize(paths: &PontemeshHome) -> anyhow::Result<Self> {
-        let database_file = paths.catalog_database_file();
-        if let Some(parent) = database_file.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create catalog directory {}", parent.display())
-            })?;
-        }
+    pub async fn initialize() -> anyhow::Result<Self> {
+        let database_url = config::database_url_from_env()?;
+        Self::initialize_with_url(&database_url).await
+    }
 
-        let options =
-            SqliteConnectOptions::from_str(&format!("sqlite://{}", database_file.display()))?
-                .create_if_missing(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(5)
-            .connect_with(options)
+    pub async fn initialize_with_url(database_url: &str) -> anyhow::Result<Self> {
+        let pool = PgPoolOptions::new()
+            .max_connections(10)
+            .connect(&database_url)
             .await
-            .with_context(|| {
-                format!(
-                    "failed to open catalog database {}",
-                    database_file.display()
-                )
-            })?;
+            .context("failed to connect to PostgreSQL using PONTEMESH_DATABASE_URL")?;
 
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS buckets (
-                name TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL
-            );
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .context("failed to migrate buckets table")?;
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS objects (
-                id TEXT PRIMARY KEY,
-                bucket_name TEXT NOT NULL,
-                key TEXT NOT NULL,
-                size_bytes INTEGER NOT NULL,
-                content_type TEXT NOT NULL,
-                sha256 TEXT NOT NULL,
-                storage_path TEXT NOT NULL,
-                state TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                deleted_at TEXT,
-                FOREIGN KEY(bucket_name) REFERENCES buckets(name)
-            );
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .context("failed to migrate objects table")?;
-
-        sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_active_key ON objects(bucket_name, key) WHERE deleted_at IS NULL;",
-        )
-        .execute(&pool)
-        .await
-        .context("failed to migrate objects unique index")?;
+        sqlx_core::migrate::Migrator::new(Path::new("./migrations"))
+            .await
+            .context("failed to load PostgreSQL migrations")?
+            .run(&pool)
+            .await
+            .context("failed to run PostgreSQL migrations")?;
 
         Ok(Self { pool })
     }
 
+    #[cfg(test)]
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     pub async fn database_connected(&self) -> bool {
-        sqlx::query("SELECT 1").execute(&self.pool).await.is_ok()
+        query("SELECT 1").execute(&self.pool).await.is_ok()
+    }
+
+    pub async fn create_initial_admin_user(
+        &self,
+        username: &str,
+        password_hash: &str,
+    ) -> anyhow::Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin setup transaction")?;
+        query(
+            r#"
+            INSERT INTO users (username, password_hash, role)
+            VALUES ($1, $2, 'admin')
+            "#,
+        )
+        .bind(username)
+        .bind(password_hash)
+        .execute(&mut *tx)
+        .await
+        .context("failed to create initial admin user")?;
+
+        record_audit_event_in_tx(
+            &mut tx,
+            "setup_completed",
+            None,
+            None,
+            None,
+            serde_json::json!({
+                "principal": username,
+                "outcome": "success",
+                "detail": "initial admin user created"
+            }),
+        )
+        .await?;
+        tx.commit()
+            .await
+            .context("failed to commit setup transaction")?;
+        Ok(())
+    }
+
+    pub async fn find_active_user_by_username(
+        &self,
+        username: &str,
+    ) -> anyhow::Result<Option<UserRecord>> {
+        let row = query(
+            r#"
+            SELECT id::text, username, password_hash, role
+            FROM users
+            WHERE username = $1 AND is_active = TRUE
+            "#,
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load user")?;
+
+        Ok(row.map(|row| UserRecord {
+            id: row.get("id"),
+            username: row.get("username"),
+            password_hash: row.get("password_hash"),
+            role: row.get("role"),
+        }))
+    }
+
+    pub async fn create_user_session(
+        &self,
+        user_id: &str,
+        token_hash: &str,
+        user_agent: Option<&str>,
+        ip_address: Option<IpAddr>,
+    ) -> anyhow::Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin login transaction")?;
+        query("UPDATE users SET last_login_at = now(), updated_at = now() WHERE id = $1::uuid")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed to update user login timestamp")?;
+
+        query(
+            r#"
+            INSERT INTO sessions (
+                user_id, session_token_hash, expires_at, user_agent, ip_address
+            )
+            VALUES ($1::uuid, $2, now() + interval '12 hours', $3, $4::inet)
+            "#,
+        )
+        .bind(user_id)
+        .bind(token_hash)
+        .bind(user_agent)
+        .bind(ip_address.map(|value| value.to_string()))
+        .execute(&mut *tx)
+        .await
+        .context("failed to create session")?;
+
+        tx.commit()
+            .await
+            .context("failed to commit login transaction")?;
+        Ok(())
+    }
+
+    pub async fn find_admin_session_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> anyhow::Result<Option<AdminSessionRecord>> {
+        let row = query(
+            r#"
+            SELECT u.id::text AS user_id, u.username, u.role
+            FROM sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.session_token_hash = $1
+              AND s.revoked_at IS NULL
+              AND s.expires_at > now()
+              AND u.is_active = TRUE
+            "#,
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load session")?;
+
+        Ok(row.map(|row| AdminSessionRecord {
+            user_id: row.get("user_id"),
+            username: row.get("username"),
+            role: row.get("role"),
+        }))
+    }
+
+    pub async fn revoke_session_by_token_hash(&self, token_hash: &str) -> anyhow::Result<()> {
+        query(
+            "UPDATE sessions SET revoked_at = now() WHERE session_token_hash = $1 AND revoked_at IS NULL",
+        )
+        .bind(token_hash)
+        .execute(&self.pool)
+        .await
+        .context("failed to revoke session")?;
+        Ok(())
     }
 
     pub async fn list_buckets(&self) -> anyhow::Result<Vec<BucketSummary>> {
-        let rows = sqlx::query(
+        let rows = query(
             r#"
             SELECT
                 b.name,
                 b.created_at,
-                COUNT(o.id) AS object_count,
-                COALESCE(SUM(o.size_bytes), 0) AS total_bytes
+                COUNT(o.id)::bigint AS object_count,
+                COALESCE(SUM(v.size_bytes), 0)::bigint AS total_bytes
             FROM buckets b
             LEFT JOIN objects o
-                ON o.bucket_name = b.name AND o.deleted_at IS NULL
-            GROUP BY b.name, b.created_at
+                ON o.bucket_id = b.id AND o.deleted_at IS NULL
+            LEFT JOIN object_versions v
+                ON v.id = o.current_version_id
+            WHERE b.deleted_at IS NULL
+            GROUP BY b.id, b.name, b.created_at
             ORDER BY b.created_at DESC, b.name ASC
             "#,
         )
@@ -143,7 +414,7 @@ impl Catalog {
             .into_iter()
             .map(|row| BucketSummary {
                 name: row.get("name"),
-                created_at: row.get("created_at"),
+                created_at: format_datetime(row.get("created_at")),
                 object_count: row.get("object_count"),
                 total_bytes: row.get("total_bytes"),
             })
@@ -152,18 +423,20 @@ impl Catalog {
 
     pub async fn get_bucket(&self, name: &str) -> anyhow::Result<Option<BucketSummary>> {
         validate_bucket_name(name)?;
-        let row = sqlx::query(
+        let row = query(
             r#"
             SELECT
                 b.name,
                 b.created_at,
-                COUNT(o.id) AS object_count,
-                COALESCE(SUM(o.size_bytes), 0) AS total_bytes
+                COUNT(o.id)::bigint AS object_count,
+                COALESCE(SUM(v.size_bytes), 0)::bigint AS total_bytes
             FROM buckets b
             LEFT JOIN objects o
-                ON o.bucket_name = b.name AND o.deleted_at IS NULL
-            WHERE b.name = ?
-            GROUP BY b.name, b.created_at
+                ON o.bucket_id = b.id AND o.deleted_at IS NULL
+            LEFT JOIN object_versions v
+                ON v.id = o.current_version_id
+            WHERE b.name = $1 AND b.deleted_at IS NULL
+            GROUP BY b.id, b.name, b.created_at
             "#,
         )
         .bind(name)
@@ -173,7 +446,7 @@ impl Catalog {
 
         Ok(row.map(|row| BucketSummary {
             name: row.get("name"),
-            created_at: row.get("created_at"),
+            created_at: format_datetime(row.get("created_at")),
             object_count: row.get("object_count"),
             total_bytes: row.get("total_bytes"),
         }))
@@ -181,63 +454,171 @@ impl Catalog {
 
     pub async fn create_bucket(&self, name: &str) -> anyhow::Result<BucketSummary> {
         validate_bucket_name(name)?;
-        let created_at = chrono::Utc::now().to_rfc3339();
-        let result = sqlx::query("INSERT INTO buckets (name, created_at) VALUES (?, ?)")
-            .bind(name)
-            .bind(&created_at)
-            .execute(&self.pool)
-            .await;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin bucket transaction")?;
+        let row = query(
+            r#"
+            INSERT INTO buckets (name)
+            VALUES ($1)
+            RETURNING id::text, name, created_at
+            "#,
+        )
+        .bind(name)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(map_unique_violation("bucket already exists"))?;
 
-        match result {
-            Ok(_) => Ok(BucketSummary {
-                name: name.to_owned(),
-                object_count: 0,
-                total_bytes: 0,
-                created_at,
-            }),
-            Err(error) if is_unique_violation(&error) => bail!("bucket already exists: {name}"),
-            Err(error) => Err(error).context("failed to create bucket"),
-        }
+        query(
+            r#"
+            INSERT INTO bucket_policies (bucket_id)
+            VALUES ($1::uuid)
+            ON CONFLICT (bucket_id) DO NOTHING
+            "#,
+        )
+        .bind(row.get::<String, _>("id"))
+        .execute(&mut *tx)
+        .await
+        .context("failed to create default bucket policy")?;
+
+        tx.commit()
+            .await
+            .context("failed to commit bucket transaction")?;
+        Ok(BucketSummary {
+            name: row.get("name"),
+            object_count: 0,
+            total_bytes: 0,
+            created_at: format_datetime(row.get("created_at")),
+        })
     }
 
     pub async fn delete_bucket(&self, name: &str) -> anyhow::Result<()> {
         validate_bucket_name(name)?;
-        let object_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM objects WHERE bucket_name = ? AND deleted_at IS NULL",
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin bucket delete transaction")?;
+        let bucket_id = bucket_id_in_tx(&mut tx, name).await?;
+        let object_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM objects WHERE bucket_id = $1::uuid AND deleted_at IS NULL",
         )
-        .bind(name)
-        .fetch_one(&self.pool)
+        .bind(&bucket_id)
+        .fetch_one(&mut *tx)
         .await
         .context("failed to count bucket objects")?;
         if object_count > 0 {
             bail!("bucket must be empty before it can be deleted");
         }
 
-        sqlx::query("DELETE FROM objects WHERE bucket_name = ? AND deleted_at IS NOT NULL")
-            .bind(name)
-            .execute(&self.pool)
-            .await
-            .context("failed to prune deleted bucket objects")?;
-
-        let result = sqlx::query("DELETE FROM buckets WHERE name = ?")
-            .bind(name)
-            .execute(&self.pool)
-            .await
-            .context("failed to delete bucket")?;
+        let result = query(
+            "UPDATE buckets SET deleted_at = now(), updated_at = now() WHERE id = $1::uuid AND deleted_at IS NULL",
+        )
+        .bind(bucket_id)
+        .execute(&mut *tx)
+        .await
+        .context("failed to delete bucket")?;
         if result.rows_affected() == 0 {
             bail!("bucket not found: {name}");
         }
+        tx.commit()
+            .await
+            .context("failed to commit bucket delete")?;
         Ok(())
+    }
+
+    pub async fn get_bucket_policy(&self, bucket_name: &str) -> anyhow::Result<BucketPolicy> {
+        validate_bucket_name(bucket_name)?;
+        let row = query(
+            r#"
+            SELECT
+                b.name,
+                p.access_package_ttl_seconds,
+                p.fragment_size_bytes,
+                p.allow_replica_edge,
+                p.allow_peer_sharing,
+                p.updated_at
+            FROM bucket_policies p
+            JOIN buckets b ON b.id = p.bucket_id
+            WHERE b.name = $1 AND b.deleted_at IS NULL
+            "#,
+        )
+        .bind(bucket_name)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load bucket policy")?;
+
+        match row {
+            Some(row) => Ok(bucket_policy_from_row(row)),
+            None => bail!("bucket not found: {bucket_name}"),
+        }
+    }
+
+    pub async fn update_bucket_policy(
+        &self,
+        bucket_name: &str,
+        update: BucketPolicyUpdate,
+    ) -> anyhow::Result<BucketPolicy> {
+        validate_bucket_name(bucket_name)?;
+        validate_bucket_policy(&update)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin bucket policy transaction")?;
+        let bucket_id = bucket_id_in_tx(&mut tx, bucket_name).await?;
+        let row = query(
+            r#"
+            INSERT INTO bucket_policies (
+                bucket_id, access_package_ttl_seconds, fragment_size_bytes,
+                allow_replica_edge, allow_peer_sharing, updated_at
+            )
+            VALUES ($1::uuid, $2, $3, $4, $5, now())
+            ON CONFLICT (bucket_id) DO UPDATE SET
+                access_package_ttl_seconds = EXCLUDED.access_package_ttl_seconds,
+                fragment_size_bytes = EXCLUDED.fragment_size_bytes,
+                allow_replica_edge = EXCLUDED.allow_replica_edge,
+                allow_peer_sharing = EXCLUDED.allow_peer_sharing,
+                updated_at = now()
+            RETURNING access_package_ttl_seconds, fragment_size_bytes,
+                allow_replica_edge, allow_peer_sharing, updated_at
+            "#,
+        )
+        .bind(bucket_id)
+        .bind(update.access_package_ttl_seconds)
+        .bind(update.fragment_size_bytes)
+        .bind(update.allow_replica_edge)
+        .bind(update.allow_peer_sharing)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to update bucket policy")?;
+
+        tx.commit()
+            .await
+            .context("failed to commit bucket policy")?;
+        Ok(BucketPolicy {
+            bucket_name: bucket_name.to_owned(),
+            access_package_ttl_seconds: row.get("access_package_ttl_seconds"),
+            fragment_size_bytes: row.get("fragment_size_bytes"),
+            allow_replica_edge: row.get("allow_replica_edge"),
+            allow_peer_sharing: row.get("allow_peer_sharing"),
+            updated_at: format_datetime(row.get("updated_at")),
+        })
     }
 
     pub async fn list_objects(&self, bucket_name: &str) -> anyhow::Result<Vec<ObjectSummary>> {
         validate_bucket_name(bucket_name)?;
-        let rows = sqlx::query(
+        let rows = query(
             r#"
-            SELECT key, size_bytes, content_type, sha256, created_at, state
-            FROM objects
-            WHERE bucket_name = ? AND deleted_at IS NULL
-            ORDER BY created_at DESC, key ASC
+            SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
+                v.created_at, o.state
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            JOIN object_versions v ON v.id = o.current_version_id
+            WHERE b.name = $1 AND b.deleted_at IS NULL AND o.deleted_at IS NULL
+            ORDER BY v.created_at DESC, o.object_key ASC
             "#,
         )
         .bind(bucket_name)
@@ -245,63 +626,90 @@ impl Catalog {
         .await
         .context("failed to list objects")?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| ObjectSummary {
-                key: row.get("key"),
-                size_bytes: row.get("size_bytes"),
-                content_type: row.get("content_type"),
-                sha256: row.get("sha256"),
-                created_at: row.get("created_at"),
-                state: row.get("state"),
-            })
-            .collect())
+        Ok(rows.into_iter().map(object_summary_from_row).collect())
     }
 
     pub async fn insert_object(&self, object: NewObject) -> anyhow::Result<ObjectSummary> {
+        self.insert_or_replace_object(object, false).await
+    }
+
+    pub async fn put_object(&self, object: NewObject) -> anyhow::Result<ObjectSummary> {
+        self.insert_or_replace_object(object, true).await
+    }
+
+    async fn insert_or_replace_object(
+        &self,
+        object: NewObject,
+        replace_existing: bool,
+    ) -> anyhow::Result<ObjectSummary> {
         validate_bucket_name(&object.bucket_name)?;
         validate_object_key(&object.key)?;
-        if self.get_bucket(&object.bucket_name).await?.is_none() {
-            bail!("bucket not found: {}", object.bucket_name);
-        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin object transaction")?;
+        let bucket_id = bucket_id_in_tx(&mut tx, &object.bucket_name).await?;
 
-        let created_at = chrono::Utc::now().to_rfc3339();
-        let state = "AVAILABLE";
-        let result = sqlx::query(
+        let object_id = if replace_existing {
+            upsert_object_in_tx(&mut tx, &bucket_id, &object.key).await?
+        } else {
+            insert_object_shell_in_tx(&mut tx, &bucket_id, &object.key).await?
+        };
+
+        let version_number: i64 = query_scalar(
+            "SELECT COALESCE(MAX(version_number), 0) + 1 FROM object_versions WHERE object_id = $1::uuid",
+        )
+        .bind(&object_id)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to allocate object version")?;
+
+        let version_row = query(
             r#"
-            INSERT INTO objects (
-                id, bucket_name, key, size_bytes, content_type, sha256,
-                storage_path, state, created_at
+            INSERT INTO object_versions (
+                object_id, version_number, size_bytes, content_type,
+                hash_algorithm, object_hash, storage_path
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ($1::uuid, $2, $3, $4, 'SHA-256', $5, $6)
+            RETURNING id::text, created_at
             "#,
         )
-        .bind(uuid::Uuid::new_v4().to_string())
-        .bind(&object.bucket_name)
-        .bind(&object.key)
+        .bind(&object_id)
+        .bind(version_number)
         .bind(object.size_bytes)
         .bind(&object.content_type)
         .bind(&object.sha256)
         .bind(&object.storage_path)
-        .bind(state)
-        .bind(&created_at)
-        .execute(&self.pool)
-        .await;
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to register object version")?;
 
-        match result {
-            Ok(_) => Ok(ObjectSummary {
-                key: object.key,
-                size_bytes: object.size_bytes,
-                content_type: object.content_type,
-                sha256: object.sha256,
-                created_at,
-                state: state.to_owned(),
-            }),
-            Err(error) if is_unique_violation(&error) => {
-                bail!("object already exists in bucket: {}", object.key)
-            }
-            Err(error) => Err(error).context("failed to register object"),
-        }
+        query(
+            r#"
+            UPDATE objects
+            SET current_version_id = $1::uuid, state = 'AVAILABLE',
+                deleted_at = NULL, updated_at = now()
+            WHERE id = $2::uuid
+            "#,
+        )
+        .bind(version_row.get::<String, _>("id"))
+        .bind(&object_id)
+        .execute(&mut *tx)
+        .await
+        .context("failed to update current object version")?;
+
+        tx.commit()
+            .await
+            .context("failed to commit object transaction")?;
+        Ok(ObjectSummary {
+            key: object.key,
+            size_bytes: object.size_bytes,
+            content_type: object.content_type,
+            sha256: object.sha256,
+            created_at: format_datetime(version_row.get("created_at")),
+            state: "AVAILABLE".to_owned(),
+        })
     }
 
     pub async fn get_object(
@@ -309,13 +717,35 @@ impl Catalog {
         bucket_name: &str,
         object_key: &str,
     ) -> anyhow::Result<Option<ObjectSummary>> {
+        Ok(self
+            .get_object_record(bucket_name, object_key)
+            .await?
+            .map(|record| ObjectSummary {
+                key: record.key,
+                size_bytes: record.size_bytes,
+                content_type: record.content_type,
+                sha256: record.sha256,
+                created_at: record.created_at,
+                state: record.state,
+            }))
+    }
+
+    pub async fn get_object_record(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<Option<ObjectRecord>> {
         validate_bucket_name(bucket_name)?;
         validate_object_key(object_key)?;
-        let row = sqlx::query(
+        let row = query(
             r#"
-            SELECT key, size_bytes, content_type, sha256, created_at, state
-            FROM objects
-            WHERE bucket_name = ? AND key = ? AND deleted_at IS NULL
+            SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
+                v.storage_path, v.created_at, o.state
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            JOIN object_versions v ON v.id = o.current_version_id
+            WHERE b.name = $1 AND o.object_key = $2
+              AND b.deleted_at IS NULL AND o.deleted_at IS NULL
             "#,
         )
         .bind(bucket_name)
@@ -324,53 +754,833 @@ impl Catalog {
         .await
         .context("failed to load object")?;
 
-        Ok(row.map(|row| ObjectSummary {
-            key: row.get("key"),
-            size_bytes: row.get("size_bytes"),
-            content_type: row.get("content_type"),
-            sha256: row.get("sha256"),
-            created_at: row.get("created_at"),
-            state: row.get("state"),
-        }))
+        Ok(row.map(object_record_from_row))
     }
 
     pub async fn delete_object(&self, bucket_name: &str, object_key: &str) -> anyhow::Result<()> {
+        self.set_object_state(bucket_name, object_key, "DELETED", true)
+            .await
+    }
+
+    pub async fn revoke_object(&self, bucket_name: &str, object_key: &str) -> anyhow::Result<()> {
+        self.set_object_state(bucket_name, object_key, "REVOKED", false)
+            .await
+    }
+
+    async fn set_object_state(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        state: &str,
+        deleted: bool,
+    ) -> anyhow::Result<()> {
         validate_bucket_name(bucket_name)?;
         validate_object_key(object_key)?;
-        let deleted_at = chrono::Utc::now().to_rfc3339();
-        let result = sqlx::query(
-            "UPDATE objects SET state = 'DELETED', deleted_at = ? WHERE bucket_name = ? AND key = ? AND deleted_at IS NULL",
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin object state transaction")?;
+        let row = query(
+            r#"
+            SELECT o.id::text
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            WHERE b.name = $1 AND o.object_key = $2
+              AND b.deleted_at IS NULL AND o.deleted_at IS NULL
+            "#,
         )
-        .bind(deleted_at)
         .bind(bucket_name)
         .bind(object_key)
-        .execute(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
-        .context("failed to delete object")?;
-        if result.rows_affected() == 0 {
+        .context("failed to load object for state change")?;
+        let Some(row) = row else {
             bail!("object not found: {object_key}");
-        }
+        };
+        let deleted_at = if deleted { "now()" } else { "NULL" };
+        let update_sql = format!(
+            "UPDATE objects SET state = $1, deleted_at = {deleted_at}, updated_at = now() WHERE id = $2::uuid"
+        );
+        query(&update_sql)
+            .bind(state)
+            .bind(row.get::<String, _>("id"))
+            .execute(&mut *tx)
+            .await
+            .context("failed to update object state")?;
+        tx.commit().await.context("failed to commit object state")?;
         Ok(())
     }
 
     pub async fn totals(&self) -> anyhow::Result<ObjectTotals> {
-        let total_buckets: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM buckets")
-            .fetch_one(&self.pool)
-            .await
-            .context("failed to count buckets")?;
-        let row = sqlx::query(
-            "SELECT COUNT(*) AS total_objects, COALESCE(SUM(size_bytes), 0) AS total_object_bytes FROM objects WHERE deleted_at IS NULL",
+        let row = query(
+            r#"
+            SELECT
+                (SELECT COUNT(*)::bigint FROM buckets WHERE deleted_at IS NULL) AS total_buckets,
+                COUNT(o.id)::bigint AS total_objects,
+                COALESCE(SUM(v.size_bytes), 0)::bigint AS total_object_bytes
+            FROM objects o
+            JOIN object_versions v ON v.id = o.current_version_id
+            WHERE o.deleted_at IS NULL
+            "#,
         )
         .fetch_one(&self.pool)
         .await
         .context("failed to count objects")?;
 
         Ok(ObjectTotals {
-            total_buckets,
+            total_buckets: row.get("total_buckets"),
             total_objects: row.get("total_objects"),
             total_object_bytes: row.get("total_object_bytes"),
         })
     }
+
+    pub async fn create_application_credential(
+        &self,
+        name: &str,
+        scopes: Vec<String>,
+    ) -> anyhow::Result<CreatedApplicationCredential> {
+        let name = name.trim();
+        if name.is_empty() {
+            bail!("application name cannot be empty");
+        }
+        if scopes.is_empty() {
+            bail!("application credential must include at least one scope");
+        }
+
+        let token = secure_url_token("pm_app_", 32);
+        let token_hash = hash_bearer_token(&token);
+        let scopes_json = serde_json::to_value(&scopes).context("failed to serialize scopes")?;
+        let row = query(
+            r#"
+            INSERT INTO application_credentials (name, token_hash, scopes)
+            VALUES ($1, $2, $3)
+            RETURNING id::text, name, scopes, created_at, revoked_at
+            "#,
+        )
+        .bind(name)
+        .bind(token_hash)
+        .bind(scopes_json)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to create application credential")?;
+
+        Ok(CreatedApplicationCredential {
+            credential: application_summary_from_row(row)?,
+            token,
+        })
+    }
+
+    pub async fn list_application_credentials(
+        &self,
+    ) -> anyhow::Result<Vec<ApplicationCredentialSummary>> {
+        let rows = query(
+            r#"
+            SELECT id::text, name, scopes, created_at, revoked_at
+            FROM application_credentials
+            ORDER BY created_at DESC, name ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list application credentials")?;
+
+        rows.into_iter().map(application_summary_from_row).collect()
+    }
+
+    pub async fn create_s3_access_key(
+        &self,
+        user_id: Option<&str>,
+        secret_encryption_key: &str,
+    ) -> anyhow::Result<CreatedS3AccessKey> {
+        if secret_encryption_key.trim().is_empty() {
+            bail!("S3 secret encryption key cannot be empty");
+        }
+        let access_key_id = secure_url_token("PM", 18);
+        let secret_access_key = secure_url_token("pm_s3_", 32);
+        let secret_key_hash = hash_bearer_token(&secret_access_key);
+        let row = query(
+            r#"
+            INSERT INTO s3_access_keys (
+                access_key_id, secret_key_hash, secret_key_ciphertext, user_id, is_active
+            )
+            VALUES ($1, $2, pgp_sym_encrypt($3, $4), $5::uuid, TRUE)
+            RETURNING id::text, access_key_id, user_id::text, is_active,
+                      created_at, revoked_at, last_used_at
+            "#,
+        )
+        .bind(&access_key_id)
+        .bind(secret_key_hash)
+        .bind(&secret_access_key)
+        .bind(secret_encryption_key)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to create S3 access key")?;
+
+        Ok(CreatedS3AccessKey {
+            key: s3_access_key_summary_from_row(row),
+            secret_access_key,
+        })
+    }
+
+    pub async fn list_s3_access_keys(&self) -> anyhow::Result<Vec<S3AccessKeySummary>> {
+        let rows = query(
+            r#"
+            SELECT id::text, access_key_id, user_id::text, is_active,
+                   created_at, revoked_at, last_used_at
+            FROM s3_access_keys
+            ORDER BY created_at DESC, access_key_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list S3 access keys")?;
+
+        Ok(rows
+            .into_iter()
+            .map(s3_access_key_summary_from_row)
+            .collect())
+    }
+
+    pub async fn revoke_s3_access_key(&self, access_key_id: &str) -> anyhow::Result<()> {
+        let result = query(
+            r#"
+            UPDATE s3_access_keys
+            SET is_active = FALSE, revoked_at = now()
+            WHERE access_key_id = $1
+              AND revoked_at IS NULL
+            "#,
+        )
+        .bind(access_key_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to revoke S3 access key")?;
+
+        if result.rows_affected() == 0 {
+            bail!("S3 access key not found or already revoked");
+        }
+        Ok(())
+    }
+
+    pub async fn find_application_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> anyhow::Result<Option<ApplicationCredential>> {
+        let row = query(
+            r#"
+            SELECT id::text, name, scopes
+            FROM application_credentials
+            WHERE token_hash = $1 AND revoked_at IS NULL
+            "#,
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load application credential")?;
+
+        row.map(|row| {
+            Ok(ApplicationCredential {
+                id: row.get("id"),
+                name: row.get("name"),
+                scopes: parse_string_vec(row.get("scopes"))?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn ensure_s3_access_key(
+        &self,
+        access_key_id: &str,
+        secret_key_hash: &str,
+    ) -> anyhow::Result<S3AccessKey> {
+        let access_key_id = access_key_id.trim();
+        if access_key_id.is_empty() {
+            bail!("S3 access key id cannot be empty");
+        }
+        if secret_key_hash.trim().is_empty() {
+            bail!("S3 secret key hash cannot be empty");
+        }
+
+        let row = query(
+            r#"
+            INSERT INTO s3_access_keys (access_key_id, secret_key_hash, is_active)
+            VALUES ($1, $2, TRUE)
+            ON CONFLICT (access_key_id) DO UPDATE SET
+                secret_key_hash = EXCLUDED.secret_key_hash,
+                is_active = TRUE,
+                revoked_at = NULL
+            RETURNING access_key_id, secret_key_hash
+            "#,
+        )
+        .bind(access_key_id)
+        .bind(secret_key_hash)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to upsert S3 access key")?;
+
+        Ok(S3AccessKey {
+            access_key_id: row.get("access_key_id"),
+            secret_key_hash: row.get("secret_key_hash"),
+            secret_access_key: None,
+        })
+    }
+
+    pub async fn find_s3_access_key_for_signing(
+        &self,
+        access_key_id: &str,
+        secret_encryption_key: &str,
+    ) -> anyhow::Result<Option<S3AccessKey>> {
+        let row = query(
+            r#"
+            SELECT access_key_id, secret_key_hash,
+                   CASE
+                       WHEN secret_key_ciphertext IS NULL THEN NULL
+                       ELSE pgp_sym_decrypt(secret_key_ciphertext, $2)
+                   END AS secret_access_key
+            FROM s3_access_keys
+            WHERE access_key_id = $1
+              AND is_active = TRUE
+              AND revoked_at IS NULL
+            "#,
+        )
+        .bind(access_key_id)
+        .bind(secret_encryption_key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load S3 access key signing material")?;
+
+        Ok(row.map(|row| S3AccessKey {
+            access_key_id: row.get("access_key_id"),
+            secret_key_hash: row.get("secret_key_hash"),
+            secret_access_key: row.get("secret_access_key"),
+        }))
+    }
+
+    pub async fn record_s3_access_key_used(&self, access_key_id: &str) -> anyhow::Result<()> {
+        query(
+            r#"
+            UPDATE s3_access_keys
+            SET last_used_at = now()
+            WHERE access_key_id = $1
+            "#,
+        )
+        .bind(access_key_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to update S3 access key last_used_at")?;
+        Ok(())
+    }
+
+    pub async fn create_replica_credential(
+        &self,
+        name: &str,
+        allowed_buckets: Vec<String>,
+    ) -> anyhow::Result<CreatedReplicaCredential> {
+        let name = name.trim();
+        if name.is_empty() {
+            bail!("replica name cannot be empty");
+        }
+        if allowed_buckets.is_empty() {
+            bail!("replica must include at least one allowed bucket");
+        }
+        for bucket in &allowed_buckets {
+            validate_bucket_name(bucket)?;
+        }
+
+        let token = secure_url_token("pm_rep_", 32);
+        let token_hash = hash_bearer_token(&token);
+        let allowed_buckets_json =
+            serde_json::to_value(&allowed_buckets).context("failed to serialize buckets")?;
+        let row = query(
+            r#"
+            INSERT INTO replica_credentials (name, token_hash, allowed_buckets)
+            VALUES ($1, $2, $3)
+            RETURNING id::text, name, allowed_buckets, created_at, revoked_at
+            "#,
+        )
+        .bind(name)
+        .bind(token_hash)
+        .bind(allowed_buckets_json)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to create replica credential")?;
+
+        Ok(CreatedReplicaCredential {
+            replica: replica_summary_from_row(row)?,
+            token,
+        })
+    }
+
+    pub async fn list_replicas(&self) -> anyhow::Result<Vec<ReplicaSummary>> {
+        let rows = query(
+            r#"
+            SELECT id::text, name, allowed_buckets, created_at, revoked_at
+            FROM replica_credentials
+            ORDER BY created_at DESC, name ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list replicas")?;
+
+        rows.into_iter().map(replica_summary_from_row).collect()
+    }
+
+    pub async fn revoke_replica(&self, replica_id: &str) -> anyhow::Result<()> {
+        let result = query(
+            "UPDATE replica_credentials SET revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL",
+        )
+        .bind(replica_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to revoke replica")?;
+        if result.rows_affected() == 0 {
+            bail!("replica not found or already revoked: {replica_id}");
+        }
+        Ok(())
+    }
+
+    pub async fn find_replica_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> anyhow::Result<Option<ReplicaCredential>> {
+        let row = query(
+            r#"
+            SELECT id::text, name, allowed_buckets
+            FROM replica_credentials
+            WHERE token_hash = $1 AND revoked_at IS NULL
+            "#,
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load replica credential")?;
+
+        row.map(|row| {
+            Ok(ReplicaCredential {
+                id: row.get("id"),
+                name: row.get("name"),
+                allowed_buckets: parse_string_vec(row.get("allowed_buckets"))?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn list_replica_sync_objects(
+        &self,
+        allowed_buckets: &[String],
+    ) -> anyhow::Result<Vec<ReplicaSyncObject>> {
+        for bucket in allowed_buckets {
+            validate_bucket_name(bucket)?;
+        }
+        let rows = query(
+            r#"
+            SELECT b.name, o.object_key, v.size_bytes, v.content_type, v.object_hash, o.state
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            JOIN object_versions v ON v.id = o.current_version_id
+            WHERE b.name = ANY($1)
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+            ORDER BY v.created_at DESC, o.object_key ASC
+            "#,
+        )
+        .bind(allowed_buckets)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list replica sync objects")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| ReplicaSyncObject {
+                bucket: row.get("name"),
+                key: row.get("object_key"),
+                size_bytes: row.get("size_bytes"),
+                content_type: row.get("content_type"),
+                sha256: row.get("object_hash"),
+                state: row.get("state"),
+            })
+            .collect())
+    }
+
+    pub async fn create_access_package(
+        &self,
+        application_id: &str,
+        bucket_name: &str,
+        object_key: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<AccessPackageRecord> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+
+        let package_token = secure_url_token("pm_ap_", 32);
+        let package_token_hash = hash_bearer_token(&package_token);
+        let row = query(
+            r#"
+            WITH target AS (
+                SELECT b.id AS bucket_id, o.id AS object_id
+                FROM buckets b
+                JOIN objects o ON o.bucket_id = b.id
+                WHERE b.name = $3 AND o.object_key = $4
+                  AND b.deleted_at IS NULL AND o.deleted_at IS NULL
+            )
+            INSERT INTO access_packages (
+                package_token_hash, application_id, bucket_id, object_id, expires_at
+            )
+            SELECT $1, $2::uuid, bucket_id, object_id, $5
+            FROM target
+            RETURNING id::text, expires_at, created_at
+            "#,
+        )
+        .bind(package_token_hash)
+        .bind(application_id)
+        .bind(bucket_name)
+        .bind(object_key)
+        .bind(expires_at)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to create access package")?;
+
+        let Some(row) = row else {
+            bail!("object not found");
+        };
+
+        Ok(AccessPackageRecord {
+            id: row.get("id"),
+            package_token,
+            application_id: application_id.to_owned(),
+            bucket_name: bucket_name.to_owned(),
+            object_key: object_key.to_owned(),
+            expires_at: format_datetime(row.get("expires_at")),
+            created_at: format_datetime(row.get("created_at")),
+        })
+    }
+
+    pub async fn record_audit_event(
+        &self,
+        event: &str,
+        principal: Option<&str>,
+        outcome: &str,
+        detail: &str,
+    ) -> anyhow::Result<AuditEventRecord> {
+        let metadata = serde_json::json!({
+            "principal": principal,
+            "outcome": outcome,
+            "detail": detail
+        });
+        let row = query(
+            r#"
+            INSERT INTO audit_events (event_type, metadata)
+            VALUES ($1, $2)
+            RETURNING id::text, event_type, metadata, created_at
+            "#,
+        )
+        .bind(event)
+        .bind(metadata)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to record audit event")?;
+
+        Ok(audit_event_from_row(row))
+    }
+
+    pub async fn list_audit_events(&self, limit: i64) -> anyhow::Result<Vec<AuditEventRecord>> {
+        let rows = query(
+            r#"
+            SELECT id::text, event_type, metadata, created_at
+            FROM audit_events
+            ORDER BY created_at DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit.clamp(1, 200))
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list audit events")?;
+
+        Ok(rows.into_iter().map(audit_event_from_row).collect())
+    }
+
+    #[allow(dead_code)]
+    pub async fn record_origin_transfer(
+        &self,
+        application_id: &str,
+        bucket_name: &str,
+        object_key: &str,
+        bytes_served: i64,
+        range: Option<(u64, u64)>,
+        status_code: u16,
+    ) -> anyhow::Result<()> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let (range_start, range_end): (Option<i64>, Option<i64>) = match range {
+            Some((start, end)) => (
+                Some(i64::try_from(start).context("range start is too large")?),
+                Some(i64::try_from(end).context("range end is too large")?),
+            ),
+            None => (None, None),
+        };
+
+        let result = query(
+            r#"
+            WITH target AS (
+                SELECT b.id AS bucket_id, o.id AS object_id
+                FROM buckets b
+                JOIN objects o ON o.bucket_id = b.id
+                WHERE b.name = $2 AND o.object_key = $3
+                  AND b.deleted_at IS NULL AND o.deleted_at IS NULL
+            )
+            INSERT INTO origin_transfer_events (
+                application_id, bucket_id, object_id, bytes_served,
+                range_start, range_end, status_code
+            )
+            SELECT $1::uuid, bucket_id, object_id, $4, $5, $6, $7
+            FROM target
+            "#,
+        )
+        .bind(application_id)
+        .bind(bucket_name)
+        .bind(object_key)
+        .bind(bytes_served)
+        .bind(range_start)
+        .bind(range_end)
+        .bind(i32::from(status_code))
+        .execute(&self.pool)
+        .await
+        .context("failed to record Origin transfer")?;
+        if result.rows_affected() == 0 {
+            bail!("object not found");
+        }
+        Ok(())
+    }
+
+    pub async fn origin_traffic_summary(&self) -> anyhow::Result<OriginTrafficSummary> {
+        let row = query(
+            r#"
+            SELECT
+                COUNT(*)::bigint AS total_requests,
+                COALESCE(SUM(CASE WHEN range_start IS NULL THEN 1 ELSE 0 END), 0)::bigint AS full_object_requests,
+                COALESCE(SUM(CASE WHEN range_start IS NOT NULL THEN 1 ELSE 0 END), 0)::bigint AS range_requests,
+                COALESCE(SUM(bytes_served), 0)::bigint AS total_bytes_served
+            FROM origin_transfer_events
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to summarize Origin traffic")?;
+
+        Ok(OriginTrafficSummary {
+            total_requests: row.get("total_requests"),
+            full_object_requests: row.get("full_object_requests"),
+            range_requests: row.get("range_requests"),
+            total_bytes_served: row.get("total_bytes_served"),
+        })
+    }
+}
+
+async fn bucket_id_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    bucket_name: &str,
+) -> anyhow::Result<String> {
+    let row =
+        query("SELECT id::text FROM buckets WHERE name = $1 AND deleted_at IS NULL FOR UPDATE")
+            .bind(bucket_name)
+            .fetch_optional(&mut **tx)
+            .await
+            .context("failed to load bucket")?;
+    row.map(|row| row.get("id"))
+        .ok_or_else(|| anyhow::anyhow!("bucket not found: {bucket_name}"))
+}
+
+async fn insert_object_shell_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    bucket_id: &str,
+    object_key: &str,
+) -> anyhow::Result<String> {
+    let row = query(
+        r#"
+        INSERT INTO objects (bucket_id, object_key)
+        VALUES ($1::uuid, $2)
+        RETURNING id::text
+        "#,
+    )
+    .bind(bucket_id)
+    .bind(object_key)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(map_unique_violation("object already exists in bucket"))?;
+    Ok(row.get("id"))
+}
+
+async fn upsert_object_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    bucket_id: &str,
+    object_key: &str,
+) -> anyhow::Result<String> {
+    let row = query(
+        r#"
+        INSERT INTO objects (bucket_id, object_key)
+        VALUES ($1::uuid, $2)
+        ON CONFLICT (bucket_id, object_key) DO UPDATE SET
+            updated_at = now(),
+            deleted_at = NULL
+        RETURNING id::text
+        "#,
+    )
+    .bind(bucket_id)
+    .bind(object_key)
+    .fetch_one(&mut **tx)
+    .await
+    .context("failed to upsert object")?;
+    Ok(row.get("id"))
+}
+
+async fn record_audit_event_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    event: &str,
+    actor_user_id: Option<&str>,
+    ip_address: Option<IpAddr>,
+    user_agent: Option<&str>,
+    metadata: serde_json::Value,
+) -> anyhow::Result<()> {
+    query(
+        r#"
+        INSERT INTO audit_events (
+            event_type, actor_user_id, ip_address, user_agent, metadata
+        )
+        VALUES ($1, $2::uuid, $3::inet, $4, $5)
+        "#,
+    )
+    .bind(event)
+    .bind(actor_user_id)
+    .bind(ip_address.map(|value| value.to_string()))
+    .bind(user_agent)
+    .bind(metadata)
+    .execute(&mut **tx)
+    .await
+    .context("failed to record audit event")?;
+    Ok(())
+}
+
+fn object_summary_from_row(row: PgRow) -> ObjectSummary {
+    ObjectSummary {
+        key: row.get("object_key"),
+        size_bytes: row.get("size_bytes"),
+        content_type: row
+            .get::<Option<String>, _>("content_type")
+            .unwrap_or_else(|| "application/octet-stream".to_owned()),
+        sha256: row.get("object_hash"),
+        created_at: format_datetime(row.get("created_at")),
+        state: row.get("state"),
+    }
+}
+
+fn object_record_from_row(row: PgRow) -> ObjectRecord {
+    ObjectRecord {
+        key: row.get("object_key"),
+        size_bytes: row.get("size_bytes"),
+        content_type: row
+            .get::<Option<String>, _>("content_type")
+            .unwrap_or_else(|| "application/octet-stream".to_owned()),
+        sha256: row.get("object_hash"),
+        storage_path: row.get("storage_path"),
+        created_at: format_datetime(row.get("created_at")),
+        state: row.get("state"),
+    }
+}
+
+fn bucket_policy_from_row(row: PgRow) -> BucketPolicy {
+    BucketPolicy {
+        bucket_name: row.get("name"),
+        access_package_ttl_seconds: row.get("access_package_ttl_seconds"),
+        fragment_size_bytes: row.get("fragment_size_bytes"),
+        allow_replica_edge: row.get("allow_replica_edge"),
+        allow_peer_sharing: row.get("allow_peer_sharing"),
+        updated_at: format_datetime(row.get("updated_at")),
+    }
+}
+
+fn application_summary_from_row(row: PgRow) -> anyhow::Result<ApplicationCredentialSummary> {
+    Ok(ApplicationCredentialSummary {
+        id: row.get("id"),
+        name: row.get("name"),
+        scopes: parse_string_vec(row.get("scopes"))?,
+        created_at: format_datetime(row.get("created_at")),
+        revoked: row
+            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("revoked_at")
+            .is_some(),
+    })
+}
+
+fn s3_access_key_summary_from_row(row: PgRow) -> S3AccessKeySummary {
+    let revoked_at: Option<chrono::DateTime<chrono::Utc>> = row.get("revoked_at");
+    let last_used_at: Option<chrono::DateTime<chrono::Utc>> = row.get("last_used_at");
+    S3AccessKeySummary {
+        id: row.get("id"),
+        access_key_id: row.get("access_key_id"),
+        user_id: row.get("user_id"),
+        is_active: row.get("is_active"),
+        created_at: format_datetime(row.get("created_at")),
+        revoked_at: revoked_at.map(format_datetime),
+        last_used_at: last_used_at.map(format_datetime),
+    }
+}
+
+fn replica_summary_from_row(row: PgRow) -> anyhow::Result<ReplicaSummary> {
+    Ok(ReplicaSummary {
+        id: row.get("id"),
+        name: row.get("name"),
+        allowed_buckets: parse_string_vec(row.get("allowed_buckets"))?,
+        created_at: format_datetime(row.get("created_at")),
+        revoked: row
+            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("revoked_at")
+            .is_some(),
+    })
+}
+
+fn audit_event_from_row(row: PgRow) -> AuditEventRecord {
+    let metadata = row
+        .get::<Option<serde_json::Value>, _>("metadata")
+        .unwrap_or_else(|| serde_json::json!({}));
+    AuditEventRecord {
+        id: row.get("id"),
+        event: row.get("event_type"),
+        principal: metadata
+            .get("principal")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned),
+        outcome: metadata
+            .get("outcome")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_owned(),
+        detail: metadata
+            .get("detail")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_owned(),
+        created_at: format_datetime(row.get("created_at")),
+    }
+}
+
+fn parse_string_vec(value: serde_json::Value) -> anyhow::Result<Vec<String>> {
+    serde_json::from_value(value).context("failed to parse string list")
+}
+
+fn format_datetime(value: chrono::DateTime<chrono::Utc>) -> String {
+    value.to_rfc3339()
+}
+
+fn validate_bucket_policy(update: &BucketPolicyUpdate) -> anyhow::Result<()> {
+    if !(60..=3600).contains(&update.access_package_ttl_seconds) {
+        bail!("accessPackageTtlSeconds must be between 60 and 3600");
+    }
+    if !(1024..=134_217_728).contains(&update.fragment_size_bytes) {
+        bail!("fragmentSizeBytes must be between 1024 and 134217728");
+    }
+    Ok(())
 }
 
 pub fn validate_bucket_name(name: &str) -> anyhow::Result<()> {
@@ -412,6 +1622,13 @@ pub fn validate_object_key(key: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn is_unique_violation(error: &sqlx::Error) -> bool {
-    matches!(error, sqlx::Error::Database(database_error) if database_error.is_unique_violation())
+fn map_unique_violation(message: &'static str) -> impl Fn(sqlx_core::Error) -> anyhow::Error {
+    move |error| match &error {
+        sqlx_core::Error::Database(database_error)
+            if database_error.code().as_deref() == Some("23505") =>
+        {
+            anyhow::anyhow!("{message}")
+        }
+        _ => anyhow::Error::new(error),
+    }
 }

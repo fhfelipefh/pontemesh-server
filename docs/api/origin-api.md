@@ -24,9 +24,9 @@ A API do Origin deve seguir as seguintes diretrizes:
 * pacotes de acesso devem ser emitidos apenas pelo Origin;
 * manifestos devem ser emitidos, assinados ou validados pelo Origin;
 * operações administrativas devem exigir autenticação, autorização e auditoria;
-* Replica/Edge não deve emitir autorização própria;
-* peers não devem ser tratados como fontes confiáveis sem validação;
-* funcionalidades próprias do Ponte Mesh não devem ser forçadas dentro da API S3-like;
+* Replica/Edge opera sob autorização do Origin;
+* fragmentos recebidos de peers devem ser validados;
+* funcionalidades específicas do Ponte Mesh ficam em APIs próprias;
 * operações base de bucket e objeto devem permanecer preferencialmente na API S3-like;
 * políticas, manifestos, fontes autorizadas, fallback e métricas devem ficar na API Ponte Mesh.
 
@@ -35,6 +35,10 @@ A API do Origin deve seguir as seguintes diretrizes:
 A API S3-like deve oferecer uma interface familiar para operações fundamentais de buckets e objetos.
 
 Ela deve permitir que aplicações existentes, dentro do subconjunto suportado, consigam apontar para o endpoint do Origin com mudanças mínimas de integração.
+
+A implementação atual separa o painel web/admin e a API S3-compatible por porta:
+o painel fica em `http://localhost:8080`, e o endpoint S3-compatible fica em
+`http://localhost:9000`. Na porta S3, as operações ficam na raiz do endpoint.
 
 ### Responsabilidades
 
@@ -183,15 +187,58 @@ O pacote de acesso pode conter:
 
 O Origin deve negar a emissão quando não houver autenticação, autorização ou política válida.
 
+O contrato inicial recebe:
+
+```json
+{
+  "bucket": "exemplo",
+  "key": "objeto.bin",
+  "ttlSeconds": 300
+}
+```
+
+E retorna um pacote temporário com token opaco, fonte autorizada `ORIGIN`,
+fallback pelo endpoint S3-compatible `/{bucket}/{objectKey}` e manifesto
+emitido pelo Origin.
+
+O `ttlSeconds` solicitado deve respeitar o máximo definido na política
+persistida do bucket. Quando omitido, o TTL padrão também vem dessa política.
+
 ### Consultar manifesto autorizado
 
 ```http
-GET /pontemesh/objects/{objectId}/manifest
+GET /pontemesh/objects/{bucket}/manifest/{objectKey}
 ```
 
 Retorna o manifesto de um objeto quando a entidade solicitante possui autorização válida.
 
 O manifesto deve conter informações suficientes para o SDK obter, validar e reconstruir logicamente o objeto.
+
+O tamanho de fragmento do manifesto vem da política persistida do bucket.
+Objetos em estado diferente de `AVAILABLE`, incluindo `REVOKED`, não geram
+manifesto nem pacote de acesso.
+
+### Política de bucket
+
+```http
+GET /api/admin/buckets/{bucket}/policy
+PUT /api/admin/buckets/{bucket}/policy
+```
+
+Contrato inicial:
+
+```json
+{
+  "accessPackageTtlSeconds": 900,
+  "fragmentSizeBytes": 4194304,
+  "allowReplicaEdge": false,
+  "allowPeerSharing": false
+}
+```
+
+Essa política é persistida no catálogo PostgreSQL. O Origin usa
+`accessPackageTtlSeconds` na emissão de pacotes e `fragmentSizeBytes` na geração
+de manifestos.
 
 ### Consultar disponibilidade
 
@@ -264,6 +311,17 @@ POST /pontemesh/objects/{objectId}/revoke
 Revoga novas autorizações para o objeto.
 
 A revogação deve impedir emissão de novos pacotes de acesso e remover o objeto de fontes elegíveis conforme política aplicável.
+
+Na implementação atual, a revogação administrativa é:
+
+```http
+POST /api/admin/buckets/{bucket}/object-revocations/{objectKey}
+```
+
+Ela marca o objeto ativo como `REVOKED`. O objeto continua no catálogo para
+auditoria e rastreabilidade, mas deixa de ser servido pelo Origin, deixa de
+aparecer em sync-plan de réplica e não pode receber novos manifestos ou pacotes
+de acesso.
 
 ### Revogar pacote de acesso
 

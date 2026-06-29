@@ -12,6 +12,7 @@ FROM rust:1-bookworm AS rust-build
 WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
 COPY src ./src
+COPY migrations ./migrations
 COPY --from=web-build /app/web/dist ./web/dist
 RUN cargo build --release
 
@@ -24,7 +25,9 @@ RUN useradd --system --create-home --home-dir /nonexistent --shell /usr/sbin/nol
     && mkdir -p /var/pontemesh_home \
     && chown -R pontemesh:pontemesh /var/pontemesh_home
 
+WORKDIR /app
 COPY --from=rust-build /app/target/release/pontemesh-server /usr/local/bin/pontemesh-server
+COPY --from=rust-build /app/migrations ./migrations
 
 USER pontemesh
 EXPOSE 8080

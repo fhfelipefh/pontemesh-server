@@ -31,7 +31,7 @@ fn log_initial_setup_message(paths: &PontemeshHome, token: &str) {
          This token is also available at:\n\n\
          {token_path}\n\n\
          If running with Docker, you can also read it with:\n\n\
-         docker exec <container_name> cat {token_path}\n\n\
+         docker compose -p ponte-mesh -f docker/docker-compose.yml exec server cat {token_path}\n\n\
          *************************************************************\n\
          *************************************************************\n\
          *************************************************************",

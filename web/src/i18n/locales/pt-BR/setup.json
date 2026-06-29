@@ -170,6 +170,30 @@
       "deleteFailed": "Falha ao excluir objeto.",
       "emptyTitle": "Este bucket ainda não possui objetos.",
       "emptyDescription": "Envie um arquivo para começar."
+    },
+    "settings": {
+      "title": "Configurações",
+      "description": "Credenciais e parâmetros operacionais da instância.",
+      "s3": {
+        "title": "Credenciais S3",
+        "description": "Chaves para clientes S3-compatible.",
+        "create": "Criar chave",
+        "createdTitle": "Chave criada",
+        "createdHint": "O secret é exibido apenas agora.",
+        "accessKeyId": "Access key",
+        "secretAccessKey": "Secret key",
+        "status": "Status",
+        "active": "ativa",
+        "revoked": "revogada",
+        "lastUsed": "Último uso",
+        "createdAt": "Criada em",
+        "revoke": "Revogar chave",
+        "loadFailed": "Falha ao carregar chaves S3.",
+        "createFailed": "Falha ao criar chave S3.",
+        "revokeFailed": "Falha ao revogar chave S3.",
+        "emptyTitle": "Nenhuma chave S3 criada.",
+        "emptyDescription": "Crie uma chave para conectar AWS CLI ou SDKs."
+      }
     }
   }
 }

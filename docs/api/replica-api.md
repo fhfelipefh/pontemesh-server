@@ -4,7 +4,7 @@ Este documento descreve a API conceitual exposta ou consumida por um componente 
 
 O Replica/Edge é uma fonte auxiliar do plano de dados. Seu objetivo é reforçar a disponibilidade de objetos e fragmentos autorizados, reduzindo carga do Origin quando houver política, autorização e benefício técnico.
 
-Replica/Edge não é autoridade independente. A autoridade sobre publicação, autorização, disponibilidade, manifesto, revogação, expiração e políticas continua sendo sempre o **Origin**.
+Replica/Edge opera sob autoridade do **Origin**, que controla publicação, autorização, disponibilidade, manifesto, revogação, expiração e políticas.
 
 ## Responsabilidades da Replica/Edge
 
@@ -17,7 +17,7 @@ Replica/Edge deve ser capaz de:
 * armazenar localmente objetos ou fragmentos autorizados;
 * anunciar disponibilidade de fragmentos ao Origin;
 * servir fragmentos para SDKs autorizados;
-* rejeitar solicitações sem autorização válida emitida pelo Origin;
+* validar autorização emitida pelo Origin antes de servir fragmentos;
 * receber e aplicar revogações;
 * receber mudanças de política;
 * reportar saúde operacional;
@@ -32,7 +32,7 @@ Antes de sincronizar ou anunciar qualquer conteúdo, a Replica/Edge deve autenti
 
 A autenticação deve usar mecanismos consolidados, como mTLS, assinatura forte de requisições, tokens curtos emitidos pelo Origin ou combinação desses mecanismos.
 
-Não devem ser implementados algoritmos próprios de autenticação, assinatura, geração de tokens ou criptografia.
+Autenticação, assinatura, geração de tokens e criptografia usam mecanismos consolidados.
 
 A autenticação deve identificar de forma inequívoca:
 
@@ -48,6 +48,14 @@ Uma réplica autenticada ainda precisa ser autorizada. Autenticação prova iden
 ### 2. Consulta de plano de sincronização
 
 Replica/Edge deve consultar o Origin para obter um plano de sincronização autorizado.
+
+Na implementação inicial, essa chamada exige `Authorization: Bearer <token>` de
+Replica/Edge. O token é separado de credenciais administrativas e de
+aplicação/SDK, é armazenado no catálogo somente como hash e deixa de funcionar
+quando a réplica é revogada.
+
+O plano é gerado a partir do catálogo real do Origin, limitado aos buckets
+autorizados para a réplica e apenas com objetos em estado `AVAILABLE`.
 
 O plano de sincronização pode conter:
 
@@ -65,7 +73,31 @@ O plano de sincronização pode conter:
 * endpoints de origem para sincronização;
 * parâmetros de auditoria e métricas.
 
-Replica/Edge não deve decidir de forma autônoma quais objetos pode replicar.
+Contrato inicial:
+
+```json
+{
+  "replicaId": "uuid",
+  "replicaName": "edge-1",
+  "allowedBuckets": ["videos"],
+  "generatedAt": "2026-06-29T00:00:00Z",
+  "expiresAt": "2026-06-29T00:05:00Z",
+  "objects": [
+    {
+      "bucket": "videos",
+      "key": "aula.mp4",
+      "sizeBytes": 1048576,
+      "contentType": "video/mp4",
+      "sha256": "...",
+      "state": "AVAILABLE"
+    }
+  ]
+}
+```
+
+O Origin não inclui objetos revogados, deletados ou bloqueados nesse plano.
+
+Replica/Edge replica objetos presentes no plano emitido pelo Origin.
 
 ### 3. Sincronização de objeto ou fragmento
 
@@ -98,7 +130,7 @@ O armazenamento local deve respeitar:
 * integridade do conteúdo;
 * rastreabilidade de origem e versão.
 
-Conteúdo armazenado na Replica/Edge não deve ser tratado como armazenamento primário. O armazenamento primário e a autoridade sobre o objeto continuam no Origin.
+Conteúdo armazenado na Replica/Edge é auxiliar. O armazenamento primário e a autoridade sobre o objeto ficam no Origin.
 
 ### 5. Anúncio de disponibilidade
 
@@ -118,7 +150,7 @@ O anúncio pode incluir:
 * capacidade disponível;
 * métricas resumidas.
 
-O Origin não deve confiar cegamente no anúncio. A disponibilidade anunciada deve ser usada como informação operacional, sempre subordinada à autorização, política e validação de integridade feita pelo SDK.
+A disponibilidade anunciada é informação operacional subordinada à autorização, política e validação de integridade feita pelo SDK.
 
 ### 6. Serviço de fragmentos para SDKs
 
@@ -136,7 +168,7 @@ A autorização apresentada pelo SDK deve permitir validar:
 * política aplicável;
 * identidade ou contexto do solicitante, quando necessário.
 
-Replica/Edge deve negar a solicitação quando:
+Replica/Edge nega a solicitação quando:
 
 * não houver autorização;
 * a autorização estiver expirada;
@@ -174,7 +206,7 @@ Ao receber uma revogação, a réplica deve:
 * registrar evento de auditoria;
 * reportar aplicação da revogação ao Origin, quando exigido pela política.
 
-A revogação não precisa prometer apagamento físico imediato em todos os casos, mas deve impedir novos serviços autorizados a partir da réplica.
+A revogação interrompe novos serviços autorizados a partir da réplica.
 
 ### 8. Reporte de saúde
 
@@ -308,19 +340,11 @@ A réplica deve validar o escopo antes de retornar qualquer dado.
 
 Replica/Edge deve seguir as seguintes regras:
 
-* só deve servir fragmentos quando o solicitante apresentar autorização válida emitida pelo Origin;
-* não deve confiar em pacote de acesso expirado;
-* não deve aceitar autorização emitida por entidade diferente do Origin;
-* não deve emitir autorização própria;
-* não deve aceitar upload arbitrário de clientes;
-* não deve anunciar fragmentos que não foram sincronizados ou autorizados;
-* não deve continuar servindo objeto revogado;
-* não deve servir fragmentos fora do escopo autorizado;
-* deve validar integridade do que sincroniza;
-* deve registrar falhas de autenticação;
-* deve registrar falhas de autorização;
-* deve registrar tentativas de uso de autorização expirada;
-* deve registrar tentativas de acesso fora de escopo;
+* servir fragmentos com autorização válida emitida pelo Origin;
+* respeitar escopo, expiração e revogação;
+* anunciar apenas fragmentos sincronizados e autorizados;
+* validar integridade do que sincroniza;
+* registrar falhas de autenticação, autorização e acesso fora de escopo;
 * deve aplicar revogações recebidas do Origin;
 * deve usar bibliotecas consolidadas para autenticação, assinatura, tokens, mTLS, criptografia e comparação segura.
 

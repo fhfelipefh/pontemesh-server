@@ -2,7 +2,7 @@
 
 Este documento descreve a configuração conceitual do `pontemesh-server`.
 
-Os arquivos `config/*.toml` ainda não definem a sintaxe final. A estrutura abaixo serve como referência arquitetural para orientar a implementação futura da configuração do servidor, das réplicas e das políticas operacionais.
+Este documento serve como referência arquitetural para a configuração do servidor, das réplicas e das políticas operacionais.
 
 ## Blocos de configuração
 
@@ -13,7 +13,7 @@ Os papéis previstos são:
 * **Origin**;
 * **Replica/Edge**.
 
-A ausência de peers ou réplicas disponíveis não exige um modo especial de execução. Nesse cenário, o Origin continua operando normalmente como servidor central, entregando objetos diretamente e mantendo as mesmas regras de autenticação, autorização, manifesto, integridade, métricas e revogação.
+Quando não há fontes auxiliares elegíveis, o Origin atende diretamente às operações autorizadas.
 
 ## Origin
 
@@ -23,7 +23,7 @@ Configurações esperadas:
 
 * endereço de escuta;
 * armazenamento primário;
-* banco de dados ou mecanismo de catálogo;
+* PostgreSQL;
 * chave de assinatura de manifestos;
 * chave de assinatura de pacotes de acesso;
 * políticas de bucket;
@@ -43,7 +43,7 @@ Configurações esperadas:
 
 O Origin deve ser configurado como autoridade central do sistema. Ele é responsável por autenticar, autorizar, emitir pacotes de acesso, gerar manifestos, controlar disponibilidade e aplicar políticas de revogação.
 
-Mesmo quando a distribuição híbrida estiver desabilitada, indisponível ou sem fontes auxiliares elegíveis, o Origin deve continuar capaz de atender às operações fundamentais de objeto.
+O Origin atende às operações fundamentais de objeto e coordena a distribuição híbrida quando houver política aplicável.
 
 ## Replica/Edge
 
@@ -67,7 +67,7 @@ Configurações esperadas:
 * métricas de transferência;
 * parâmetros de reconexão com o Origin.
 
-A Replica/Edge não deve atuar como autoridade independente. Ela deve operar somente dentro dos escopos, políticas e autorizações definidos pelo Origin.
+Replica/Edge opera dentro dos escopos, políticas e autorizações definidos pelo Origin.
 
 Toda comunicação entre Origin e Replica/Edge deve ser autenticada, autorizada, auditável e revogável.
 
@@ -100,7 +100,7 @@ Exemplos de configurações possíveis:
 * configurar limites para circuit breaker de fontes;
 * configurar revalidação de autorização durante transferências prolongadas.
 
-Essas políticas pertencem ao domínio específico do Ponte Mesh e não devem ser forçadas dentro da API S3-like quando não houver correspondência natural com o modelo S3.
+Essas políticas pertencem ao domínio específico do Ponte Mesh.
 
 ## Segurança de configuração
 
@@ -108,7 +108,7 @@ A configuração deve seguir princípios de segurança desde o início do projet
 
 Regras obrigatórias:
 
-* segredos não devem ser versionados;
+* segredos ficam fora do versionamento;
 * credenciais administrativas não devem ser reutilizadas por réplicas;
 * credenciais de réplica devem ser separadas de credenciais de usuários e aplicações;
 * chaves de assinatura devem permitir rotação;
@@ -116,8 +116,8 @@ Regras obrigatórias:
 * configurações inseguras devem falhar fechadas, negando acesso;
 * permissões devem ser explícitas;
 * ausência de configuração obrigatória deve impedir inicialização segura;
-* logs não devem expor segredos, tokens, chaves ou credenciais;
-* configurações de desenvolvimento não devem ser aceitas automaticamente em produção.
+* logs mascaram segredos, tokens, chaves e credenciais;
+* configurações de produção usam valores explícitos.
 
 ## Configuração operacional
 
@@ -128,16 +128,14 @@ Valores conceituais possíveis:
 * `origin`;
 * `replica-edge`.
 
-Não deve existir um modo separado para representar ausência de peers, ausência de réplicas ou execução sem malha distribuída. Essas situações fazem parte do comportamento normal do Origin.
-
-Quando nenhuma fonte auxiliar estiver disponível, o Origin deve continuar atendendo diretamente às operações autorizadas, preservando o modelo de segurança, manifesto, integridade e auditoria.
+Quando nenhuma fonte auxiliar estiver disponível, o Origin atende diretamente às operações autorizadas, preservando segurança, manifesto, integridade e auditoria.
 
 ## Síntese
 
 A configuração do Ponte Mesh deve separar claramente os parâmetros do **Origin** e do **Replica/Edge**.
 
-O **Origin** é sempre a autoridade central e deve continuar funcional mesmo sem peers ou réplicas.
+O **Origin** é sempre a autoridade central.
 
 O **Replica/Edge** é um componente auxiliar, autorizado pelo Origin, usado para reforçar disponibilidade e reduzir carga em cenários apropriados.
 
-A distribuição híbrida deve ser controlada por políticas explícitas. Ela é uma otimização operacional, não uma condição obrigatória para o servidor cumprir sua finalidade.
+A distribuição híbrida é controlada por políticas explícitas.

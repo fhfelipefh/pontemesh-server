@@ -4,13 +4,13 @@ Este documento descreve a operação do `pontemesh-server` quando executado no p
 
 O **Replica/Edge** é um nó auxiliar mais estável que peers comuns, utilizado para reforçar a disponibilidade do plano de dados e reduzir a carga do Origin em cenários nos quais a replicação for autorizada, segura e tecnicamente vantajosa.
 
-Replica/Edge não é autoridade de controle. A autoridade sobre ingestão, catálogo, autenticação, autorização, manifestos, políticas, revogação, expiração e disponibilidade continua sendo sempre o **Origin**.
+Replica/Edge opera sob autoridade do **Origin**, que controla ingestão, catálogo, autenticação, autorização, manifestos, políticas, revogação, expiração e disponibilidade.
 
 ## Papel da Replica/Edge
 
 Replica/Edge atua como fonte auxiliar de fragmentos ou objetos autorizados.
 
-Seu papel é apoiar a distribuição de conteúdo no plano de dados, sem substituir o Origin e sem tomar decisões autônomas de autorização.
+Seu papel é apoiar a distribuição de conteúdo no plano de dados, dentro das autorizações emitidas pelo Origin.
 
 O Replica/Edge deve operar sempre dentro dos escopos, políticas e autorizações emitidos pelo Origin.
 
@@ -52,7 +52,7 @@ O Origin deve decidir:
 * por quanto tempo a autorização é válida;
 * quando a réplica deve parar de servir determinado conteúdo.
 
-Replica/Edge não deve continuar operando com políticas, planos ou credenciais expiradas.
+Replica/Edge opera com políticas, planos e credenciais vigentes.
 
 ## Autenticação com o Origin
 
@@ -70,13 +70,11 @@ Operações sensíveis incluem:
 
 A autenticação deve usar mecanismos consolidados, como mTLS, assinatura forte de requisições, tokens curtos emitidos pelo Origin ou combinação desses mecanismos.
 
-O projeto não deve implementar algoritmos próprios de autenticação, assinatura, geração de tokens, criptografia ou comparação segura.
+O projeto usa bibliotecas consolidadas para autenticação, assinatura, geração de tokens, criptografia e comparação segura.
 
 ## Autorização
 
-Autenticação não é suficiente.
-
-Mesmo autenticada, a Replica/Edge precisa estar autorizada para cada operação relevante.
+Autenticação identifica a réplica. Autorização define cada operação permitida.
 
 A autorização deve considerar:
 
@@ -91,8 +89,6 @@ A autorização deve considerar:
 * estado de revogação;
 * estado de disponibilidade do objeto;
 * plano de sincronização vigente.
-
-Replica/Edge não deve aceitar escopo implícito.
 
 Toda permissão deve ser explícita, limitada e revogável.
 
@@ -197,21 +193,8 @@ Replica/Edge deve negar a solicitação quando qualquer validação falhar.
 
 ## Restrições
 
-Replica/Edge deve respeitar as seguintes restrições:
-
-* não é autoridade de autorização;
-* não emite pacote de acesso para clientes;
-* não emite manifesto como autoridade;
-* não aceita upload arbitrário de clientes;
-* não aceita escopo implícito;
-* não decide autonomamente quais objetos pode distribuir;
-* não continua anunciando objeto revogado;
-* não continua servindo fragmento revogado;
-* não deve servir fragmento sem validação local;
-* não deve servir fragmento sem permissão vigente;
-* não deve confiar em pacote expirado;
-* não deve aceitar autorização emitida por entidade diferente do Origin;
-* não deve tratar conteúdo local como armazenamento primário.
+Replica/Edge serve apenas conteúdo autorizado pelo Origin, com escopo explícito,
+integridade validada e permissão vigente. Conteúdo local é armazenamento auxiliar.
 
 ## Revogação
 
@@ -362,7 +345,7 @@ Nesses casos:
 * falhas repetidas devem reduzir sua prioridade;
 * revogação deve impedir uso futuro até nova autorização.
 
-A falha da Replica/Edge não deve impedir o funcionamento do sistema, pois o Origin continua sendo fonte final de garantia.
+A falha da Replica/Edge aciona entrega pelo Origin como fonte de garantia.
 
 ## Síntese
 
@@ -370,6 +353,4 @@ Replica/Edge é um nó auxiliar mais estável que peers comuns, usado para refor
 
 Ele deve autenticar-se com o Origin, obter plano de sincronização autorizado, replicar apenas conteúdos permitidos, validar integridade, anunciar disponibilidade, servir fragmentos somente para SDKs autorizados, aplicar revogações e reportar métricas.
 
-Replica/Edge não é autoridade de autorização, não emite pacotes de acesso, não aceita escopo implícito e não substitui o Origin.
-
-A autoridade central permanece sempre no Origin.
+Replica/Edge é fonte auxiliar autorizada. A autoridade central permanece no Origin.
