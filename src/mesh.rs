@@ -1,7 +1,7 @@
 use crate::{
     audit,
     auth::ApplicationIdentity,
-    catalog::{BucketPolicy, ObjectManifest, ObjectRecord},
+    catalog::{BucketPolicy, ObjectManifest, ObjectRecord, ReplicaAvailabilityRecord},
     http::AppState,
     security::token::hash_bearer_token,
 };
@@ -38,6 +38,28 @@ pub struct AccessPackageResponse {
     authorized_sources: Vec<AuthorizedSource>,
     fallback: FallbackContract,
     manifest: ManifestResponse,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourcesResponse {
+    bucket: String,
+    key: String,
+    manifest_id: String,
+    authorized_sources: Vec<AuthorizedSource>,
+    fallback: FallbackContract,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevalidateAccessPackageResponse {
+    package_id: String,
+    bucket: String,
+    key: String,
+    manifest_id: String,
+    valid: bool,
+    authorized_sources: Vec<AuthorizedSource>,
+    fallback: FallbackContract,
 }
 
 #[derive(Debug, Serialize)]
@@ -146,6 +168,63 @@ pub async fn create_access_package(
             .await;
             (StatusCode::CREATED, Json(package)).into_response()
         }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn get_sources(
+    State(state): State<AppState>,
+    Extension(application): Extension<ApplicationIdentity>,
+    headers: HeaderMap,
+    Path((bucket_name, object_key)): Path<(String, String)>,
+) -> Response {
+    if !has_scope(&application, "pontemesh:sources:read") {
+        return forbidden("missing scope: pontemesh:sources:read");
+    }
+
+    match get_sources_inner(
+        &state,
+        &headers,
+        &bucket_name,
+        object_key.trim_start_matches('/'),
+    )
+    .await
+    {
+        Ok(sources) => {
+            record_mesh_audit(
+                &state,
+                "sources_issued",
+                &application.name,
+                "success",
+                &format!("bucket={bucket_name}; key={}", sources.key),
+            )
+            .await;
+            Json(sources).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn revalidate_access_package(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((package_id, bucket_name, object_key)): Path<(String, String, String)>,
+) -> Response {
+    let Some(package_token) = read_bearer_token(&headers) else {
+        return unauthorized("access package bearer token required");
+    };
+
+    match revalidate_access_package_inner(
+        &state,
+        &headers,
+        &package_id,
+        &bucket_name,
+        object_key.trim_start_matches('/'),
+        &package_token,
+    )
+    .await
+    {
+        Ok(response) => Json(response).into_response(),
         Err(error) => bad_request(error),
     }
 }
@@ -282,6 +361,14 @@ async fn create_access_package_inner(
         url_component(&payload.bucket),
         object_path(&payload.key)
     );
+    let authorized_sources = authorized_sources_for_object(
+        state,
+        &payload.bucket,
+        &payload.key,
+        &record.expires_at,
+        &object_endpoint,
+    )
+    .await?;
 
     Ok(AccessPackageResponse {
         id: record.id,
@@ -296,13 +383,7 @@ async fn create_access_package_inner(
             "source:origin".to_owned(),
             "manifest:read".to_owned(),
         ],
-        authorized_sources: vec![AuthorizedSource {
-            id: "origin".to_owned(),
-            source_type: "ORIGIN".to_owned(),
-            endpoint: object_endpoint.clone(),
-            priority: 1,
-            expires_at: record.expires_at,
-        }],
+        authorized_sources,
         fallback: FallbackContract {
             source_type: "ORIGIN".to_owned(),
             object_endpoint,
@@ -311,6 +392,150 @@ async fn create_access_package_inner(
         },
         manifest,
     })
+}
+
+async fn get_sources_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    bucket_name: &str,
+    object_key: &str,
+) -> anyhow::Result<SourcesResponse> {
+    let manifest = load_manifest(state, bucket_name, object_key).await?;
+    let base_url = request_s3_base_url(headers);
+    let object_endpoint = format!(
+        "{base_url}/{}/{}",
+        url_component(bucket_name),
+        object_path(object_key)
+    );
+    let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
+    let authorized_sources = authorized_sources_for_object(
+        state,
+        bucket_name,
+        object_key,
+        &expires_at,
+        &object_endpoint,
+    )
+    .await?;
+
+    Ok(SourcesResponse {
+        bucket: bucket_name.to_owned(),
+        key: object_key.to_owned(),
+        manifest_id: manifest.manifest_id,
+        authorized_sources,
+        fallback: FallbackContract {
+            source_type: "ORIGIN".to_owned(),
+            object_endpoint,
+            supports_range: true,
+            preserve_validated_fragments: true,
+        },
+    })
+}
+
+async fn revalidate_access_package_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    package_id: &str,
+    bucket_name: &str,
+    object_key: &str,
+    package_token: &str,
+) -> anyhow::Result<RevalidateAccessPackageResponse> {
+    let authorization = state
+        .catalog
+        .authorize_access_package(
+            package_id,
+            &hash_bearer_token(package_token),
+            bucket_name,
+            object_key,
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("access package is invalid, expired or revoked"))?;
+    let base_url = request_s3_base_url(headers);
+    let object_endpoint = format!(
+        "{base_url}/{}/{}",
+        url_component(bucket_name),
+        object_path(object_key)
+    );
+    let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
+    let authorized_sources = authorized_sources_for_object(
+        state,
+        bucket_name,
+        object_key,
+        &expires_at,
+        &object_endpoint,
+    )
+    .await?;
+
+    record_mesh_audit(
+        state,
+        "access_package_revalidated",
+        &authorization.application_id,
+        "success",
+        &format!(
+            "package_id={}; manifest_id={}; bucket={}; key={}",
+            authorization.package_id,
+            authorization.manifest_id,
+            authorization.bucket_name,
+            authorization.object_key
+        ),
+    )
+    .await;
+
+    Ok(RevalidateAccessPackageResponse {
+        package_id: authorization.package_id,
+        bucket: authorization.bucket_name,
+        key: authorization.object_key,
+        manifest_id: authorization.manifest_id,
+        valid: true,
+        authorized_sources,
+        fallback: FallbackContract {
+            source_type: "ORIGIN".to_owned(),
+            object_endpoint,
+            supports_range: true,
+            preserve_validated_fragments: true,
+        },
+    })
+}
+
+async fn authorized_sources_for_object(
+    state: &AppState,
+    bucket_name: &str,
+    object_key: &str,
+    expires_at: &str,
+    origin_endpoint: &str,
+) -> anyhow::Result<Vec<AuthorizedSource>> {
+    let mut sources = vec![AuthorizedSource {
+        id: "origin".to_owned(),
+        source_type: "ORIGIN".to_owned(),
+        endpoint: origin_endpoint.to_owned(),
+        priority: 1,
+        expires_at: expires_at.to_owned(),
+    }];
+
+    let replicas = state
+        .catalog
+        .list_authorized_replica_sources(bucket_name, object_key)
+        .await?;
+    sources.extend(
+        replicas
+            .into_iter()
+            .enumerate()
+            .map(|(index, replica)| replica_source(replica, expires_at, index)),
+    );
+    Ok(sources)
+}
+
+fn replica_source(
+    replica: ReplicaAvailabilityRecord,
+    expires_at: &str,
+    index: usize,
+) -> AuthorizedSource {
+    AuthorizedSource {
+        id: replica.replica_id,
+        source_type: "REPLICA_EDGE".to_owned(),
+        endpoint: replica.endpoint,
+        priority: u8::try_from(index + 2).unwrap_or(u8::MAX),
+        expires_at: expires_at.to_owned(),
+    }
 }
 
 async fn load_manifest(

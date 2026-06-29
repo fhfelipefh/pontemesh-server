@@ -5,7 +5,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +16,16 @@ pub struct SyncPlanResponse {
     generated_at: String,
     expires_at: String,
     objects: Vec<crate::catalog::ReplicaSyncObject>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnounceAvailabilityRequest {
+    bucket: String,
+    key: String,
+    endpoint: String,
+    #[serde(default)]
+    available_fragments: Vec<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -64,6 +74,60 @@ pub async fn sync_plan(
                 );
             }
             Json(response).into_response()
+        }
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: error.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn announce_availability(
+    State(state): State<AppState>,
+    Extension(replica): Extension<ReplicaIdentity>,
+    Path(replica_id): Path<String>,
+    Json(payload): Json<AnnounceAvailabilityRequest>,
+) -> Response {
+    if replica_id != replica.id {
+        return forbidden("replica credential does not match requested replica id");
+    }
+
+    match state
+        .catalog
+        .record_replica_object_availability(
+            &replica.id,
+            &replica.allowed_buckets,
+            &payload.bucket,
+            &payload.key,
+            &payload.endpoint,
+            &payload.available_fragments,
+        )
+        .await
+    {
+        Ok(record) => {
+            if let Err(error) = state
+                .catalog
+                .record_audit_event(
+                    "replica_availability_announced",
+                    Some(&replica.name),
+                    "success",
+                    &format!(
+                        "replica_id={}; bucket={}; key={}",
+                        replica.id, record.bucket, record.key
+                    ),
+                )
+                .await
+            {
+                audit::failure(
+                    "audit_persist_failed",
+                    Some(&replica.name),
+                    &error.to_string(),
+                );
+            }
+            Json(record).into_response()
         }
         Err(error) => (
             StatusCode::BAD_REQUEST,

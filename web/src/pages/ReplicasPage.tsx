@@ -133,6 +133,8 @@ export function ReplicasPage() {
                 <tr>
                   <th>{t("setup.replicas.name")}</th>
                   <th>{t("setup.replicas.allowedBuckets")}</th>
+                  <th>{t("setup.replicas.availableObjects")}</th>
+                  <th>{t("setup.replicas.lastSeenAt")}</th>
                   <th>{t("setup.settings.s3.status")}</th>
                   <th>{t("setup.settings.s3.createdAt")}</th>
                   <th aria-label={t("setup.settings.s3.actions")} />
@@ -143,6 +145,8 @@ export function ReplicasPage() {
                   <tr key={replica.id}>
                     <td className="settings-table__name">{replica.name}</td>
                     <td>{replica.allowedBuckets.join(", ")}</td>
+                    <td>{replica.availableObjects}</td>
+                    <td>{replica.lastSeenAt ? formatDate(replica.lastSeenAt, i18n.language) : t("setup.replicas.neverSeen")}</td>
                     <td>{replica.revoked ? t("setup.settings.s3.revoked") : t("setup.settings.s3.active")}</td>
                     <td>{formatDate(replica.createdAt, i18n.language)}</td>
                     <td className="settings-table__actions">

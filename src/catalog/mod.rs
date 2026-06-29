@@ -200,6 +200,8 @@ pub struct ReplicaSummary {
     pub allowed_buckets: Vec<String>,
     pub created_at: String,
     pub revoked: bool,
+    pub available_objects: i64,
+    pub last_seen_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +236,18 @@ pub struct ReplicaSyncObject {
     pub content_type: String,
     pub sha256: String,
     pub state: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaAvailabilityRecord {
+    pub replica_id: String,
+    pub replica_name: String,
+    pub bucket: String,
+    pub key: String,
+    pub endpoint: String,
+    pub available_fragments: Vec<i64>,
+    pub last_seen_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1369,7 +1383,9 @@ impl Catalog {
             r#"
             INSERT INTO replica_credentials (name, token_hash, allowed_buckets)
             VALUES ($1, $2, $3)
-            RETURNING id::text, name, allowed_buckets, created_at, revoked_at
+            RETURNING id::text, name, allowed_buckets, created_at, revoked_at,
+                0::bigint AS available_objects,
+                NULL::timestamptz AS last_seen_at
             "#,
         )
         .bind(name)
@@ -1388,9 +1404,18 @@ impl Catalog {
     pub async fn list_replicas(&self) -> anyhow::Result<Vec<ReplicaSummary>> {
         let rows = query(
             r#"
-            SELECT id::text, name, allowed_buckets, created_at, revoked_at
-            FROM replica_credentials
-            ORDER BY created_at DESC, name ASC
+            SELECT
+                r.id::text,
+                r.name,
+                r.allowed_buckets,
+                r.created_at,
+                r.revoked_at,
+                COUNT(a.object_id)::bigint AS available_objects,
+                MAX(a.last_seen_at) AS last_seen_at
+            FROM replica_credentials r
+            LEFT JOIN replica_object_availability a ON a.replica_id = r.id
+            GROUP BY r.id, r.name, r.allowed_buckets, r.created_at, r.revoked_at
+            ORDER BY r.created_at DESC, r.name ASC
             "#,
         )
         .fetch_all(&self.pool)
@@ -1401,16 +1426,29 @@ impl Catalog {
     }
 
     pub async fn revoke_replica(&self, replica_id: &str) -> anyhow::Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin replica revocation transaction")?;
         let result = query(
             "UPDATE replica_credentials SET revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL",
         )
         .bind(replica_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .context("failed to revoke replica")?;
         if result.rows_affected() == 0 {
             bail!("replica not found or already revoked: {replica_id}");
         }
+        query("DELETE FROM replica_object_availability WHERE replica_id = $1::uuid")
+            .bind(replica_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed to remove revoked replica availability")?;
+        tx.commit()
+            .await
+            .context("failed to commit replica revocation")?;
         Ok(())
     }
 
@@ -1511,6 +1549,136 @@ impl Catalog {
                 state: row.get("state"),
             })
             .collect())
+    }
+
+    pub async fn record_replica_object_availability(
+        &self,
+        replica_id: &str,
+        allowed_buckets: &[String],
+        bucket_name: &str,
+        object_key: &str,
+        endpoint: &str,
+        available_fragments: &[i64],
+    ) -> anyhow::Result<ReplicaAvailabilityRecord> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        if !allowed_buckets.iter().any(|bucket| bucket == bucket_name) {
+            bail!("replica is not allowed to announce this bucket");
+        }
+        validate_replica_endpoint(endpoint)?;
+        for fragment in available_fragments {
+            if *fragment < 0 {
+                bail!("available fragment indexes must be non-negative");
+            }
+        }
+
+        let available_fragments_json =
+            serde_json::to_value(available_fragments).context("failed to serialize fragments")?;
+        let row = query(
+            r#"
+            WITH target AS (
+                SELECT
+                    r.id AS replica_id,
+                    r.name AS replica_name,
+                    b.id AS bucket_id,
+                    b.name AS bucket_name,
+                    o.id AS object_id,
+                    o.object_key,
+                    m.id AS manifest_id
+                FROM replica_credentials r
+                JOIN buckets b ON b.name = $2
+                JOIN objects o ON o.bucket_id = b.id AND o.object_key = $3
+                JOIN object_versions v ON v.id = o.current_version_id
+                JOIN object_manifests m ON m.object_version_id = v.id
+                JOIN bucket_policies p ON p.bucket_id = b.id
+                WHERE r.id = $1::uuid
+                  AND r.revoked_at IS NULL
+                  AND r.allowed_buckets ? $2
+                  AND b.deleted_at IS NULL
+                  AND o.deleted_at IS NULL
+                  AND o.state = 'AVAILABLE'
+                  AND p.allow_replica_edge = TRUE
+            )
+            INSERT INTO replica_object_availability (
+                replica_id, bucket_id, object_id, object_manifest_id,
+                endpoint, available_fragments, last_seen_at
+            )
+            SELECT replica_id, bucket_id, object_id, manifest_id, $4, $5, now()
+            FROM target
+            ON CONFLICT (replica_id, object_manifest_id) DO UPDATE
+            SET endpoint = EXCLUDED.endpoint,
+                available_fragments = EXCLUDED.available_fragments,
+                last_seen_at = now()
+            RETURNING
+                replica_id::text,
+                (SELECT replica_name FROM target) AS replica_name,
+                (SELECT bucket_name FROM target) AS bucket_name,
+                (SELECT object_key FROM target) AS object_key,
+                endpoint,
+                available_fragments,
+                last_seen_at
+            "#,
+        )
+        .bind(replica_id)
+        .bind(bucket_name)
+        .bind(object_key)
+        .bind(endpoint)
+        .bind(available_fragments_json)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to record replica object availability")?;
+
+        let Some(row) = row else {
+            bail!("replica availability target is not authorized or not available");
+        };
+
+        availability_record_from_row(row)
+    }
+
+    pub async fn list_authorized_replica_sources(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<Vec<ReplicaAvailabilityRecord>> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let rows = query(
+            r#"
+            SELECT
+                r.id::text AS replica_id,
+                r.name AS replica_name,
+                b.name AS bucket_name,
+                o.object_key,
+                a.endpoint,
+                a.available_fragments,
+                a.last_seen_at
+            FROM replica_object_availability a
+            JOIN replica_credentials r ON r.id = a.replica_id
+            JOIN buckets b ON b.id = a.bucket_id
+            JOIN objects o ON o.id = a.object_id
+            JOIN object_versions v ON v.id = o.current_version_id
+            JOIN object_manifests m ON m.object_version_id = v.id
+            JOIN bucket_policies p ON p.bucket_id = b.id
+            WHERE b.name = $1
+              AND o.object_key = $2
+              AND a.object_manifest_id = m.id
+              AND r.revoked_at IS NULL
+              AND r.allowed_buckets ? b.name
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+              AND p.allow_replica_edge = TRUE
+              AND a.last_seen_at > now() - interval '10 minutes'
+            ORDER BY a.last_seen_at DESC, r.name ASC
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list authorized replica sources")?;
+
+        rows.into_iter().map(availability_record_from_row).collect()
     }
 
     pub async fn create_access_package(
@@ -1909,6 +2077,7 @@ fn normalize_optional_name(value: &str) -> Option<String> {
 }
 
 fn replica_summary_from_row(row: PgRow) -> anyhow::Result<ReplicaSummary> {
+    let last_seen_at: Option<chrono::DateTime<chrono::Utc>> = row.get("last_seen_at");
     Ok(ReplicaSummary {
         id: row.get("id"),
         name: row.get("name"),
@@ -1917,6 +2086,20 @@ fn replica_summary_from_row(row: PgRow) -> anyhow::Result<ReplicaSummary> {
         revoked: row
             .get::<Option<chrono::DateTime<chrono::Utc>>, _>("revoked_at")
             .is_some(),
+        available_objects: row.get("available_objects"),
+        last_seen_at: last_seen_at.map(format_datetime),
+    })
+}
+
+fn availability_record_from_row(row: PgRow) -> anyhow::Result<ReplicaAvailabilityRecord> {
+    Ok(ReplicaAvailabilityRecord {
+        replica_id: row.get("replica_id"),
+        replica_name: row.get("replica_name"),
+        bucket: row.get("bucket_name"),
+        key: row.get("object_key"),
+        endpoint: row.get("endpoint"),
+        available_fragments: parse_i64_vec(row.get("available_fragments"))?,
+        last_seen_at: format_datetime(row.get("last_seen_at")),
     })
 }
 
@@ -1947,6 +2130,10 @@ fn audit_event_from_row(row: PgRow) -> AuditEventRecord {
 
 fn parse_string_vec(value: serde_json::Value) -> anyhow::Result<Vec<String>> {
     serde_json::from_value(value).context("failed to parse string list")
+}
+
+fn parse_i64_vec(value: serde_json::Value) -> anyhow::Result<Vec<i64>> {
+    serde_json::from_value(value).context("failed to parse integer list")
 }
 
 fn format_datetime(value: chrono::DateTime<chrono::Utc>) -> String {
@@ -1998,6 +2185,20 @@ pub fn validate_object_key(key: &str) -> anyhow::Result<()> {
             std::path::Component::Normal(part) if !part.is_empty() => {}
             _ => bail!("object key contains an invalid path component"),
         }
+    }
+    Ok(())
+}
+
+fn validate_replica_endpoint(endpoint: &str) -> anyhow::Result<()> {
+    let endpoint = endpoint.trim();
+    if endpoint.is_empty() {
+        bail!("replica endpoint cannot be empty");
+    }
+    if endpoint.len() > 2048 {
+        bail!("replica endpoint is too long");
+    }
+    if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+        bail!("replica endpoint must be an HTTP or HTTPS URL");
     }
     Ok(())
 }

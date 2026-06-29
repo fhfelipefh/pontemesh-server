@@ -144,16 +144,25 @@ fn admin_routes(state: AppState) -> Router<AppState> {
 }
 
 fn pontemesh_routes(state: AppState) -> Router<AppState> {
-    let package_routes = Router::new().route(
-        "/access-packages/{package_id}/objects/{bucket_name}/{*object_key}",
-        get(mesh::get_object_with_access_package),
-    );
+    let package_routes = Router::new()
+        .route(
+            "/access-packages/{package_id}/objects/{bucket_name}/{*object_key}",
+            get(mesh::get_object_with_access_package),
+        )
+        .route(
+            "/access-packages/{package_id}/revalidate/{bucket_name}/{*object_key}",
+            post(mesh::revalidate_access_package),
+        );
 
     let application_routes = Router::new()
         .route("/access-packages", post(mesh::create_access_package))
         .route(
             "/objects/{bucket_name}/manifest/{*object_key}",
             get(mesh::get_manifest),
+        )
+        .route(
+            "/objects/{bucket_name}/sources/{*object_key}",
+            get(mesh::get_sources),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -162,6 +171,10 @@ fn pontemesh_routes(state: AppState) -> Router<AppState> {
 
     let replica_routes = Router::new()
         .route("/replicas/{replica_id}/sync-plan", get(replica::sync_plan))
+        .route(
+            "/replicas/{replica_id}/availability",
+            post(replica::announce_availability),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_replica_credential,
@@ -891,7 +904,7 @@ mod tests {
                     .header(header::COOKIE, &admin_cookie)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
-                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":false,"allowPeerSharing":false}"#,
+                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":true,"allowPeerSharing":false}"#,
                     ))
                     .expect("valid request"),
             )
@@ -1115,6 +1128,134 @@ mod tests {
                 .contains(r#""key":"folder/hello.txt""#)
         );
 
+        let announce_availability = app
+            .clone()
+            .oneshot(
+                signed_replica_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(format!("/pontemesh/replicas/{replica_id}/availability"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(
+                            r#"{"bucket":"test-bucket","key":"folder/hello.txt","endpoint":"https://edge-1.example.test/test-bucket/folder/hello.txt","availableFragments":[0]}"#,
+                        )),
+                    replica_token,
+                    "nonce-availability-0001",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(announce_availability.status(), StatusCode::OK);
+        let availability_body: serde_json::Value =
+            serde_json::from_str(&response_text(announce_availability).await)
+                .expect("availability JSON");
+        assert_eq!(availability_body["replicaId"].as_str(), Some(replica_id));
+        assert_eq!(
+            availability_body["endpoint"].as_str(),
+            Some("https://edge-1.example.test/test-bucket/folder/hello.txt")
+        );
+
+        let listed_replicas = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/replicas")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(listed_replicas.status(), StatusCode::OK);
+        let listed_replicas_body: serde_json::Value =
+            serde_json::from_str(&response_text(listed_replicas).await).expect("replicas JSON");
+        assert_eq!(listed_replicas_body[0]["availableObjects"], 1);
+        assert!(listed_replicas_body[0]["lastSeenAt"].as_str().is_some());
+
+        let sources = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/pontemesh/objects/test-bucket/sources/folder/hello.txt")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(sources.status(), StatusCode::OK);
+        let sources_body: serde_json::Value =
+            serde_json::from_str(&response_text(sources).await).expect("sources JSON");
+        let authorized_sources = sources_body["authorizedSources"]
+            .as_array()
+            .expect("authorized sources");
+        assert_eq!(authorized_sources.len(), 2);
+        assert_eq!(authorized_sources[0]["sourceType"], "ORIGIN");
+        assert_eq!(authorized_sources[1]["sourceType"], "REPLICA_EDGE");
+        assert_eq!(authorized_sources[1]["id"].as_str(), Some(replica_id));
+
+        let package_with_replica = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/pontemesh/access-packages")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"bucket":"test-bucket","key":"folder/hello.txt","ttlSeconds":120}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(package_with_replica.status(), StatusCode::CREATED);
+        let package_with_replica_body: serde_json::Value =
+            serde_json::from_str(&response_text(package_with_replica).await)
+                .expect("access package with replica JSON");
+        assert_eq!(
+            package_with_replica_body["authorizedSources"]
+                .as_array()
+                .expect("package sources")
+                .len(),
+            2
+        );
+        let package_with_replica_id = package_with_replica_body["id"]
+            .as_str()
+            .expect("package with replica id");
+        let package_with_replica_token = package_with_replica_body["packageToken"]
+            .as_str()
+            .expect("package with replica token");
+        let revalidate = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_with_replica_id}/revalidate/test-bucket/folder/hello.txt"
+                    ))
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {package_with_replica_token}"),
+                    )
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(revalidate.status(), StatusCode::OK);
+        let revalidate_body: serde_json::Value =
+            serde_json::from_str(&response_text(revalidate).await).expect("revalidate JSON");
+        assert_eq!(revalidate_body["valid"], true);
+        assert_eq!(
+            revalidate_body["authorizedSources"]
+                .as_array()
+                .expect("revalidated sources")
+                .len(),
+            2
+        );
+
         let revoke = app
             .clone()
             .oneshot(
@@ -1165,7 +1306,30 @@ mod tests {
                 .contains(r#""key":"folder/hello.txt""#)
         );
 
+        let revalidate_after_object_revocation = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_with_replica_id}/revalidate/test-bucket/folder/hello.txt"
+                    ))
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {package_with_replica_token}"),
+                    )
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            revalidate_after_object_revocation.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
         let replayed_sync_plan = app
+            .clone()
             .oneshot(
                 signed_replica_request(
                     Request::builder()
@@ -1179,6 +1343,38 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(replayed_sync_plan.status(), StatusCode::UNAUTHORIZED);
+
+        let revoke_replica = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/api/admin/replicas/{replica_id}/revoke"))
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(revoke_replica.status(), StatusCode::OK);
+
+        let sync_plan_after_replica_revoke = app
+            .oneshot(
+                signed_replica_request(
+                    Request::builder()
+                        .uri(format!("/pontemesh/replicas/{replica_id}/sync-plan"))
+                        .body(Body::empty()),
+                    replica_token,
+                    "nonce-sync-plan-0003",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            sync_plan_after_replica_revoke.status(),
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     struct TestContext {
@@ -1264,6 +1460,7 @@ mod tests {
                     "origin:objects:read".to_owned(),
                     "origin:objects:write".to_owned(),
                     "pontemesh:manifest:read".to_owned(),
+                    "pontemesh:sources:read".to_owned(),
                     "pontemesh:access-package:create".to_owned(),
                 ],
             )

@@ -6,6 +6,8 @@ export type ReplicaSummary = {
   allowedBuckets: string[];
   createdAt: string;
   revoked: boolean;
+  availableObjects: number;
+  lastSeenAt: string | null;
 };
 
 export type CreatedReplicaCredential = {
