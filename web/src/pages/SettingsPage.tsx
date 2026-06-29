@@ -82,6 +82,7 @@ export function SettingsPage() {
           error={error}
           onKeyNameChange={setKeyName}
           onCreateKey={handleCreateKey}
+          onDismissCreatedKey={() => setCreatedKey(null)}
           onRevokeKey={handleRevokeKey}
         />
       </div>

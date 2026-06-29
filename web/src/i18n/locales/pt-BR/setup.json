@@ -87,6 +87,7 @@
       "yes": "Sim",
       "no": "Não",
       "ok": "OK",
+      "cancel": "Cancelar",
       "failed": "Falhou"
     },
     "dashboard": {
@@ -183,6 +184,8 @@
         "title": "Credenciais S3",
         "description": "Chaves para clientes S3-compatíveis.",
         "create": "Criar chave",
+        "createModalTitle": "Criar credencial S3",
+        "createModalDescription": "Defina um nome para identificar esta chave no painel.",
         "name": "Nome",
         "namePlaceholder": "default-admin-key",
         "createdTitle": "Chave criada",

@@ -87,6 +87,7 @@
       "yes": "Yes",
       "no": "No",
       "ok": "OK",
+      "cancel": "Cancel",
       "failed": "Failed"
     },
     "dashboard": {
@@ -183,6 +184,8 @@
         "title": "S3 Credentials",
         "description": "Keys for S3-compatible clients.",
         "create": "Create key",
+        "createModalTitle": "Create S3 credential",
+        "createModalDescription": "Set a name to identify this key in the panel.",
         "name": "Name",
         "namePlaceholder": "default-admin-key",
         "createdTitle": "Key created",
