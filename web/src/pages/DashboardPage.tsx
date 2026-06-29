@@ -69,11 +69,6 @@ export function DashboardPage() {
       label: t("setup.dashboard.health.storage"),
       ok: summary.health.storageWritable,
       value: summary.health.storageWritable ? t("setup.dashboard.health.writable") : t("setup.dashboard.health.notWritable")
-    },
-    {
-      label: t("setup.dashboard.health.setup"),
-      ok: summary.health.setupCompleted,
-      value: summary.health.setupCompleted ? t("setup.dashboard.health.setupReady") : t("setup.dashboard.health.setupIncomplete")
     }
   ];
 
