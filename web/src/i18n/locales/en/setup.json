@@ -177,30 +177,38 @@
     },
     "settings": {
       "title": "Settings",
-      "description": "Instance credentials and operational settings.",
+      "description": "Manage instance credentials and operational parameters.",
       "s3": {
-        "title": "S3 credentials",
+        "title": "S3 Credentials",
         "description": "Keys for S3-compatible clients.",
         "create": "Create key",
         "name": "Name",
         "namePlaceholder": "default-admin-key",
         "createdTitle": "Key created",
         "createdHint": "Copy this secret now. It will not be shown again.",
-        "accessKeyId": "Access key",
-        "secretAccessKey": "Secret key",
-        "copyAccessKeyId": "Copy access key",
-        "copySecretAccessKey": "Copy secret key",
+        "accessKeyId": "Access Key",
+        "secretAccessKey": "Secret Access Key",
+        "copyAccessKeyId": "Copy Access Key",
+        "copySecretAccessKey": "Copy Secret Access Key",
+        "actions": "Actions",
         "status": "Status",
-        "active": "active",
-        "revoked": "revoked",
+        "active": "Active",
+        "revoked": "Revoked",
         "lastUsed": "Last used",
         "createdAt": "Created at",
         "revoke": "Revoke key",
         "loadFailed": "Failed to load S3 keys.",
         "createFailed": "Failed to create S3 key.",
         "revokeFailed": "Failed to revoke S3 key.",
-        "emptyTitle": "No S3 keys created.",
-        "emptyDescription": "Create a key to connect AWS CLI or SDKs."
+        "emptyTitle": "No S3 credentials have been created yet.",
+        "emptyDescription": "Create a key to connect S3-compatible clients.",
+        "helpTitle": "About S3 credentials",
+        "helpText": "S3 credentials allow applications and tools to access your buckets securely. Keep your keys protected and revoke keys that are no longer in use."
+      },
+      "help": {
+        "title": "Need help?",
+        "description": "Read the documentation or contact our team.",
+        "docs": "View documentation"
       }
     }
   }

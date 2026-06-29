@@ -64,12 +64,12 @@
     },
     "nav": {
       "primary": "Navegação principal",
-      "dashboard": "Dashboard",
+      "dashboard": "Painel",
       "buckets": "Buckets",
-      "objects": "Objects",
-      "replicas": "Replicas",
-      "metrics": "Metrics",
-      "settings": "Settings"
+      "objects": "Objetos",
+      "replicas": "Réplicas",
+      "metrics": "Métricas",
+      "settings": "Configurações"
     },
     "roles": {
       "origin": "Origin",
@@ -177,30 +177,38 @@
     },
     "settings": {
       "title": "Configurações",
-      "description": "Credenciais e parâmetros operacionais da instância.",
+      "description": "Gerencie as credenciais e parâmetros operacionais da instância.",
       "s3": {
         "title": "Credenciais S3",
-        "description": "Chaves para clientes S3-compatible.",
+        "description": "Chaves para clientes S3-compatíveis.",
         "create": "Criar chave",
         "name": "Nome",
         "namePlaceholder": "default-admin-key",
         "createdTitle": "Chave criada",
         "createdHint": "Copie este segredo agora. Ele não será exibido novamente.",
-        "accessKeyId": "Access key",
-        "secretAccessKey": "Secret key",
-        "copyAccessKeyId": "Copiar access key",
-        "copySecretAccessKey": "Copiar secret key",
+        "accessKeyId": "Access Key",
+        "secretAccessKey": "Secret Access Key",
+        "copyAccessKeyId": "Copiar Access Key",
+        "copySecretAccessKey": "Copiar Secret Access Key",
+        "actions": "Ações",
         "status": "Status",
-        "active": "ativa",
-        "revoked": "revogada",
+        "active": "Ativa",
+        "revoked": "Revogada",
         "lastUsed": "Último uso",
         "createdAt": "Criada em",
         "revoke": "Revogar chave",
         "loadFailed": "Falha ao carregar chaves S3.",
         "createFailed": "Falha ao criar chave S3.",
         "revokeFailed": "Falha ao revogar chave S3.",
-        "emptyTitle": "Nenhuma chave S3 criada.",
-        "emptyDescription": "Crie uma chave para conectar AWS CLI ou SDKs."
+        "emptyTitle": "Nenhuma credencial S3 criada ainda.",
+        "emptyDescription": "Crie uma chave para conectar clientes S3-compatíveis.",
+        "helpTitle": "Sobre as credenciais S3",
+        "helpText": "As credenciais S3 permitem que aplicações e ferramentas acessem seus buckets de forma segura. Mantenha suas chaves protegidas e revogue aquelas que não estiverem mais em uso."
+      },
+      "help": {
+        "title": "Precisa de ajuda?",
+        "description": "Consulte a documentação.",
+        "docs": "Ver documentação"
       }
     }
   }
