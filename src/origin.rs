@@ -274,6 +274,8 @@ async fn put_object_inner(
         .unwrap_or("application/octet-stream")
         .to_owned();
     let sha256 = format!("{:x}", Sha256::digest(&body));
+    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
+    let manifest = catalog::build_object_manifest(&body, policy.fragment_size_bytes)?;
 
     let storage_path = config::configured_storage_dir(&state.paths)?;
     let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
@@ -296,6 +298,7 @@ async fn put_object_inner(
             content_type,
             sha256,
             storage_path: object_path.display().to_string(),
+            manifest,
         })
         .await
 }

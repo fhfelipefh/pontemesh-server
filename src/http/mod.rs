@@ -852,6 +852,24 @@ mod tests {
             StatusCode::OK,
         );
 
+        let admin_cookie = login_cookie(app.clone()).await;
+        let policy_update = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/buckets/test-bucket/policy")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":false,"allowPeerSharing":false}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(policy_update.status(), StatusCode::OK);
+
         assert_status(
             s3_app
                 .clone()
@@ -886,7 +904,19 @@ mod tests {
                 .fetch_one(ctx.catalog.pool())
                 .await
                 .expect("count object versions");
+        let manifests: i64 =
+            sqlx_core::query_scalar::query_scalar("SELECT COUNT(*)::bigint FROM object_manifests")
+                .fetch_one(ctx.catalog.pool())
+                .await
+                .expect("count object manifests");
+        let fragments: i64 = sqlx_core::query_scalar::query_scalar(
+            "SELECT COUNT(*)::bigint FROM object_manifest_fragments",
+        )
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("count object manifest fragments");
         assert_eq!((buckets, objects, versions), (1, 1, 1));
+        assert_eq!((manifests, fragments), (1, 1));
 
         let range_get = s3_app
             .clone()
@@ -905,24 +935,6 @@ mod tests {
         assert_eq!(range_get.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(response_text(range_get).await, "hello");
 
-        let admin_cookie = login_cookie(app.clone()).await;
-        let policy_update = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::PUT)
-                    .uri("/api/admin/buckets/test-bucket/policy")
-                    .header(header::COOKIE, &admin_cookie)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":false,"allowPeerSharing":false}"#,
-                    ))
-                    .expect("valid request"),
-            )
-            .await
-            .expect("router response");
-        assert_eq!(policy_update.status(), StatusCode::OK);
-
         let manifest = app
             .clone()
             .oneshot(
@@ -935,11 +947,13 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(manifest.status(), StatusCode::OK);
-        assert!(
-            response_text(manifest)
-                .await
-                .contains(r#""fragmentSizeBytes":1024"#)
-        );
+        let manifest_body: serde_json::Value =
+            serde_json::from_str(&response_text(manifest).await).expect("manifest JSON");
+        assert_eq!(manifest_body["fragmentSizeBytes"], 1024);
+        let manifest_id = manifest_body["manifestId"]
+            .as_str()
+            .expect("manifest id")
+            .to_owned();
 
         let package = app
             .clone()
@@ -957,6 +971,24 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(package.status(), StatusCode::CREATED);
+        let package_body: serde_json::Value =
+            serde_json::from_str(&response_text(package).await).expect("access package JSON");
+        assert_eq!(
+            package_body["manifestId"].as_str(),
+            Some(manifest_id.as_str())
+        );
+        assert_eq!(
+            package_body["manifest"]["manifestId"].as_str(),
+            Some(manifest_id.as_str())
+        );
+        let package_manifest_id: Option<String> = sqlx_core::query_scalar::query_scalar(
+            "SELECT object_manifest_id::text FROM access_packages WHERE id = $1::uuid",
+        )
+        .bind(package_body["id"].as_str().expect("access package id"))
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("access package manifest id");
+        assert_eq!(package_manifest_id.as_deref(), Some(manifest_id.as_str()));
 
         let metrics = app
             .clone()

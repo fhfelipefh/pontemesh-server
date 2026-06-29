@@ -4,6 +4,7 @@ use crate::{
 };
 use anyhow::{Context, bail};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use sqlx::{PgPool, PgPoolOptions, PgRow, Postgres};
 use sqlx_core::{query::query, query_scalar::query_scalar, row::Row, transaction::Transaction};
 use std::{net::IpAddr, path::Path};
@@ -79,6 +80,52 @@ pub struct NewObject {
     pub content_type: String,
     pub sha256: String,
     pub storage_path: String,
+    pub manifest: NewObjectManifest,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewObjectManifest {
+    pub fragment_size_bytes: i64,
+    pub fragments: Vec<NewObjectFragment>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewObjectFragment {
+    pub index: i64,
+    pub byte_range_start: i64,
+    pub byte_range_end: i64,
+    pub size_bytes: i64,
+    pub sha256: String,
+    pub priority: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ObjectManifest {
+    pub manifest_id: String,
+    pub object_id: String,
+    pub bucket: String,
+    pub key: String,
+    pub version: String,
+    pub total_size_bytes: i64,
+    pub content_type: String,
+    pub object_hash_algorithm: String,
+    pub object_sha256: String,
+    pub fragment_size_bytes: i64,
+    pub availability_state: String,
+    pub created_at: String,
+    pub fragments: Vec<ObjectManifestFragment>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ObjectManifestFragment {
+    pub index: i64,
+    pub fragment_id: String,
+    pub byte_range_start: i64,
+    pub byte_range_end: i64,
+    pub size_bytes: i64,
+    pub hash_algorithm: String,
+    pub sha256: String,
+    pub priority: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -188,6 +235,7 @@ pub struct AccessPackageRecord {
     pub application_id: String,
     pub bucket_name: String,
     pub object_key: String,
+    pub manifest_id: String,
     pub expires_at: String,
     pub created_at: String,
 }
@@ -700,6 +748,46 @@ impl Catalog {
         .fetch_one(&mut *tx)
         .await
         .context("failed to register object version")?;
+        let version_id = version_row.get::<String, _>("id");
+
+        let manifest_id = query(
+            r#"
+            INSERT INTO object_manifests (
+                object_version_id, fragment_size_bytes, object_hash_algorithm, object_hash
+            )
+            VALUES ($1::uuid, $2, 'SHA-256', $3)
+            RETURNING id::text
+            "#,
+        )
+        .bind(&version_id)
+        .bind(object.manifest.fragment_size_bytes)
+        .bind(&object.sha256)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to register object manifest")?
+        .get::<String, _>("id");
+
+        for fragment in &object.manifest.fragments {
+            query(
+                r#"
+                INSERT INTO object_manifest_fragments (
+                    manifest_id, fragment_index, byte_range_start, byte_range_end,
+                    size_bytes, hash_algorithm, fragment_hash, priority
+                )
+                VALUES ($1::uuid, $2, $3, $4, $5, 'SHA-256', $6, $7)
+                "#,
+            )
+            .bind(&manifest_id)
+            .bind(fragment.index)
+            .bind(fragment.byte_range_start)
+            .bind(fragment.byte_range_end)
+            .bind(fragment.size_bytes)
+            .bind(&fragment.sha256)
+            .bind(&fragment.priority)
+            .execute(&mut *tx)
+            .await
+            .context("failed to register object manifest fragment")?;
+        }
 
         query(
             r#"
@@ -709,7 +797,7 @@ impl Catalog {
             WHERE id = $2::uuid
             "#,
         )
-        .bind(version_row.get::<String, _>("id"))
+        .bind(&version_id)
         .bind(&object_id)
         .execute(&mut *tx)
         .await
@@ -771,6 +859,96 @@ impl Catalog {
         .context("failed to load object")?;
 
         Ok(row.map(object_record_from_row))
+    }
+
+    pub async fn get_object_manifest(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<Option<ObjectManifest>> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let row = query(
+            r#"
+            SELECT
+                m.id::text AS manifest_id,
+                o.id::text AS object_id,
+                b.name AS bucket,
+                o.object_key,
+                v.object_hash,
+                v.size_bytes,
+                v.content_type,
+                m.object_hash_algorithm,
+                m.fragment_size_bytes,
+                o.state,
+                m.created_at
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            JOIN object_versions v ON v.id = o.current_version_id
+            JOIN object_manifests m ON m.object_version_id = v.id
+            WHERE b.name = $1
+              AND o.object_key = $2
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load object manifest")?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let manifest_id = row.get::<String, _>("manifest_id");
+        let fragments = query(
+            r#"
+            SELECT
+                fragment_index, byte_range_start, byte_range_end, size_bytes,
+                hash_algorithm, fragment_hash, priority
+            FROM object_manifest_fragments
+            WHERE manifest_id = $1::uuid
+            ORDER BY fragment_index ASC
+            "#,
+        )
+        .bind(&manifest_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to load object manifest fragments")?;
+
+        Ok(Some(ObjectManifest {
+            manifest_id: manifest_id.clone(),
+            object_id: row.get("object_id"),
+            bucket: row.get("bucket"),
+            key: row.get("object_key"),
+            version: row.get("object_hash"),
+            total_size_bytes: row.get("size_bytes"),
+            content_type: row.get("content_type"),
+            object_hash_algorithm: row.get("object_hash_algorithm"),
+            object_sha256: row.get("object_hash"),
+            fragment_size_bytes: row.get("fragment_size_bytes"),
+            availability_state: row.get("state"),
+            created_at: format_datetime(row.get("created_at")),
+            fragments: fragments
+                .into_iter()
+                .map(|fragment| {
+                    let index = fragment.get("fragment_index");
+                    let sha256 = fragment.get("fragment_hash");
+                    ObjectManifestFragment {
+                        index,
+                        fragment_id: format!("{manifest_id}:{index}:{sha256}"),
+                        byte_range_start: fragment.get("byte_range_start"),
+                        byte_range_end: fragment.get("byte_range_end"),
+                        size_bytes: fragment.get("size_bytes"),
+                        hash_algorithm: fragment.get("hash_algorithm"),
+                        sha256,
+                        priority: fragment.get("priority"),
+                    }
+                })
+                .collect(),
+        }))
     }
 
     pub async fn delete_object(&self, bucket_name: &str, object_key: &str) -> anyhow::Result<()> {
@@ -1306,18 +1484,21 @@ impl Catalog {
         let row = query(
             r#"
             WITH target AS (
-                SELECT b.id AS bucket_id, o.id AS object_id
+                SELECT b.id AS bucket_id, o.id AS object_id, m.id AS manifest_id
                 FROM buckets b
                 JOIN objects o ON o.bucket_id = b.id
+                JOIN object_versions v ON v.id = o.current_version_id
+                JOIN object_manifests m ON m.object_version_id = v.id
                 WHERE b.name = $3 AND o.object_key = $4
                   AND b.deleted_at IS NULL AND o.deleted_at IS NULL
+                  AND o.state = 'AVAILABLE'
             )
             INSERT INTO access_packages (
-                package_token_hash, application_id, bucket_id, object_id, expires_at
+                package_token_hash, application_id, bucket_id, object_id, object_manifest_id, expires_at
             )
-            SELECT $1, $2::uuid, bucket_id, object_id, $5
+            SELECT $1, $2::uuid, bucket_id, object_id, manifest_id, $5
             FROM target
-            RETURNING id::text, expires_at, created_at
+            RETURNING id::text, object_manifest_id::text, expires_at, created_at
             "#,
         )
         .bind(package_token_hash)
@@ -1339,6 +1520,7 @@ impl Catalog {
             application_id: application_id.to_owned(),
             bucket_name: bucket_name.to_owned(),
             object_key: object_key.to_owned(),
+            manifest_id: row.get("object_manifest_id"),
             expires_at: format_datetime(row.get("expires_at")),
             created_at: format_datetime(row.get("created_at")),
         })
@@ -1726,6 +1908,47 @@ pub fn validate_object_key(key: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn build_object_manifest(
+    bytes: &[u8],
+    fragment_size_bytes: i64,
+) -> anyhow::Result<NewObjectManifest> {
+    if fragment_size_bytes <= 0 {
+        bail!("fragmentSizeBytes must be positive");
+    }
+    let fragment_size =
+        usize::try_from(fragment_size_bytes).context("fragment size is too large")?;
+    let fragments = bytes
+        .chunks(fragment_size)
+        .enumerate()
+        .map(|(index, chunk)| {
+            let start = index
+                .checked_mul(fragment_size)
+                .and_then(|value| i64::try_from(value).ok())
+                .ok_or_else(|| anyhow::anyhow!("fragment byte range is too large"))?;
+            let size_bytes =
+                i64::try_from(chunk.len()).context("fragment size cannot fit in i64")?;
+            let end = start + size_bytes.saturating_sub(1);
+            Ok(NewObjectFragment {
+                index: i64::try_from(index).context("fragment index cannot fit in i64")?,
+                byte_range_start: start,
+                byte_range_end: end,
+                size_bytes,
+                sha256: format!("{:x}", Sha256::digest(chunk)),
+                priority: if index == 0 {
+                    "INITIAL".to_owned()
+                } else {
+                    "NORMAL".to_owned()
+                },
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    Ok(NewObjectManifest {
+        fragment_size_bytes,
+        fragments,
+    })
+}
+
 fn map_unique_violation(message: &'static str) -> impl Fn(sqlx_core::Error) -> anyhow::Error {
     move |error| match &error {
         sqlx_core::Error::Database(database_error)
@@ -1753,5 +1976,31 @@ mod tests {
         assert_eq!(total_pages(10, 10), 1);
         assert_eq!(total_pages(11, 10), 2);
         assert_eq!(total_pages(101, 10), 11);
+    }
+
+    #[test]
+    fn object_manifest_fragments_cover_object_ranges_and_hashes() {
+        let manifest = build_object_manifest(b"abcdef", 2).expect("manifest");
+
+        assert_eq!(manifest.fragment_size_bytes, 2);
+        assert_eq!(manifest.fragments.len(), 3);
+        assert_eq!(manifest.fragments[0].index, 0);
+        assert_eq!(manifest.fragments[0].byte_range_start, 0);
+        assert_eq!(manifest.fragments[0].byte_range_end, 1);
+        assert_eq!(manifest.fragments[0].size_bytes, 2);
+        assert_eq!(manifest.fragments[0].priority, "INITIAL");
+        assert_eq!(
+            manifest.fragments[0].sha256,
+            format!("{:x}", Sha256::digest(b"ab"))
+        );
+        assert_eq!(manifest.fragments[2].byte_range_start, 4);
+        assert_eq!(manifest.fragments[2].byte_range_end, 5);
+        assert_eq!(manifest.fragments[2].priority, "NORMAL");
+    }
+
+    #[test]
+    fn object_manifest_rejects_invalid_fragment_size() {
+        assert!(build_object_manifest(b"abc", 0).is_err());
+        assert!(build_object_manifest(b"abc", -1).is_err());
     }
 }

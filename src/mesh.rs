@@ -1,10 +1,10 @@
 use crate::{
     audit,
     auth::ApplicationIdentity,
-    catalog::{BucketPolicy, ObjectRecord},
+    catalog::{BucketPolicy, ObjectManifest},
     http::AppState,
 };
-use anyhow::{Context, bail};
+use anyhow::bail;
 use axum::{
     Extension, Json,
     extract::{Path, State},
@@ -12,8 +12,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::fs;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +29,7 @@ pub struct AccessPackageResponse {
     bucket: String,
     key: String,
     version: String,
+    manifest_id: String,
     expires_at: String,
     scope: Vec<String>,
     authorized_sources: Vec<AuthorizedSource>,
@@ -188,6 +187,7 @@ async fn create_access_package_inner(
         bucket: payload.bucket,
         key: payload.key,
         version: manifest.version.clone(),
+        manifest_id: record.manifest_id,
         expires_at: record.expires_at.clone(),
         scope: vec![
             "object:read".to_owned(),
@@ -216,17 +216,17 @@ async fn load_manifest(
     bucket_name: &str,
     object_key: &str,
 ) -> anyhow::Result<ManifestResponse> {
-    let object = state
+    let manifest = state
         .catalog
-        .get_object_record(bucket_name, object_key)
+        .get_object_manifest(bucket_name, object_key)
         .await?
         .ok_or_else(|| anyhow::anyhow!("object not found"))?;
-    if object.state != "AVAILABLE" {
+    if manifest.availability_state != "AVAILABLE" {
         bail!("object is not available");
     }
 
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
-    build_manifest_with_policy(bucket_name, object_key, object, &policy)
+    build_manifest_with_policy(bucket_name, object_key, manifest, &policy)
 }
 
 async fn load_manifest_with_policy(
@@ -235,65 +235,62 @@ async fn load_manifest_with_policy(
     object_key: &str,
     policy: &BucketPolicy,
 ) -> anyhow::Result<ManifestResponse> {
-    let object = state
+    let manifest = state
         .catalog
-        .get_object_record(bucket_name, object_key)
+        .get_object_manifest(bucket_name, object_key)
         .await?
         .ok_or_else(|| anyhow::anyhow!("object not found"))?;
-    if object.state != "AVAILABLE" {
+    if manifest.availability_state != "AVAILABLE" {
         bail!("object is not available");
     }
 
-    build_manifest_with_policy(bucket_name, object_key, object, policy)
+    build_manifest_with_policy(bucket_name, object_key, manifest, policy)
 }
 
 fn build_manifest_with_policy(
-    bucket_name: &str,
-    object_key: &str,
-    object: ObjectRecord,
-    policy: &BucketPolicy,
+    _bucket_name: &str,
+    _object_key: &str,
+    manifest: ObjectManifest,
+    _policy: &BucketPolicy,
 ) -> anyhow::Result<ManifestResponse> {
-    let bytes = fs::read(&object.storage_path)
-        .with_context(|| format!("failed to read object data {}", object.storage_path))?;
-    let mut fragments = Vec::new();
-    let fragment_size =
-        usize::try_from(policy.fragment_size_bytes).context("fragment size is too large")?;
-
-    for (index, chunk) in bytes.chunks(fragment_size).enumerate() {
-        let start = index * fragment_size;
-        let end = start + chunk.len().saturating_sub(1);
-        let sha256 = format!("{:x}", Sha256::digest(chunk));
-        fragments.push(FragmentDescriptor {
-            index,
-            fragment_id: format!("{}:{index}:{sha256}", object.sha256),
-            byte_range_start: start as u64,
-            byte_range_end: end as u64,
-            size_bytes: chunk.len(),
-            hash_algorithm: "SHA-256".to_owned(),
-            sha256,
-            priority: if index == 0 {
-                "INITIAL".to_owned()
-            } else {
-                "NORMAL".to_owned()
-            },
-            fallback_range_header: format!("bytes={start}-{end}"),
-        });
-    }
-
     Ok(ManifestResponse {
-        manifest_id: format!("manifest:{}:{}:{}", bucket_name, object_key, object.sha256),
-        object_id: format!("{bucket_name}/{object_key}"),
-        bucket: bucket_name.to_owned(),
-        key: object_key.to_owned(),
-        version: object.sha256.clone(),
-        total_size_bytes: object.size_bytes,
-        content_type: object.content_type,
-        object_hash_algorithm: "SHA-256".to_owned(),
-        object_sha256: object.sha256,
-        fragment_size_bytes: fragment_size,
-        fragments,
-        availability_state: object.state,
-        created_at: chrono::Utc::now().to_rfc3339(),
+        manifest_id: manifest.manifest_id,
+        object_id: manifest.object_id,
+        bucket: manifest.bucket,
+        key: manifest.key,
+        version: manifest.version,
+        total_size_bytes: manifest.total_size_bytes,
+        content_type: manifest.content_type,
+        object_hash_algorithm: manifest.object_hash_algorithm,
+        object_sha256: manifest.object_sha256,
+        fragment_size_bytes: usize::try_from(manifest.fragment_size_bytes)
+            .map_err(|_| anyhow::anyhow!("fragment size is too large"))?,
+        fragments: manifest
+            .fragments
+            .into_iter()
+            .map(|fragment| {
+                let start = u64::try_from(fragment.byte_range_start)
+                    .map_err(|_| anyhow::anyhow!("fragment byte range is invalid"))?;
+                let end = u64::try_from(fragment.byte_range_end)
+                    .map_err(|_| anyhow::anyhow!("fragment byte range is invalid"))?;
+                let size = usize::try_from(fragment.size_bytes)
+                    .map_err(|_| anyhow::anyhow!("fragment size is too large"))?;
+                Ok(FragmentDescriptor {
+                    index: usize::try_from(fragment.index)
+                        .map_err(|_| anyhow::anyhow!("fragment index is too large"))?,
+                    fragment_id: fragment.fragment_id,
+                    byte_range_start: start,
+                    byte_range_end: end,
+                    size_bytes: size,
+                    hash_algorithm: fragment.hash_algorithm,
+                    sha256: fragment.sha256,
+                    priority: fragment.priority,
+                    fallback_range_header: format!("bytes={start}-{end}"),
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?,
+        availability_state: manifest.availability_state,
+        created_at: manifest.created_at,
     })
 }
 
