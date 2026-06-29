@@ -11,13 +11,16 @@ use anyhow::Context;
 use axum::{
     Extension, Json,
     body::Bytes,
-    extract::{Multipart, Path, State},
+    extract::{Multipart, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
+
+const DEFAULT_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 10;
+const MAX_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 100;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +84,13 @@ pub struct CreateReplicaCredentialRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateS3AccessKeyRequest {
     name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListS3AccessKeysQuery {
+    page: Option<u32>,
+    page_size: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -422,11 +432,25 @@ pub async fn create_application_credential(
     }
 }
 
-pub async fn list_s3_access_keys(State(state): State<AppState>) -> Response {
-    match state.catalog.list_s3_access_keys().await {
+pub async fn list_s3_access_keys(
+    State(state): State<AppState>,
+    Query(query): Query<ListS3AccessKeysQuery>,
+) -> Response {
+    let (page, page_size) = normalize_s3_access_key_pagination(&query);
+
+    match state.catalog.list_s3_access_keys(page, page_size).await {
         Ok(keys) => Json(keys).into_response(),
         Err(error) => internal_error(error),
     }
+}
+
+fn normalize_s3_access_key_pagination(query: &ListS3AccessKeysQuery) -> (u32, u32) {
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query
+        .page_size
+        .unwrap_or(DEFAULT_S3_ACCESS_KEYS_PAGE_SIZE)
+        .clamp(1, MAX_S3_ACCESS_KEYS_PAGE_SIZE);
+    (page, page_size)
 }
 
 pub async fn create_s3_access_key(
@@ -762,4 +786,40 @@ fn internal_error(error: anyhow::Error) -> Response {
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn s3_access_key_pagination_defaults_to_first_page() {
+        let query = ListS3AccessKeysQuery {
+            page: None,
+            page_size: None,
+        };
+
+        assert_eq!(
+            normalize_s3_access_key_pagination(&query),
+            (1, DEFAULT_S3_ACCESS_KEYS_PAGE_SIZE)
+        );
+    }
+
+    #[test]
+    fn s3_access_key_pagination_clamps_invalid_bounds() {
+        let zero_values = ListS3AccessKeysQuery {
+            page: Some(0),
+            page_size: Some(0),
+        };
+        let huge_page_size = ListS3AccessKeysQuery {
+            page: Some(3),
+            page_size: Some(10_000),
+        };
+
+        assert_eq!(normalize_s3_access_key_pagination(&zero_values), (1, 1));
+        assert_eq!(
+            normalize_s3_access_key_pagination(&huge_page_size),
+            (3, MAX_S3_ACCESS_KEYS_PAGE_SIZE)
+        );
+    }
 }

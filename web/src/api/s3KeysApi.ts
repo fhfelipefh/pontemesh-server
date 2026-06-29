@@ -19,14 +19,26 @@ export type CreatedS3AccessKey = {
   createdAt: string;
 };
 
-export async function listS3AccessKeys(): Promise<S3AccessKeySummary[]> {
-  const response = await fetch("/api/admin/s3/access-keys", {
+export type S3AccessKeysPage = {
+  items: S3AccessKeySummary[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+export async function listS3AccessKeys(page = 1, pageSize = 10): Promise<S3AccessKeysPage> {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize)
+  });
+  const response = await fetch(`/api/admin/s3/access-keys?${params.toString()}`, {
     headers: {
       accept: "application/json"
     }
   });
   await ensureOk(response);
-  return response.json() as Promise<S3AccessKeySummary[]>;
+  return response.json() as Promise<S3AccessKeysPage>;
 }
 
 export async function createS3AccessKey(name?: string): Promise<CreatedS3AccessKey> {

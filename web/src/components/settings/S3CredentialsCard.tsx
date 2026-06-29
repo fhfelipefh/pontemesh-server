@@ -1,13 +1,11 @@
 import { Ban, ChevronLeft, ChevronRight, Info, KeyRound, Plus, X } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CreatedS3AccessKey, S3AccessKeySummary } from "../../api/s3KeysApi";
 import { Button } from "../Button";
 import { ErrorMessage } from "../ErrorMessage";
 import { CopyButton } from "./CopyButton";
 import { StatusBadge } from "./StatusBadge";
-
-const S3_KEYS_PER_PAGE = 5;
 
 type S3CredentialsCardProps = {
   keys: S3AccessKeySummary[];
@@ -17,9 +15,14 @@ type S3CredentialsCardProps = {
   creating: boolean;
   revoking: string | null;
   error: string;
+  currentPage: number;
+  pageSize: number;
+  totalKeys: number;
+  totalPages: number;
   onKeyNameChange: (value: string) => void;
   onCreateKey: () => void;
   onDismissCreatedKey: () => void;
+  onPageChange: (page: number) => void;
   onRevokeKey: (id: string) => void;
 };
 
@@ -31,9 +34,14 @@ export function S3CredentialsCard({
   creating,
   revoking,
   error,
+  currentPage,
+  pageSize,
+  totalKeys,
+  totalPages,
   onKeyNameChange,
   onCreateKey,
   onDismissCreatedKey,
+  onPageChange,
   onRevokeKey
 }: S3CredentialsCardProps) {
   const { t, i18n } = useTranslation();
@@ -89,7 +97,12 @@ export function S3CredentialsCard({
         <S3CredentialsTable
           keys={keys}
           locale={i18n.language}
+          currentPage={currentPage}
+          pageSize={pageSize}
+          totalKeys={totalKeys}
+          totalPages={totalPages}
           revoking={revoking}
+          onPageChange={onPageChange}
           onRevokeKey={onRevokeKey}
         />
       )}
@@ -247,24 +260,29 @@ function S3SecretModal({ createdKey, onClose }: S3SecretModalProps) {
 type S3CredentialsTableProps = {
   keys: S3AccessKeySummary[];
   locale: string;
+  currentPage: number;
+  pageSize: number;
+  totalKeys: number;
+  totalPages: number;
   revoking: string | null;
+  onPageChange: (page: number) => void;
   onRevokeKey: (id: string) => void;
 };
 
-function S3CredentialsTable({ keys, locale, revoking, onRevokeKey }: S3CredentialsTableProps) {
+function S3CredentialsTable({
+  keys,
+  locale,
+  currentPage,
+  pageSize,
+  totalKeys,
+  totalPages,
+  revoking,
+  onPageChange,
+  onRevokeKey
+}: S3CredentialsTableProps) {
   const { t } = useTranslation();
-  const [currentPage, setCurrentPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(keys.length / S3_KEYS_PER_PAGE));
-  const firstVisibleKey = (currentPage - 1) * S3_KEYS_PER_PAGE + 1;
-  const lastVisibleKey = Math.min(currentPage * S3_KEYS_PER_PAGE, keys.length);
-  const visibleKeys = useMemo(
-    () => keys.slice((currentPage - 1) * S3_KEYS_PER_PAGE, currentPage * S3_KEYS_PER_PAGE),
-    [currentPage, keys]
-  );
-
-  useEffect(() => {
-    setCurrentPage((page) => Math.min(page, totalPages));
-  }, [totalPages]);
+  const firstVisibleKey = totalKeys === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const lastVisibleKey = Math.min(currentPage * pageSize, totalKeys);
 
   return (
     <>
@@ -289,7 +307,7 @@ function S3CredentialsTable({ keys, locale, revoking, onRevokeKey }: S3Credentia
             </tr>
           </thead>
           <tbody>
-            {visibleKeys.map((key) => (
+            {keys.map((key) => (
               <tr key={key.id}>
                 <td className="settings-table__name">{key.name ?? t("setup.common.unavailable")}</td>
                 <td>
@@ -326,7 +344,7 @@ function S3CredentialsTable({ keys, locale, revoking, onRevokeKey }: S3Credentia
           </tbody>
         </table>
       </div>
-      {keys.length > S3_KEYS_PER_PAGE && (
+      {totalKeys > pageSize && (
         <nav className="settings-pagination" aria-label={t("setup.settings.s3.paginationLabel")}>
           <p>
             {t("setup.settings.s3.paginationSummary", {
@@ -341,7 +359,7 @@ function S3CredentialsTable({ keys, locale, revoking, onRevokeKey }: S3Credentia
               className="settings-pagination__button"
               aria-label={t("setup.settings.s3.previousPage")}
               disabled={currentPage === 1}
-              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              onClick={() => onPageChange(Math.max(1, currentPage - 1))}
             >
               <ChevronLeft size={16} aria-hidden="true" />
             </button>
@@ -351,7 +369,7 @@ function S3CredentialsTable({ keys, locale, revoking, onRevokeKey }: S3Credentia
               className="settings-pagination__button"
               aria-label={t("setup.settings.s3.nextPage")}
               disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
             >
               <ChevronRight size={16} aria-hidden="true" />
             </button>

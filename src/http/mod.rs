@@ -626,7 +626,11 @@ mod tests {
         assert_eq!(list.status(), StatusCode::OK);
         let list_body: serde_json::Value =
             serde_json::from_str(&response_text(list).await).expect("list key JSON");
-        let keys = list_body.as_array().expect("keys array");
+        assert_eq!(list_body["page"], 1);
+        assert_eq!(list_body["pageSize"], 10);
+        assert_eq!(list_body["total"], 2);
+        assert_eq!(list_body["totalPages"], 1);
+        let keys = list_body["items"].as_array().expect("keys array");
         assert_eq!(keys.len(), 2);
         let listed_created = keys
             .iter()
@@ -635,6 +639,32 @@ mod tests {
         assert_eq!(listed_created["isActive"], true);
         assert!(listed_created.get("secretAccessKey").is_none());
         assert!(listed_created.get("secretKeyHash").is_none());
+
+        let second_page = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/s3-access-keys?page=2&pageSize=1")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(second_page.status(), StatusCode::OK);
+        let second_page_body: serde_json::Value =
+            serde_json::from_str(&response_text(second_page).await).expect("second page JSON");
+        assert_eq!(second_page_body["page"], 2);
+        assert_eq!(second_page_body["pageSize"], 1);
+        assert_eq!(second_page_body["total"], 2);
+        assert_eq!(second_page_body["totalPages"], 2);
+        assert_eq!(
+            second_page_body["items"]
+                .as_array()
+                .expect("second page keys")
+                .len(),
+            1
+        );
 
         let row: (String, Option<String>, bool, String, Vec<u8>) = sqlx_core::query_as::query_as(
             r#"
@@ -683,7 +713,8 @@ mod tests {
             serde_json::from_str(&response_text(list_after_revoke).await)
                 .expect("list revoked key JSON");
         let revoked_key = list_after_revoke_body
-            .as_array()
+            .get("items")
+            .and_then(|items| items.as_array())
             .expect("keys array")
             .iter()
             .find(|key| key["accessKeyId"] == access_key_id)

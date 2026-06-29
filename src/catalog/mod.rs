@@ -120,6 +120,16 @@ pub struct S3AccessKeySummary {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PaginatedS3AccessKeys {
+    pub items: Vec<S3AccessKeySummary>,
+    pub page: u32,
+    pub page_size: u32,
+    pub total: i64,
+    pub total_pages: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreatedS3AccessKey {
     pub id: String,
     pub name: Option<String>,
@@ -940,23 +950,44 @@ impl Catalog {
         })
     }
 
-    pub async fn list_s3_access_keys(&self) -> anyhow::Result<Vec<S3AccessKeySummary>> {
+    pub async fn list_s3_access_keys(
+        &self,
+        page: u32,
+        page_size: u32,
+    ) -> anyhow::Result<PaginatedS3AccessKeys> {
+        let total: i64 = query_scalar("SELECT COUNT(*) FROM s3_access_keys")
+            .fetch_one(&self.pool)
+            .await
+            .context("failed to count S3 access keys")?;
+        let total_pages = total_pages(total, page_size);
+        let page = page.min(total_pages).max(1);
+        let offset = i64::from(page.saturating_sub(1)) * i64::from(page_size);
+        let limit = i64::from(page_size);
         let rows = query(
             r#"
             SELECT id::text, name, access_key_id, user_id::text, is_active,
                    created_at, revoked_at, last_used_at
             FROM s3_access_keys
             ORDER BY created_at DESC, access_key_id ASC
+            LIMIT $1 OFFSET $2
             "#,
         )
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&self.pool)
         .await
         .context("failed to list S3 access keys")?;
 
-        Ok(rows
-            .into_iter()
-            .map(s3_access_key_summary_from_row)
-            .collect())
+        Ok(PaginatedS3AccessKeys {
+            items: rows
+                .into_iter()
+                .map(s3_access_key_summary_from_row)
+                .collect(),
+            page,
+            page_size,
+            total,
+            total_pages,
+        })
     }
 
     pub async fn revoke_s3_access_key(&self, access_key_id: &str) -> anyhow::Result<()> {
@@ -1584,6 +1615,14 @@ fn s3_access_key_summary_from_row(row: PgRow) -> S3AccessKeySummary {
     }
 }
 
+fn total_pages(total: i64, page_size: u32) -> u32 {
+    if total <= 0 {
+        return 1;
+    }
+    let page_size = i64::from(page_size.max(1));
+    ((total + page_size - 1) / page_size) as u32
+}
+
 fn normalize_optional_name(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -1695,5 +1734,24 @@ fn map_unique_violation(message: &'static str) -> impl Fn(sqlx_core::Error) -> a
             anyhow::anyhow!("{message}")
         }
         _ => anyhow::Error::new(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn total_pages_never_returns_zero_for_empty_collections() {
+        assert_eq!(total_pages(0, 10), 1);
+        assert_eq!(total_pages(-1, 10), 1);
+    }
+
+    #[test]
+    fn total_pages_rounds_up_partial_pages() {
+        assert_eq!(total_pages(1, 10), 1);
+        assert_eq!(total_pages(10, 10), 1);
+        assert_eq!(total_pages(11, 10), 2);
+        assert_eq!(total_pages(101, 10), 11);
     }
 }

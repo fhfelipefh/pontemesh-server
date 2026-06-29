@@ -9,6 +9,8 @@ import {
 } from "../api/s3KeysApi";
 import { S3CredentialsCard } from "../components/settings/S3CredentialsCard";
 
+const S3_KEYS_PAGE_SIZE = 10;
+
 export function SettingsPage() {
   const { t } = useTranslation();
   const [keys, setKeys] = useState<S3AccessKeySummary[]>([]);
@@ -18,12 +20,19 @@ export function SettingsPage() {
   const [creating, setCreating] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalKeys, setTotalKeys] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
-  const refreshKeys = useCallback(async () => {
+  const refreshKeys = useCallback(async (page: number) => {
     setLoading(true);
     setError("");
     try {
-      setKeys(await listS3AccessKeys());
+      const result = await listS3AccessKeys(page, S3_KEYS_PAGE_SIZE);
+      setKeys(result.items);
+      setCurrentPage(result.page);
+      setTotalKeys(result.total);
+      setTotalPages(result.totalPages);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t("setup.settings.s3.loadFailed"));
     } finally {
@@ -32,7 +41,7 @@ export function SettingsPage() {
   }, [t]);
 
   useEffect(() => {
-    void refreshKeys();
+    void refreshKeys(1);
   }, [refreshKeys]);
 
   async function handleCreateKey() {
@@ -41,7 +50,7 @@ export function SettingsPage() {
     try {
       const nextKey = await createS3AccessKey(keyName);
       setCreatedKey(nextKey);
-      await refreshKeys();
+      await refreshKeys(1);
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : t("setup.settings.s3.createFailed"));
     } finally {
@@ -54,7 +63,7 @@ export function SettingsPage() {
     setError("");
     try {
       await revokeS3AccessKey(id);
-      await refreshKeys();
+      await refreshKeys(currentPage);
     } catch (revokeError) {
       setError(revokeError instanceof Error ? revokeError.message : t("setup.settings.s3.revokeFailed"));
     } finally {
@@ -80,9 +89,14 @@ export function SettingsPage() {
           creating={creating}
           revoking={revoking}
           error={error}
+          currentPage={currentPage}
+          pageSize={S3_KEYS_PAGE_SIZE}
+          totalKeys={totalKeys}
+          totalPages={totalPages}
           onKeyNameChange={setKeyName}
           onCreateKey={handleCreateKey}
           onDismissCreatedKey={() => setCreatedKey(null)}
+          onPageChange={(page) => void refreshKeys(page)}
           onRevokeKey={handleRevokeKey}
         />
       </div>
