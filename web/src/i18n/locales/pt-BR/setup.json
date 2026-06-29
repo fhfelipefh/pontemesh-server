@@ -92,12 +92,12 @@
       "version": "Versão",
       "uptime": "Tempo em execução",
       "memory": "Memória",
-      "realChecks": "verificações reais",
       "totalBuckets": "Total de buckets",
       "totalObjects": "Total de objetos",
       "totalBytes": "Bytes armazenados",
       "warnings": "Avisos de coleta",
       "loadFailed": "Falha ao carregar dashboard.",
+      "updateError": "Não foi possível atualizar os dados agora.",
       "cards": {
         "instance": "Status da instância",
         "storage": "Armazenamento",
@@ -107,7 +107,7 @@
         "health": "Saúde"
       },
       "storage": {
-        "title": "Uso real de armazenamento",
+        "title": "Uso armazenamento",
         "used": "Usado",
         "available": "Disponível",
         "total": "Total",
@@ -120,11 +120,19 @@
       },
       "health": {
         "title": "Saúde da instância",
-        "description": "Verificações feitas pelo backend nesta instância.",
-        "database": "Catálogo conectado",
-        "storage": "Storage gravável",
+        "description": "Verificações reais feitas pelo backend nesta instância.",
+        "database": "Banco de dados",
+        "storage": "Storage",
         "setup": "Setup concluído",
-        "authenticated": "Sessão autenticada"
+        "connected": "conectado",
+        "unavailable": "indisponível",
+        "writable": "gravável",
+        "notWritable": "sem permissão de escrita",
+        "setupReady": "concluído",
+        "setupIncomplete": "pendente",
+        "operational": "sem alertas",
+        "attention": "requer atenção",
+        "alert": "Uma ou mais verificações da instância requerem atenção."
       },
       "duration": {
         "seconds": "{{count}}s",

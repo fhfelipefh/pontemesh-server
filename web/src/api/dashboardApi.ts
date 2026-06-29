@@ -31,6 +31,7 @@ export type DashboardSummary = {
     storageWritable: boolean;
     setupCompleted: boolean;
     authenticated: boolean;
+    lastCheckedAt: string;
   };
 };
 

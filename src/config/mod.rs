@@ -18,16 +18,21 @@ pub struct PontemeshHome {
 }
 
 impl PontemeshHome {
-    pub fn from_env() -> anyhow::Result<Self> {
-        let root = env::var_os("PONTEMESH_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(DEFAULT_PONTEMESH_HOME));
-
+    pub fn from_path(root: impl Into<PathBuf>) -> anyhow::Result<Self> {
+        let root = root.into();
         if root.as_os_str().is_empty() {
             bail!("PONTEMESH_HOME cannot be empty");
         }
 
         Ok(Self { root })
+    }
+
+    pub fn from_env() -> anyhow::Result<Self> {
+        let root = env::var_os("PONTEMESH_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_PONTEMESH_HOME));
+
+        Self::from_path(root)
     }
 
     pub fn root(&self) -> &Path {

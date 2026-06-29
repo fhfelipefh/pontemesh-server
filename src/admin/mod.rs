@@ -45,6 +45,7 @@ struct HealthSummary {
     storage_writable: bool,
     setup_completed: bool,
     authenticated: bool,
+    last_checked_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -251,6 +252,7 @@ async fn build_dashboard_summary(state: &AppState) -> anyhow::Result<DashboardSu
             storage_writable,
             setup_completed: state.paths.setup_lock_file().exists(),
             authenticated: true,
+            last_checked_at: chrono::Utc::now(),
         },
     })
 }

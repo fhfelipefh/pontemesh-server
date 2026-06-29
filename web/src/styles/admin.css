@@ -213,7 +213,20 @@
 .admin-hero__meta strong {
   display: block;
   color: var(--pm-deep-navy);
-  font-size: 1.25rem;
+  font-size: 1.02rem;
+}
+
+.dashboard-update-error {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(220, 38, 38, 0.22);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: var(--pm-danger);
+  background: rgba(220, 38, 38, 0.07);
+  font-weight: 800;
 }
 
 .metric-card {
@@ -306,6 +319,19 @@
 .health-list {
   display: grid;
   gap: 10px;
+}
+
+.health-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--pm-danger);
+  background: rgba(220, 38, 38, 0.07);
+  font-size: 0.9rem;
+  font-weight: 800;
 }
 
 .health-list__item {

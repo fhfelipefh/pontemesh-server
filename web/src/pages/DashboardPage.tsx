@@ -1,20 +1,55 @@
-import { ReactNode, useEffect, useState } from "react";
-import { Boxes, CheckCircle2, Cpu, Database, HardDrive, Server, ShieldCheck } from "lucide-react";
-import { Link } from "react-router-dom";
+import { ReactNode, useCallback, useEffect, useState } from "react";
+import { AlertTriangle, Boxes, CheckCircle2, Cpu, Database, HardDrive, Server, ShieldCheck, XCircle } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { DashboardSummary, getDashboardSummary } from "../api/dashboardApi";
+import { HttpError } from "../api/http";
 import { ErrorMessage } from "../components/ErrorMessage";
+
+const DASHBOARD_REFRESH_INTERVAL_MS = 10_000;
 
 export function DashboardPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState("");
+  const [updateError, setUpdateError] = useState("");
+
+  const refreshDashboard = useCallback(async (initial = false) => {
+    try {
+      const nextSummary = await getDashboardSummary();
+      setSummary(nextSummary);
+      setUpdateError("");
+      setError("");
+    } catch (loadError) {
+      if (loadError instanceof HttpError && loadError.status === 401) {
+        navigate("/login", { replace: true });
+        return;
+      }
+
+      if (initial) {
+        setError(loadError instanceof Error ? loadError.message : t("setup.dashboard.loadFailed"));
+      } else {
+        setUpdateError(t("setup.dashboard.updateError"));
+      }
+    }
+  }, [navigate, t]);
 
   useEffect(() => {
-    getDashboardSummary()
-      .then(setSummary)
-      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : t("setup.dashboard.loadFailed")));
-  }, [t]);
+    void refreshDashboard(true);
+  }, [refreshDashboard]);
+
+  useEffect(() => {
+    if (!summary) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshDashboard();
+    }, DASHBOARD_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(interval);
+  }, [refreshDashboard, summary]);
 
   if (error) {
     return <ErrorMessage message={error} />;
@@ -25,11 +60,24 @@ export function DashboardPage() {
   }
 
   const healthItems = [
-    { label: t("setup.dashboard.health.database"), ok: summary.health.databaseConnected },
-    { label: t("setup.dashboard.health.storage"), ok: summary.health.storageWritable },
-    { label: t("setup.dashboard.health.setup"), ok: summary.health.setupCompleted },
-    { label: t("setup.dashboard.health.authenticated"), ok: summary.health.authenticated }
+    {
+      label: t("setup.dashboard.health.database"),
+      ok: summary.health.databaseConnected,
+      value: summary.health.databaseConnected ? t("setup.dashboard.health.connected") : t("setup.dashboard.health.unavailable")
+    },
+    {
+      label: t("setup.dashboard.health.storage"),
+      ok: summary.health.storageWritable,
+      value: summary.health.storageWritable ? t("setup.dashboard.health.writable") : t("setup.dashboard.health.notWritable")
+    },
+    {
+      label: t("setup.dashboard.health.setup"),
+      ok: summary.health.setupCompleted,
+      value: summary.health.setupCompleted ? t("setup.dashboard.health.setupReady") : t("setup.dashboard.health.setupIncomplete")
+    }
   ];
+
+  const failedHealthItems = healthItems.filter((item) => !item.ok);
 
   return (
     <div className="dashboard-grid">
@@ -43,10 +91,16 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="admin-hero__meta">
-          <strong>{summary.instance.version}</strong>
-          <span>{t("setup.dashboard.version")}</span>
+          <strong>{t("setup.dashboard.version")} {summary.instance.version}</strong>
         </div>
       </section>
+
+      {updateError && (
+        <section className="dashboard-update-error" role="status">
+          <AlertTriangle size={17} aria-hidden="true" />
+          <span>{updateError}</span>
+        </section>
+      )}
 
       <MetricCard
         icon={<Server size={20} />}
@@ -81,8 +135,8 @@ export function DashboardPage() {
       <MetricCard
         icon={<ShieldCheck size={20} />}
         label={t("setup.dashboard.cards.health")}
-        value={`${healthItems.filter((item) => item.ok).length}/${healthItems.length}`}
-        detail={t("setup.dashboard.realChecks")}
+        value={`${healthItems.length - failedHealthItems.length}/${healthItems.length}`}
+        detail={failedHealthItems.length === 0 ? t("setup.dashboard.health.operational") : t("setup.dashboard.health.attention")}
       />
 
       <section className="admin-panel admin-panel--wide">
@@ -123,12 +177,22 @@ export function DashboardPage() {
             <p>{t("setup.dashboard.health.description")}</p>
           </div>
         </div>
+        {failedHealthItems.length > 0 && (
+          <div className="health-alert" role="alert">
+            <AlertTriangle size={18} aria-hidden="true" />
+            <span>{t("setup.dashboard.health.alert")}</span>
+          </div>
+        )}
         <div className="health-list">
           {healthItems.map((item) => (
             <div className="health-list__item" key={item.label}>
-              <CheckCircle2 size={17} aria-hidden="true" data-ok={item.ok} />
+              {item.ok ? (
+                <CheckCircle2 size={17} aria-hidden="true" data-ok="true" />
+              ) : (
+                <XCircle size={17} aria-hidden="true" data-ok="false" />
+              )}
               <span>{item.label}</span>
-              <strong>{item.ok ? t("setup.common.ok") : t("setup.common.failed")}</strong>
+              <strong>{item.value}</strong>
             </div>
           ))}
         </div>

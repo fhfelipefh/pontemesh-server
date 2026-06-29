@@ -92,12 +92,12 @@
       "version": "Version",
       "uptime": "Process uptime",
       "memory": "Memory",
-      "realChecks": "real checks",
       "totalBuckets": "Total buckets",
       "totalObjects": "Total objects",
       "totalBytes": "Stored bytes",
       "warnings": "Collection warnings",
       "loadFailed": "Failed to load dashboard.",
+      "updateError": "Could not update dashboard data right now.",
       "cards": {
         "instance": "Instance status",
         "storage": "Storage",
@@ -107,7 +107,7 @@
         "health": "Health"
       },
       "storage": {
-        "title": "Real storage usage",
+        "title": "Storage usage",
         "used": "Used",
         "available": "Available",
         "total": "Total",
@@ -120,11 +120,19 @@
       },
       "health": {
         "title": "Instance health",
-        "description": "Checks performed by the backend on this instance.",
-        "database": "Catalog connected",
-        "storage": "Storage writable",
+        "description": "Real checks performed by the backend on this instance.",
+        "database": "Database",
+        "storage": "Storage",
         "setup": "Setup completed",
-        "authenticated": "Authenticated session"
+        "connected": "connected",
+        "unavailable": "unavailable",
+        "writable": "writable",
+        "notWritable": "not writable",
+        "setupReady": "completed",
+        "setupIncomplete": "pending",
+        "operational": "no alerts",
+        "attention": "needs attention",
+        "alert": "One or more instance checks need attention."
       },
       "duration": {
         "seconds": "{{count}}s",
