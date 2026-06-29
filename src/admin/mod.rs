@@ -170,6 +170,13 @@ pub async fn origin_traffic_metrics(State(state): State<AppState>) -> Response {
     }
 }
 
+pub async fn replica_traffic_metrics(State(state): State<AppState>) -> Response {
+    match state.catalog.replica_traffic_summary().await {
+        Ok(summary) => Json(summary).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
 pub async fn list_buckets(State(state): State<AppState>) -> Response {
     match state.catalog.list_buckets().await {
         Ok(buckets) => Json(buckets).into_response(),
@@ -270,6 +277,28 @@ pub async fn update_bucket_policy(
         .await
     {
         Ok(policy) => {
+            let update_detail = serde_json::json!({
+                "accessPackageTtlSeconds": policy.access_package_ttl_seconds,
+                "fragmentSizeBytes": policy.fragment_size_bytes,
+                "allowReplicaEdge": policy.allow_replica_edge,
+                "allowPeerSharing": policy.allow_peer_sharing
+            });
+            if let Err(error) = state
+                .catalog
+                .record_replica_policy_update_for_bucket(
+                    &bucket_name,
+                    None,
+                    "BUCKET_POLICY_UPDATED",
+                    update_detail,
+                )
+                .await
+            {
+                audit::failure(
+                    "replica_policy_update_persist_failed",
+                    Some(&session.username),
+                    &error.to_string(),
+                );
+            }
             audit::event(
                 "bucket_policy_updated",
                 Some(&session.username),
@@ -373,6 +402,22 @@ pub async fn revoke_object(
 ) -> Response {
     match state.catalog.revoke_object(&bucket_name, &object_key).await {
         Ok(()) => {
+            if let Err(error) = state
+                .catalog
+                .record_replica_policy_update_for_bucket(
+                    &bucket_name,
+                    Some(&object_key),
+                    "OBJECT_REVOKED",
+                    serde_json::json!({ "bucket": bucket_name, "key": object_key }),
+                )
+                .await
+            {
+                audit::failure(
+                    "replica_policy_update_persist_failed",
+                    Some(&session.username),
+                    &error.to_string(),
+                );
+            }
             audit::event(
                 "object_revoked",
                 Some(&session.username),
@@ -427,6 +472,33 @@ pub async fn create_application_credential(
             )
             .await;
             (StatusCode::CREATED, Json(created)).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn revoke_application_credential(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.catalog.revoke_application_credential(&id).await {
+        Ok(()) => {
+            audit::event(
+                "application_credential_revoked",
+                Some(&session.username),
+                "success",
+                &format!("application_id={id}"),
+            );
+            record_admin_audit(
+                &state,
+                "application_credential_revoked",
+                &session.username,
+                "success",
+                &format!("application_id={id}"),
+            )
+            .await;
+            StatusCode::NO_CONTENT.into_response()
         }
         Err(error) => bad_request(error),
     }

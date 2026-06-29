@@ -50,6 +50,17 @@ export type OriginTrafficMetrics = {
   totalBytesServed: number;
 };
 
+export type ReplicaTrafficMetrics = {
+  totalReplicas: number;
+  activeReplicas: number;
+  totalBytesSynced: number;
+  totalBytesServed: number;
+  totalFragmentsSynced: number;
+  totalFragmentsServed: number;
+  syncFailures: number;
+  authFailures: number;
+};
+
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   const response = await fetch("/api/admin/dashboard/summary", {
     headers: {
@@ -78,4 +89,14 @@ export async function getOriginTrafficMetrics(): Promise<OriginTrafficMetrics> {
   });
   await ensureOk(response);
   return response.json() as Promise<OriginTrafficMetrics>;
+}
+
+export async function getReplicaTrafficMetrics(): Promise<ReplicaTrafficMetrics> {
+  const response = await fetch("/api/admin/metrics/replica-traffic", {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<ReplicaTrafficMetrics>;
 }

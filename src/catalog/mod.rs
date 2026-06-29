@@ -202,6 +202,8 @@ pub struct ReplicaSummary {
     pub revoked: bool,
     pub available_objects: i64,
     pub last_seen_at: Option<String>,
+    pub health_status: Option<String>,
+    pub health_reported_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -248,6 +250,75 @@ pub struct ReplicaAvailabilityRecord {
     pub endpoint: String,
     pub available_fragments: Vec<i64>,
     pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplicaHealthReportInput {
+    pub status: String,
+    pub version: Option<String>,
+    pub storage_available_bytes: Option<i64>,
+    pub error_count: i64,
+    pub detail: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaHealthReport {
+    pub replica_id: String,
+    pub status: String,
+    pub version: Option<String>,
+    pub storage_available_bytes: Option<i64>,
+    pub error_count: i64,
+    pub reported_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplicaMetricInput {
+    pub bytes_synced: i64,
+    pub bytes_served: i64,
+    pub fragments_synced: i64,
+    pub fragments_served: i64,
+    pub sync_failures: i64,
+    pub auth_failures: i64,
+    pub avg_latency_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaMetricRecord {
+    pub replica_id: String,
+    pub bytes_synced: i64,
+    pub bytes_served: i64,
+    pub fragments_synced: i64,
+    pub fragments_served: i64,
+    pub sync_failures: i64,
+    pub auth_failures: i64,
+    pub avg_latency_ms: Option<i64>,
+    pub reported_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaTrafficSummary {
+    pub total_replicas: i64,
+    pub active_replicas: i64,
+    pub total_bytes_synced: i64,
+    pub total_bytes_served: i64,
+    pub total_fragments_synced: i64,
+    pub total_fragments_served: i64,
+    pub sync_failures: i64,
+    pub auth_failures: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaPolicyUpdateRecord {
+    pub id: String,
+    pub update_type: String,
+    pub bucket: Option<String>,
+    pub object_key: Option<String>,
+    pub detail: serde_json::Value,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1105,6 +1176,20 @@ impl Catalog {
         rows.into_iter().map(application_summary_from_row).collect()
     }
 
+    pub async fn revoke_application_credential(&self, id: &str) -> anyhow::Result<()> {
+        let result = query(
+            "UPDATE application_credentials SET revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .context("failed to revoke application credential")?;
+        if result.rows_affected() == 0 {
+            bail!("application credential not found or already revoked: {id}");
+        }
+        Ok(())
+    }
+
     pub async fn create_s3_access_key(
         &self,
         user_id: &str,
@@ -1385,7 +1470,9 @@ impl Catalog {
             VALUES ($1, $2, $3)
             RETURNING id::text, name, allowed_buckets, created_at, revoked_at,
                 0::bigint AS available_objects,
-                NULL::timestamptz AS last_seen_at
+                NULL::timestamptz AS last_seen_at,
+                NULL::text AS health_status,
+                NULL::timestamptz AS health_reported_at
             "#,
         )
         .bind(name)
@@ -1411,10 +1498,20 @@ impl Catalog {
                 r.created_at,
                 r.revoked_at,
                 COUNT(a.object_id)::bigint AS available_objects,
-                MAX(a.last_seen_at) AS last_seen_at
+                MAX(a.last_seen_at) AS last_seen_at,
+                h.status AS health_status,
+                h.reported_at AS health_reported_at
             FROM replica_credentials r
             LEFT JOIN replica_object_availability a ON a.replica_id = r.id
-            GROUP BY r.id, r.name, r.allowed_buckets, r.created_at, r.revoked_at
+            LEFT JOIN LATERAL (
+                SELECT status, reported_at
+                FROM replica_health_reports
+                WHERE replica_id = r.id
+                ORDER BY reported_at DESC
+                LIMIT 1
+            ) h ON TRUE
+            GROUP BY r.id, r.name, r.allowed_buckets, r.created_at, r.revoked_at,
+                h.status, h.reported_at
             ORDER BY r.created_at DESC, r.name ASC
             "#,
         )
@@ -1513,6 +1610,48 @@ impl Catalog {
         Ok(())
     }
 
+    pub async fn authorize_replica_object_sync(
+        &self,
+        replica_id: &str,
+        allowed_buckets: &[String],
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<ObjectRecord> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        if !allowed_buckets.iter().any(|bucket| bucket == bucket_name) {
+            bail!("replica is not allowed to synchronize this bucket");
+        }
+
+        let row = query(
+            r#"
+            SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash, v.storage_path,
+                   v.created_at, o.state
+            FROM replica_credentials r
+            JOIN buckets b ON b.name = $2
+            JOIN objects o ON o.bucket_id = b.id AND o.object_key = $3
+            JOIN object_versions v ON v.id = o.current_version_id
+            JOIN bucket_policies p ON p.bucket_id = b.id
+            WHERE r.id = $1::uuid
+              AND r.revoked_at IS NULL
+              AND r.allowed_buckets ? $2
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+              AND p.allow_replica_edge = TRUE
+            "#,
+        )
+        .bind(replica_id)
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to authorize replica object synchronization")?;
+
+        row.map(object_record_from_row)
+            .ok_or_else(|| anyhow::anyhow!("replica object synchronization is not authorized"))
+    }
+
     pub async fn list_replica_sync_objects(
         &self,
         allowed_buckets: &[String],
@@ -1526,10 +1665,12 @@ impl Catalog {
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.id = o.current_version_id
+            JOIN bucket_policies p ON p.bucket_id = b.id
             WHERE b.name = ANY($1)
               AND b.deleted_at IS NULL
               AND o.deleted_at IS NULL
               AND o.state = 'AVAILABLE'
+              AND p.allow_replica_edge = TRUE
             ORDER BY v.created_at DESC, o.object_key ASC
             "#,
         )
@@ -1681,6 +1822,222 @@ impl Catalog {
         rows.into_iter().map(availability_record_from_row).collect()
     }
 
+    pub async fn record_replica_health(
+        &self,
+        replica_id: &str,
+        input: ReplicaHealthReportInput,
+    ) -> anyhow::Result<ReplicaHealthReport> {
+        validate_non_negative(input.error_count, "errorCount")?;
+        let row = query(
+            r#"
+            INSERT INTO replica_health_reports (
+                replica_id, status, version, storage_available_bytes, error_count, detail
+            )
+            SELECT id, $2, $3, $4, $5, $6
+            FROM replica_credentials
+            WHERE id = $1::uuid AND revoked_at IS NULL
+            RETURNING replica_id::text, status, version, storage_available_bytes,
+                error_count, reported_at
+            "#,
+        )
+        .bind(replica_id)
+        .bind(validate_health_status(&input.status)?)
+        .bind(input.version)
+        .bind(input.storage_available_bytes)
+        .bind(input.error_count)
+        .bind(input.detail)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to record replica health")?;
+
+        let Some(row) = row else {
+            bail!("replica not found or revoked");
+        };
+
+        Ok(ReplicaHealthReport {
+            replica_id: row.get("replica_id"),
+            status: row.get("status"),
+            version: row.get("version"),
+            storage_available_bytes: row.get("storage_available_bytes"),
+            error_count: row.get("error_count"),
+            reported_at: format_datetime(row.get("reported_at")),
+        })
+    }
+
+    pub async fn record_replica_metrics(
+        &self,
+        replica_id: &str,
+        input: ReplicaMetricInput,
+    ) -> anyhow::Result<ReplicaMetricRecord> {
+        validate_non_negative(input.bytes_synced, "bytesSynced")?;
+        validate_non_negative(input.bytes_served, "bytesServed")?;
+        validate_non_negative(input.fragments_synced, "fragmentsSynced")?;
+        validate_non_negative(input.fragments_served, "fragmentsServed")?;
+        validate_non_negative(input.sync_failures, "syncFailures")?;
+        validate_non_negative(input.auth_failures, "authFailures")?;
+        if let Some(value) = input.avg_latency_ms {
+            validate_non_negative(value, "avgLatencyMs")?;
+        }
+
+        let row = query(
+            r#"
+            INSERT INTO replica_metric_events (
+                replica_id, bytes_synced, bytes_served, fragments_synced,
+                fragments_served, sync_failures, auth_failures, avg_latency_ms
+            )
+            SELECT id, $2, $3, $4, $5, $6, $7, $8
+            FROM replica_credentials
+            WHERE id = $1::uuid AND revoked_at IS NULL
+            RETURNING replica_id::text, bytes_synced, bytes_served, fragments_synced,
+                fragments_served, sync_failures, auth_failures, avg_latency_ms, reported_at
+            "#,
+        )
+        .bind(replica_id)
+        .bind(input.bytes_synced)
+        .bind(input.bytes_served)
+        .bind(input.fragments_synced)
+        .bind(input.fragments_served)
+        .bind(input.sync_failures)
+        .bind(input.auth_failures)
+        .bind(input.avg_latency_ms)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to record replica metrics")?;
+
+        let Some(row) = row else {
+            bail!("replica not found or revoked");
+        };
+
+        Ok(replica_metric_from_row(row))
+    }
+
+    pub async fn replica_traffic_summary(&self) -> anyhow::Result<ReplicaTrafficSummary> {
+        let row = query(
+            r#"
+            SELECT
+                (SELECT COUNT(*)::bigint FROM replica_credentials) AS total_replicas,
+                (SELECT COUNT(*)::bigint FROM replica_credentials WHERE revoked_at IS NULL) AS active_replicas,
+                COALESCE(SUM(bytes_synced), 0)::bigint AS total_bytes_synced,
+                COALESCE(SUM(bytes_served), 0)::bigint AS total_bytes_served,
+                COALESCE(SUM(fragments_synced), 0)::bigint AS total_fragments_synced,
+                COALESCE(SUM(fragments_served), 0)::bigint AS total_fragments_served,
+                COALESCE(SUM(sync_failures), 0)::bigint AS sync_failures,
+                COALESCE(SUM(auth_failures), 0)::bigint AS auth_failures
+            FROM replica_metric_events
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to summarize replica traffic")?;
+
+        Ok(ReplicaTrafficSummary {
+            total_replicas: row.get("total_replicas"),
+            active_replicas: row.get("active_replicas"),
+            total_bytes_synced: row.get("total_bytes_synced"),
+            total_bytes_served: row.get("total_bytes_served"),
+            total_fragments_synced: row.get("total_fragments_synced"),
+            total_fragments_served: row.get("total_fragments_served"),
+            sync_failures: row.get("sync_failures"),
+            auth_failures: row.get("auth_failures"),
+        })
+    }
+
+    pub async fn record_replica_sync_transfer(
+        &self,
+        replica_id: &str,
+        bytes_synced: i64,
+        fragments_synced: i64,
+    ) -> anyhow::Result<()> {
+        self.record_replica_metrics(
+            replica_id,
+            ReplicaMetricInput {
+                bytes_synced,
+                bytes_served: 0,
+                fragments_synced,
+                fragments_served: 0,
+                sync_failures: 0,
+                auth_failures: 0,
+                avg_latency_ms: None,
+            },
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_replica_policy_updates(
+        &self,
+        replica_id: &str,
+        since: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> anyhow::Result<Vec<ReplicaPolicyUpdateRecord>> {
+        let rows = query(
+            r#"
+            SELECT u.id::text, u.update_type, b.name AS bucket_name, o.object_key,
+                   u.detail, u.created_at
+            FROM replica_policy_updates u
+            JOIN replica_credentials r ON r.id = u.replica_id
+            LEFT JOIN buckets b ON b.id = u.bucket_id
+            LEFT JOIN objects o ON o.id = u.object_id
+            WHERE u.replica_id = $1::uuid
+              AND r.revoked_at IS NULL
+              AND ($2::timestamptz IS NULL OR u.created_at > $2)
+            ORDER BY u.created_at ASC
+            LIMIT 200
+            "#,
+        )
+        .bind(replica_id)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list replica policy updates")?;
+
+        Ok(rows
+            .into_iter()
+            .map(replica_policy_update_from_row)
+            .collect())
+    }
+
+    pub async fn record_replica_policy_update_for_bucket(
+        &self,
+        bucket_name: &str,
+        object_key: Option<&str>,
+        update_type: &str,
+        detail: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        validate_bucket_name(bucket_name)?;
+        if let Some(key) = object_key {
+            validate_object_key(key)?;
+        }
+        let result = query(
+            r#"
+            WITH target AS (
+                SELECT b.id AS bucket_id, o.id AS object_id
+                FROM buckets b
+                LEFT JOIN objects o ON o.bucket_id = b.id AND o.object_key = $2
+                WHERE b.name = $1 AND b.deleted_at IS NULL
+            )
+            INSERT INTO replica_policy_updates (
+                replica_id, update_type, bucket_id, object_id, detail
+            )
+            SELECT r.id, $3, target.bucket_id, target.object_id, $4
+            FROM replica_credentials r
+            CROSS JOIN target
+            WHERE r.revoked_at IS NULL
+              AND r.allowed_buckets ? $1
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .bind(update_type)
+        .bind(detail)
+        .execute(&self.pool)
+        .await
+        .context("failed to record replica policy update")?;
+        if result.rows_affected() == 0 {
+            // No active replica needed this update; that is not an error.
+        }
+        Ok(())
+    }
+
     pub async fn create_access_package(
         &self,
         application_id: &str,
@@ -1756,6 +2113,7 @@ impl Catalog {
                 o.object_key,
                 ap.object_manifest_id::text AS manifest_id
             FROM access_packages ap
+            JOIN application_credentials ac ON ac.id = ap.application_id
             JOIN buckets b ON b.id = ap.bucket_id
             JOIN objects o ON o.id = ap.object_id
             JOIN object_versions v ON v.id = o.current_version_id
@@ -1766,6 +2124,7 @@ impl Catalog {
               AND o.object_key = $4
               AND ap.expires_at > now()
               AND ap.revoked_at IS NULL
+              AND ac.revoked_at IS NULL
               AND b.deleted_at IS NULL
               AND o.deleted_at IS NULL
               AND o.state = 'AVAILABLE'
@@ -2078,6 +2437,7 @@ fn normalize_optional_name(value: &str) -> Option<String> {
 
 fn replica_summary_from_row(row: PgRow) -> anyhow::Result<ReplicaSummary> {
     let last_seen_at: Option<chrono::DateTime<chrono::Utc>> = row.get("last_seen_at");
+    let health_reported_at: Option<chrono::DateTime<chrono::Utc>> = row.get("health_reported_at");
     Ok(ReplicaSummary {
         id: row.get("id"),
         name: row.get("name"),
@@ -2088,6 +2448,8 @@ fn replica_summary_from_row(row: PgRow) -> anyhow::Result<ReplicaSummary> {
             .is_some(),
         available_objects: row.get("available_objects"),
         last_seen_at: last_seen_at.map(format_datetime),
+        health_status: row.get("health_status"),
+        health_reported_at: health_reported_at.map(format_datetime),
     })
 }
 
@@ -2124,6 +2486,33 @@ fn audit_event_from_row(row: PgRow) -> AuditEventRecord {
             .and_then(|value| value.as_str())
             .unwrap_or("")
             .to_owned(),
+        created_at: format_datetime(row.get("created_at")),
+    }
+}
+
+fn replica_metric_from_row(row: PgRow) -> ReplicaMetricRecord {
+    ReplicaMetricRecord {
+        replica_id: row.get("replica_id"),
+        bytes_synced: row.get("bytes_synced"),
+        bytes_served: row.get("bytes_served"),
+        fragments_synced: row.get("fragments_synced"),
+        fragments_served: row.get("fragments_served"),
+        sync_failures: row.get("sync_failures"),
+        auth_failures: row.get("auth_failures"),
+        avg_latency_ms: row.get("avg_latency_ms"),
+        reported_at: format_datetime(row.get("reported_at")),
+    }
+}
+
+fn replica_policy_update_from_row(row: PgRow) -> ReplicaPolicyUpdateRecord {
+    ReplicaPolicyUpdateRecord {
+        id: row.get("id"),
+        update_type: row.get("update_type"),
+        bucket: row.get("bucket_name"),
+        object_key: row.get("object_key"),
+        detail: row
+            .get::<Option<serde_json::Value>, _>("detail")
+            .unwrap_or_else(|| serde_json::json!({})),
         created_at: format_datetime(row.get("created_at")),
     }
 }
@@ -2201,6 +2590,21 @@ fn validate_replica_endpoint(endpoint: &str) -> anyhow::Result<()> {
         bail!("replica endpoint must be an HTTP or HTTPS URL");
     }
     Ok(())
+}
+
+fn validate_non_negative(value: i64, field: &str) -> anyhow::Result<()> {
+    if value < 0 {
+        bail!("{field} must be non-negative");
+    }
+    Ok(())
+}
+
+fn validate_health_status(status: &str) -> anyhow::Result<String> {
+    let normalized = status.trim().to_ascii_uppercase();
+    match normalized.as_str() {
+        "OK" | "DEGRADED" | "UNAVAILABLE" => Ok(normalized),
+        _ => bail!("status must be OK, DEGRADED or UNAVAILABLE"),
+    }
 }
 
 pub fn build_object_manifest(

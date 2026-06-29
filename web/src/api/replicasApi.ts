@@ -8,6 +8,8 @@ export type ReplicaSummary = {
   revoked: boolean;
   availableObjects: number;
   lastSeenAt: string | null;
+  healthStatus: string | null;
+  healthReportedAt: string | null;
 };
 
 export type CreatedReplicaCredential = {

@@ -185,6 +185,10 @@
       "fullObjectRequests": "Full object requests",
       "rangeRequests": "Range requests",
       "totalBytesServed": "Bytes served",
+      "activeReplicas": "Active replicas",
+      "replicaBytesSynced": "Bytes synced to replicas",
+      "replicaFragmentsSynced": "Fragments synced",
+      "replicaFailures": "Replica failures",
       "loadFailed": "Failed to load Origin metrics."
     },
     "replicas": {
@@ -214,6 +218,24 @@
     "settings": {
       "title": "Settings",
       "description": "Manage instance credentials and operational parameters.",
+      "applications": {
+        "title": "Application credentials",
+        "description": "Tokens for SDKs and applications to consume Ponte Mesh contracts.",
+        "name": "Name",
+        "namePlaceholder": "default-sdk",
+        "create": "Create application",
+        "createdTitle": "Application token created",
+        "applicationId": "Application ID",
+        "token": "Token",
+        "copyToken": "Copy application token",
+        "scopes": "Scopes",
+        "revoke": "Revoke application",
+        "loadFailed": "Failed to load application credentials.",
+        "createFailed": "Failed to create application credential.",
+        "revokeFailed": "Failed to revoke application credential.",
+        "emptyTitle": "No application credentials have been created yet.",
+        "emptyDescription": "Create a credential so SDKs can request access packages and manifests."
+      },
       "s3": {
         "title": "S3 Credentials",
         "description": "Keys for S3-compatible clients.",

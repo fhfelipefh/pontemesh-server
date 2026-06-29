@@ -86,6 +86,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             get(admin::origin_traffic_metrics),
         )
         .route(
+            "/api/admin/metrics/replica-traffic",
+            get(admin::replica_traffic_metrics),
+        )
+        .route(
             "/api/admin/buckets",
             get(admin::list_buckets).post(admin::create_bucket),
         )
@@ -112,6 +116,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         .route(
             "/api/admin/application-credentials",
             get(admin::list_application_credentials).post(admin::create_application_credential),
+        )
+        .route(
+            "/api/admin/application-credentials/{id}/revoke",
+            post(admin::revoke_application_credential),
         )
         .route(
             "/api/admin/s3-access-keys",
@@ -172,8 +180,24 @@ fn pontemesh_routes(state: AppState) -> Router<AppState> {
     let replica_routes = Router::new()
         .route("/replicas/{replica_id}/sync-plan", get(replica::sync_plan))
         .route(
+            "/replicas/{replica_id}/objects/{bucket_name}/{*object_key}",
+            get(replica::sync_object),
+        )
+        .route(
             "/replicas/{replica_id}/availability",
             post(replica::announce_availability),
+        )
+        .route(
+            "/replicas/{replica_id}/health",
+            post(replica::report_health),
+        )
+        .route(
+            "/replicas/{replica_id}/metrics",
+            post(replica::report_metrics),
+        )
+        .route(
+            "/replicas/{replica_id}/policy-updates",
+            get(replica::policy_updates),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -1173,6 +1197,110 @@ mod tests {
         assert_eq!(listed_replicas_body[0]["availableObjects"], 1);
         assert!(listed_replicas_body[0]["lastSeenAt"].as_str().is_some());
 
+        let replica_health = app
+            .clone()
+            .oneshot(
+                signed_replica_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(format!("/pontemesh/replicas/{replica_id}/health"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(
+                            r#"{"status":"OK","version":"0.1.0","storageAvailableBytes":4096,"errorCount":0,"detail":{"node":"edge-1"}}"#,
+                        )),
+                    replica_token,
+                    "nonce-health-0001",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replica_health.status(), StatusCode::OK);
+        let replica_health_body: serde_json::Value =
+            serde_json::from_str(&response_text(replica_health).await).expect("health JSON");
+        assert_eq!(replica_health_body["status"], "OK");
+
+        let replica_metric_report = app
+            .clone()
+            .oneshot(
+                signed_replica_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(format!("/pontemesh/replicas/{replica_id}/metrics"))
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(
+                            r#"{"bytesSynced":3,"bytesServed":7,"fragmentsSynced":1,"fragmentsServed":2,"syncFailures":0,"authFailures":0,"avgLatencyMs":12}"#,
+                        )),
+                    replica_token,
+                    "nonce-metrics-0001",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replica_metric_report.status(), StatusCode::OK);
+
+        let replica_sync_object = app
+            .clone()
+            .oneshot(
+                signed_replica_request(
+                    Request::builder()
+                        .uri(format!(
+                            "/pontemesh/replicas/{replica_id}/objects/test-bucket/folder/hello.txt"
+                        ))
+                        .header(header::RANGE, "bytes=0-4")
+                        .body(Body::empty()),
+                    replica_token,
+                    "nonce-replica-object-0001",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replica_sync_object.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response_text(replica_sync_object).await, "hello");
+
+        let replica_metrics = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/replica-traffic")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replica_metrics.status(), StatusCode::OK);
+        let replica_metrics_body: serde_json::Value =
+            serde_json::from_str(&response_text(replica_metrics).await)
+                .expect("replica metrics JSON");
+        assert_eq!(replica_metrics_body["activeReplicas"], 1);
+        assert_eq!(replica_metrics_body["totalBytesSynced"], 8);
+        assert_eq!(replica_metrics_body["totalFragmentsSynced"], 2);
+
+        let listed_replicas_after_health = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/replicas")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(listed_replicas_after_health.status(), StatusCode::OK);
+        let listed_replicas_after_health_body: serde_json::Value =
+            serde_json::from_str(&response_text(listed_replicas_after_health).await)
+                .expect("replicas after health JSON");
+        assert_eq!(listed_replicas_after_health_body[0]["healthStatus"], "OK");
+        assert!(
+            listed_replicas_after_health_body[0]["healthReportedAt"]
+                .as_str()
+                .is_some()
+        );
+
         let sources = app
             .clone()
             .oneshot(
@@ -1256,6 +1384,70 @@ mod tests {
             2
         );
 
+        let application_id: String = sqlx_core::query_scalar::query_scalar(
+            "SELECT id::text FROM application_credentials WHERE name = 'test-sdk'",
+        )
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("application id");
+        let revoke_application = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/api/admin/application-credentials/{application_id}/revoke"
+                    ))
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(revoke_application.status(), StatusCode::NO_CONTENT);
+
+        let package_after_application_revoke = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/pontemesh/access-packages")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"bucket":"test-bucket","key":"folder/hello.txt","ttlSeconds":120}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            package_after_application_revoke.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let revalidate_after_application_revoke = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_with_replica_id}/revalidate/test-bucket/folder/hello.txt"
+                    ))
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {package_with_replica_token}"),
+                    )
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            revalidate_after_application_revoke.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
         let revoke = app
             .clone()
             .oneshot(
@@ -1304,6 +1496,27 @@ mod tests {
             !response_text(sync_plan_after_revocation)
                 .await
                 .contains(r#""key":"folder/hello.txt""#)
+        );
+
+        let policy_updates = app
+            .clone()
+            .oneshot(
+                signed_replica_request(
+                    Request::builder()
+                        .uri(format!("/pontemesh/replicas/{replica_id}/policy-updates"))
+                        .body(Body::empty()),
+                    replica_token,
+                    "nonce-policy-updates-0001",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(policy_updates.status(), StatusCode::OK);
+        assert!(
+            response_text(policy_updates)
+                .await
+                .contains(r#""updateType":"OBJECT_REVOKED""#)
         );
 
         let revalidate_after_object_revocation = app

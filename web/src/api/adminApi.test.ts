@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  createApplicationCredential,
+  listApplicationCredentials,
+  revokeApplicationCredential
+} from "./applicationCredentialsApi";
 import { listBuckets } from "./bucketsApi";
-import { getDashboardSummary, getOriginTrafficMetrics } from "./dashboardApi";
+import { getDashboardSummary, getOriginTrafficMetrics, getReplicaTrafficMetrics } from "./dashboardApi";
 import { HttpError } from "./http";
 import { createReplicaCredential, listReplicas, revokeReplica } from "./replicasApi";
 import { getStorageStatus } from "./storageApi";
@@ -84,6 +89,30 @@ describe("admin API clients", () => {
     });
   });
 
+  it("fetches replica traffic metrics from the protected admin endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        totalReplicas: 1,
+        activeReplicas: 1,
+        totalBytesSynced: 5,
+        totalBytesServed: 7,
+        totalFragmentsSynced: 1,
+        totalFragmentsServed: 2,
+        syncFailures: 0,
+        authFailures: 0
+      })
+    );
+
+    const metrics = await getReplicaTrafficMetrics();
+
+    expect(metrics.totalBytesSynced).toBe(5);
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/metrics/replica-traffic", {
+      headers: {
+        accept: "application/json"
+      }
+    });
+  });
+
   it("manages Replica credentials through protected admin routes", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse([]))
@@ -93,7 +122,11 @@ describe("admin API clients", () => {
           name: "edge-1",
           allowedBuckets: ["media"],
           createdAt: "2026-06-29T12:00:00Z",
-          revoked: false
+          revoked: false,
+          availableObjects: 0,
+          lastSeenAt: null,
+          healthStatus: null,
+          healthReportedAt: null
         },
         token: "pm_rep_secret"
       }, 201))
@@ -116,6 +149,42 @@ describe("admin API clients", () => {
       body: JSON.stringify({ name: "edge-1", allowedBuckets: ["media"] })
     });
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/replicas/replica%2F1/revoke", {
+      method: "POST"
+    });
+  });
+
+  it("manages application credentials through protected admin routes", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({
+        credential: {
+          id: "app-1",
+          name: "default-sdk",
+          scopes: ["pontemesh:manifest:read"],
+          createdAt: "2026-06-29T12:00:00Z",
+          revoked: false
+        },
+        token: "pm_app_secret"
+      }, 201))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await listApplicationCredentials();
+    await createApplicationCredential("default-sdk", ["pontemesh:manifest:read"]);
+    await revokeApplicationCredential("app/1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/application-credentials", {
+      headers: {
+        accept: "application/json"
+      }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/application-credentials", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ name: "default-sdk", scopes: ["pontemesh:manifest:read"] })
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/application-credentials/app%2F1/revoke", {
       method: "POST"
     });
   });
