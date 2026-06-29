@@ -1,10 +1,13 @@
-import { Info, KeyRound, Plus, RotateCcw } from "lucide-react";
+import { Ban, ChevronLeft, ChevronRight, Info, KeyRound, Plus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CreatedS3AccessKey, S3AccessKeySummary } from "../../api/s3KeysApi";
 import { Button } from "../Button";
 import { ErrorMessage } from "../ErrorMessage";
 import { CopyButton } from "./CopyButton";
 import { StatusBadge } from "./StatusBadge";
+
+const S3_KEYS_PER_PAGE = 5;
 
 type S3CredentialsCardProps = {
   keys: S3AccessKeySummary[];
@@ -122,58 +125,104 @@ type S3CredentialsTableProps = {
 
 function S3CredentialsTable({ keys, locale, revoking, onRevokeKey }: S3CredentialsTableProps) {
   const { t } = useTranslation();
+  const [currentPage, setCurrentPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(keys.length / S3_KEYS_PER_PAGE));
+  const firstVisibleKey = (currentPage - 1) * S3_KEYS_PER_PAGE + 1;
+  const lastVisibleKey = Math.min(currentPage * S3_KEYS_PER_PAGE, keys.length);
+  const visibleKeys = useMemo(
+    () => keys.slice((currentPage - 1) * S3_KEYS_PER_PAGE, currentPage * S3_KEYS_PER_PAGE),
+    [currentPage, keys]
+  );
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
 
   return (
-    <div className="settings-table-wrap">
-      <table className="settings-table">
-        <thead>
-          <tr>
-            <th>{t("setup.settings.s3.name")}</th>
-            <th>{t("setup.settings.s3.accessKeyId")}</th>
-            <th>{t("setup.settings.s3.status")}</th>
-            <th>{t("setup.settings.s3.lastUsed")}</th>
-            <th>{t("setup.settings.s3.createdAt")}</th>
-            <th aria-label={t("setup.settings.s3.actions")} />
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((key) => (
-            <tr key={key.id}>
-              <td className="settings-table__name">{key.name ?? t("setup.common.unavailable")}</td>
-              <td>
-                <div className="settings-access-key">
-                  <code>{key.accessKeyId}</code>
-                  <CopyButton value={key.accessKeyId} label={t("setup.settings.s3.copyAccessKeyId")} />
-                </div>
-              </td>
-              <td>
-                <StatusBadge
-                  active={key.isActive}
-                  activeLabel={t("setup.settings.s3.active")}
-                  revokedLabel={t("setup.settings.s3.revoked")}
-                />
-              </td>
-              <td>{key.lastUsedAt ? formatDate(key.lastUsedAt, locale) : t("setup.common.unavailable")}</td>
-              <td>{formatDate(key.createdAt, locale)}</td>
-              <td>
-                {key.isActive && (
-                  <button
-                    className="settings-revoke-button"
-                    type="button"
-                    title={t("setup.settings.s3.revoke")}
-                    aria-label={t("setup.settings.s3.revoke")}
-                    disabled={revoking === key.id}
-                    onClick={() => onRevokeKey(key.id)}
-                  >
-                    <RotateCcw size={16} aria-hidden="true" />
-                  </button>
-                )}
-              </td>
+    <>
+      <div className="settings-table-wrap">
+        <table className="settings-table">
+          <thead>
+            <tr>
+              <th>{t("setup.settings.s3.name")}</th>
+              <th>{t("setup.settings.s3.accessKeyId")}</th>
+              <th>{t("setup.settings.s3.status")}</th>
+              <th>{t("setup.settings.s3.lastUsed")}</th>
+              <th>{t("setup.settings.s3.createdAt")}</th>
+              <th aria-label={t("setup.settings.s3.actions")} />
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {visibleKeys.map((key) => (
+              <tr key={key.id}>
+                <td className="settings-table__name">{key.name ?? t("setup.common.unavailable")}</td>
+                <td>
+                  <div className="settings-access-key">
+                    <code>{key.accessKeyId}</code>
+                    <CopyButton value={key.accessKeyId} label={t("setup.settings.s3.copyAccessKeyId")} />
+                  </div>
+                </td>
+                <td>
+                  <StatusBadge
+                    active={key.isActive}
+                    activeLabel={t("setup.settings.s3.active")}
+                    revokedLabel={t("setup.settings.s3.revoked")}
+                  />
+                </td>
+                <td>{key.lastUsedAt ? formatDate(key.lastUsedAt, locale) : t("setup.common.notApplicable")}</td>
+                <td>{formatDate(key.createdAt, locale)}</td>
+                <td>
+                  {key.isActive && (
+                    <button
+                      className="settings-revoke-button"
+                      type="button"
+                      title={t("setup.settings.s3.revoke")}
+                      aria-label={t("setup.settings.s3.revoke")}
+                      disabled={revoking === key.id}
+                      onClick={() => onRevokeKey(key.id)}
+                    >
+                      <Ban size={16} aria-hidden="true" />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {keys.length > S3_KEYS_PER_PAGE && (
+        <nav className="settings-pagination" aria-label={t("setup.settings.s3.paginationLabel")}>
+          <p>
+            {t("setup.settings.s3.paginationSummary", {
+              start: firstVisibleKey,
+              end: lastVisibleKey,
+              total: keys.length
+            })}
+          </p>
+          <div className="settings-pagination__actions">
+            <button
+              type="button"
+              className="settings-pagination__button"
+              aria-label={t("setup.settings.s3.previousPage")}
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            >
+              <ChevronLeft size={16} aria-hidden="true" />
+            </button>
+            <span>{t("setup.settings.s3.pageIndicator", { page: currentPage, total: totalPages })}</span>
+            <button
+              type="button"
+              className="settings-pagination__button"
+              aria-label={t("setup.settings.s3.nextPage")}
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            >
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>
+          </div>
+        </nav>
+      )}
+    </>
   );
 }
 
