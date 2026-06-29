@@ -88,18 +88,26 @@ Responsabilidades esperadas:
 * configurar limites operacionais para peers e réplicas;
 * expor contratos administrativos para uso futuro por dashboard.
 
-Na implementação inicial, estão disponíveis:
+Na implementação atual, estão disponíveis:
 
 ```http
 POST /pontemesh/access-packages
+POST /pontemesh/access-packages/{packageId}/revalidate/{bucket}/{objectKey}
+GET /pontemesh/access-packages/{packageId}/objects/{bucket}/{objectKey}
 GET /pontemesh/objects/{bucket}/manifest/{objectKey}
+GET /pontemesh/objects/{bucket}/sources/{objectKey}
 GET /pontemesh/replicas/{replicaId}/sync-plan
+GET /pontemesh/replicas/{replicaId}/objects/{bucket}/{objectKey}
+GET /pontemesh/replicas/{replicaId}/manifests/{manifestId}/fragments/{fragmentId}
+POST /pontemesh/replicas/{replicaId}/availability
+POST /pontemesh/replicas/{replicaId}/health
+POST /pontemesh/replicas/{replicaId}/metrics
+GET /pontemesh/replicas/{replicaId}/policy-updates
 ```
 
-Os endpoints de aplicação/SDK exigem `Authorization: Bearer <token>` de aplicação. O endpoint de sync-plan exige credencial própria de Replica/Edge.
-O pacote de acesso inicial autoriza somente a fonte `ORIGIN`, informa fallback
-pelo endpoint S3-compatible `/{bucket}/{objectKey}` e embute o manifesto gerado
-pelo Origin.
+Os endpoints de aplicação/SDK exigem `Authorization: Bearer <token>` de aplicação. Endpoints de Replica/Edge exigem credencial própria de réplica, assinatura da requisição, timestamp e nonce.
+O pacote de acesso autoriza fontes elegíveis reais, sempre com fallback para
+Origin e inclusão do manifesto gerado pelo Origin.
 
 O manifesto e o pacote de acesso usam a política persistida do bucket para
 definir tamanho de fragmento e TTL máximo do pacote.
@@ -180,10 +188,16 @@ Na implementação atual, o plano administrativo já expõe contratos para:
 ```http
 GET /api/admin/audit-events
 GET /api/admin/metrics/origin-traffic
+GET /api/admin/metrics/replica-traffic
+GET /api/admin/metrics/buckets
+GET /api/admin/metrics/objects
+GET /api/admin/metrics/replicas/{replicaId}
 GET /api/admin/buckets/{bucket}/policy
 PUT /api/admin/buckets/{bucket}/policy
 GET /api/admin/application-credentials
 POST /api/admin/application-credentials
+POST /api/admin/application-credentials/{id}/revoke
+POST /api/admin/access-packages/{packageId}/revoke
 GET /api/admin/replicas
 POST /api/admin/replicas
 POST /api/admin/replicas/{replicaId}/revoke

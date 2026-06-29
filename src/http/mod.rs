@@ -90,6 +90,18 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             get(admin::replica_traffic_metrics),
         )
         .route(
+            "/api/admin/metrics/buckets",
+            get(admin::bucket_traffic_metrics),
+        )
+        .route(
+            "/api/admin/metrics/objects",
+            get(admin::object_traffic_metrics),
+        )
+        .route(
+            "/api/admin/metrics/replicas/{replica_id}",
+            get(admin::replica_detail_metrics),
+        )
+        .route(
             "/api/admin/buckets",
             get(admin::list_buckets).post(admin::create_bucket),
         )
@@ -120,6 +132,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         .route(
             "/api/admin/application-credentials/{id}/revoke",
             post(admin::revoke_application_credential),
+        )
+        .route(
+            "/api/admin/access-packages/{package_id}/revoke",
+            post(admin::revoke_access_package),
         )
         .route(
             "/api/admin/s3-access-keys",
@@ -182,6 +198,10 @@ fn pontemesh_routes(state: AppState) -> Router<AppState> {
         .route(
             "/replicas/{replica_id}/objects/{bucket_name}/{*object_key}",
             get(replica::sync_object),
+        )
+        .route(
+            "/replicas/{replica_id}/manifests/{manifest_id}/fragments/{fragment_id}",
+            get(replica::sync_fragment),
         )
         .route(
             "/replicas/{replica_id}/availability",
@@ -1260,6 +1280,28 @@ mod tests {
         assert_eq!(replica_sync_object.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(response_text(replica_sync_object).await, "hello");
 
+        let fragment_id = manifest_body["fragments"][0]["fragmentId"]
+            .as_str()
+            .expect("fragment id");
+        let replica_sync_fragment = app
+            .clone()
+            .oneshot(
+                signed_replica_request(
+                    Request::builder()
+                        .uri(format!(
+                            "/pontemesh/replicas/{replica_id}/manifests/{manifest_id}/fragments/{fragment_id}"
+                        ))
+                        .body(Body::empty()),
+                    replica_token,
+                    "nonce-replica-fragment-0001",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replica_sync_fragment.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response_text(replica_sync_fragment).await, "hello world");
+
         let replica_metrics = app
             .clone()
             .oneshot(
@@ -1276,8 +1318,61 @@ mod tests {
             serde_json::from_str(&response_text(replica_metrics).await)
                 .expect("replica metrics JSON");
         assert_eq!(replica_metrics_body["activeReplicas"], 1);
-        assert_eq!(replica_metrics_body["totalBytesSynced"], 8);
-        assert_eq!(replica_metrics_body["totalFragmentsSynced"], 2);
+        assert_eq!(replica_metrics_body["totalBytesSynced"], 19);
+        assert_eq!(replica_metrics_body["totalFragmentsSynced"], 3);
+
+        let replica_detail_metrics = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/admin/metrics/replicas/{replica_id}"))
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replica_detail_metrics.status(), StatusCode::OK);
+        let replica_detail_metrics_body: serde_json::Value =
+            serde_json::from_str(&response_text(replica_detail_metrics).await)
+                .expect("replica detail metrics JSON");
+        assert_eq!(replica_detail_metrics_body["fragmentEvents"], 1);
+
+        let bucket_metrics = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/buckets")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(bucket_metrics.status(), StatusCode::OK);
+        assert!(
+            response_text(bucket_metrics)
+                .await
+                .contains(r#""bucket":"test-bucket""#)
+        );
+
+        let object_metrics = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/objects")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(object_metrics.status(), StatusCode::OK);
+        assert!(
+            response_text(object_metrics)
+                .await
+                .contains(r#""key":"folder/hello.txt""#)
+        );
 
         let listed_replicas_after_health = app
             .clone()
@@ -1382,6 +1477,86 @@ mod tests {
                 .expect("revalidated sources")
                 .len(),
             2
+        );
+
+        let package_to_revoke = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/pontemesh/access-packages")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"bucket":"test-bucket","key":"folder/hello.txt","ttlSeconds":120}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(package_to_revoke.status(), StatusCode::CREATED);
+        let package_to_revoke_body: serde_json::Value =
+            serde_json::from_str(&response_text(package_to_revoke).await)
+                .expect("access package to revoke JSON");
+        let package_to_revoke_id = package_to_revoke_body["id"]
+            .as_str()
+            .expect("package to revoke id");
+        let package_to_revoke_token = package_to_revoke_body["packageToken"]
+            .as_str()
+            .expect("package to revoke token");
+        let revoke_access_package = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/api/admin/access-packages/{package_to_revoke_id}/revoke"
+                    ))
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(revoke_access_package.status(), StatusCode::NO_CONTENT);
+        let revalidate_after_package_revoke = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_to_revoke_id}/revalidate/test-bucket/folder/hello.txt"
+                    ))
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {package_to_revoke_token}"),
+                    )
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            revalidate_after_package_revoke.status(),
+            StatusCode::UNAUTHORIZED
+        );
+
+        let filtered_audit = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/audit-events?event=access_package_revoked&outcome=success")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(filtered_audit.status(), StatusCode::OK);
+        assert!(
+            response_text(filtered_audit)
+                .await
+                .contains(r#""event":"access_package_revoked""#)
         );
 
         let application_id: String = sqlx_core::query_scalar::query_scalar(

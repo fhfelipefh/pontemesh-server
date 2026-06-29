@@ -280,15 +280,25 @@ GET /pontemesh/replicas/{replicaId}/sync-plan
 
 Retorna o plano de sincronização autorizado para a réplica.
 
+### Baixar objeto autorizado do Origin
+
+```http
+GET /pontemesh/replicas/{replicaId}/objects/{bucketName}/{objectKey}
+```
+
+Permite que a réplica baixe um objeto autorizado a partir do Origin. A rota
+suporta `Range` para sincronização parcial.
+
 ### Baixar fragmento autorizado do Origin
 
 ```http
-GET /pontemesh/replicas/{replicaId}/objects/{objectId}/fragments/{fragmentId}
+GET /pontemesh/replicas/{replicaId}/manifests/{manifestId}/fragments/{fragmentId}
 ```
 
 Permite que a réplica baixe um fragmento autorizado a partir do Origin.
 
-A operação deve validar identidade da réplica, escopo, política e validade do plano de sincronização.
+A operação deve validar identidade da réplica, escopo, política, manifesto atual,
+hash do fragmento e estado de revogação antes de retornar dados.
 
 ### Anunciar disponibilidade
 

@@ -101,6 +101,21 @@ pub async fn sync_object(
     }
 }
 
+pub async fn sync_fragment(
+    State(state): State<AppState>,
+    Extension(replica): Extension<ReplicaIdentity>,
+    Path((replica_id, manifest_id, fragment_id)): Path<(String, String, String)>,
+) -> Response {
+    if replica_id != replica.id {
+        return forbidden("replica credential does not match requested replica id");
+    }
+
+    match sync_fragment_inner(&state, &replica, &manifest_id, &fragment_id).await {
+        Ok(response) => response,
+        Err(error) => bad_request(error),
+    }
+}
+
 pub async fn sync_plan(
     State(state): State<AppState>,
     Extension(replica): Extension<ReplicaIdentity>,
@@ -355,6 +370,89 @@ async fn sync_object_inner(
     Ok(object_body_response(&object, status, body, range))
 }
 
+async fn sync_fragment_inner(
+    state: &AppState,
+    replica: &ReplicaIdentity,
+    manifest_id: &str,
+    fragment_id: &str,
+) -> anyhow::Result<Response> {
+    let fragment = state
+        .catalog
+        .authorize_replica_fragment_sync(
+            &replica.id,
+            &replica.allowed_buckets,
+            manifest_id,
+            fragment_id,
+        )
+        .await?;
+    let bytes = fs::read(&fragment.object.storage_path)
+        .map_err(|_| anyhow::anyhow!("object data is unavailable"))?;
+    let start = usize::try_from(fragment.byte_range_start)
+        .map_err(|_| anyhow::anyhow!("fragment range start is too large"))?;
+    let end = usize::try_from(fragment.byte_range_end)
+        .map_err(|_| anyhow::anyhow!("fragment range end is too large"))?;
+    if end >= bytes.len() || start > end {
+        bail!("fragment range is invalid for object data");
+    }
+    let body = bytes[start..=end].to_vec();
+    let range = ResolvedRange {
+        start: u64::try_from(fragment.byte_range_start)
+            .map_err(|_| anyhow::anyhow!("fragment range start is invalid"))?,
+        end: u64::try_from(fragment.byte_range_end)
+            .map_err(|_| anyhow::anyhow!("fragment range end is invalid"))?,
+    };
+    state
+        .catalog
+        .record_replica_sync_transfer(
+            &replica.id,
+            i64::try_from(body.len()).map_err(|_| anyhow::anyhow!("response body is too large"))?,
+            1,
+        )
+        .await?;
+    state
+        .catalog
+        .record_fragment_transfer_event(
+            "REPLICA_EDGE",
+            Some(&replica.id),
+            &fragment.bucket_name,
+            &fragment.object_key,
+            &fragment.manifest_id,
+            fragment.fragment_index,
+            &fragment.fragment_hash,
+            "FRAGMENT_SYNCED",
+            i64::try_from(body.len()).map_err(|_| anyhow::anyhow!("response body is too large"))?,
+            "success",
+            serde_json::json!({ "replicaId": replica.id }),
+        )
+        .await?;
+    if let Err(error) = state
+        .catalog
+        .record_audit_event(
+            "replica_fragment_synced",
+            Some(&replica.name),
+            "success",
+            &format!(
+                "replica_id={}; manifest_id={manifest_id}; fragment_id={fragment_id}",
+                replica.id
+            ),
+        )
+        .await
+    {
+        audit::failure(
+            "audit_persist_failed",
+            Some(&replica.name),
+            &error.to_string(),
+        );
+    }
+
+    Ok(object_body_response(
+        &fragment.object,
+        StatusCode::PARTIAL_CONTENT,
+        body,
+        Some(range),
+    ))
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ResolvedRange {
     start: u64,
@@ -428,7 +526,10 @@ fn bad_request(error: anyhow::Error) -> Response {
     let message = error.to_string();
     let status = if message == "requested range is not satisfiable" {
         StatusCode::RANGE_NOT_SATISFIABLE
-    } else if message == "replica object synchronization is not authorized" {
+    } else if message == "replica object synchronization is not authorized"
+        || message == "replica fragment synchronization is not authorized"
+        || message == "fragment does not belong to requested manifest"
+    {
         StatusCode::FORBIDDEN
     } else {
         StatusCode::BAD_REQUEST

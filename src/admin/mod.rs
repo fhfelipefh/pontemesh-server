@@ -93,6 +93,17 @@ pub struct ListS3AccessKeysQuery {
     page_size: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEventsQuery {
+    event: Option<String>,
+    principal: Option<String>,
+    outcome: Option<String>,
+    since: Option<chrono::DateTime<chrono::Utc>>,
+    until: Option<chrono::DateTime<chrono::Utc>>,
+    limit: Option<i64>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
     error: String,
@@ -156,8 +167,19 @@ pub async fn storage_status(
     }
 }
 
-pub async fn list_audit_events(State(state): State<AppState>) -> Response {
-    match state.catalog.list_audit_events(100).await {
+pub async fn list_audit_events(
+    State(state): State<AppState>,
+    Query(query): Query<AuditEventsQuery>,
+) -> Response {
+    let filter = catalog::AuditEventFilter {
+        event: query.event.filter(|value| !value.trim().is_empty()),
+        principal: query.principal.filter(|value| !value.trim().is_empty()),
+        outcome: query.outcome.filter(|value| !value.trim().is_empty()),
+        since: query.since,
+        until: query.until,
+        limit: query.limit.unwrap_or(100),
+    };
+    match state.catalog.list_audit_events_filtered(filter).await {
         Ok(events) => Json(events).into_response(),
         Err(error) => internal_error(error),
     }
@@ -174,6 +196,31 @@ pub async fn replica_traffic_metrics(State(state): State<AppState>) -> Response 
     match state.catalog.replica_traffic_summary().await {
         Ok(summary) => Json(summary).into_response(),
         Err(error) => internal_error(error),
+    }
+}
+
+pub async fn bucket_traffic_metrics(State(state): State<AppState>) -> Response {
+    match state.catalog.bucket_traffic_metrics().await {
+        Ok(summary) => Json(summary).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn object_traffic_metrics(State(state): State<AppState>) -> Response {
+    match state.catalog.object_traffic_metrics().await {
+        Ok(summary) => Json(summary).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn replica_detail_metrics(
+    State(state): State<AppState>,
+    Path(replica_id): Path<String>,
+) -> Response {
+    match state.catalog.replica_detail_metrics(&replica_id).await {
+        Ok(Some(summary)) => Json(summary).into_response(),
+        Ok(None) => not_found("replica not found"),
+        Err(error) => bad_request(error),
     }
 }
 
@@ -496,6 +543,33 @@ pub async fn revoke_application_credential(
                 &session.username,
                 "success",
                 &format!("application_id={id}"),
+            )
+            .await;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn revoke_access_package(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Path(package_id): Path<String>,
+) -> Response {
+    match state.catalog.revoke_access_package(&package_id).await {
+        Ok(()) => {
+            audit::event(
+                "access_package_revoked",
+                Some(&session.username),
+                "success",
+                &format!("package_id={package_id}"),
+            );
+            record_admin_audit(
+                &state,
+                "access_package_revoked",
+                &session.username,
+                "success",
+                &format!("package_id={package_id}"),
             )
             .await;
             StatusCode::NO_CONTENT.into_response()

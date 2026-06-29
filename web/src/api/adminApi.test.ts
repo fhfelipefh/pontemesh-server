@@ -4,8 +4,16 @@ import {
   listApplicationCredentials,
   revokeApplicationCredential
 } from "./applicationCredentialsApi";
+import { listAuditEvents } from "./auditApi";
 import { listBuckets } from "./bucketsApi";
-import { getDashboardSummary, getOriginTrafficMetrics, getReplicaTrafficMetrics } from "./dashboardApi";
+import {
+  getBucketTrafficMetrics,
+  getDashboardSummary,
+  getObjectTrafficMetrics,
+  getOriginTrafficMetrics,
+  getReplicaDetailMetrics,
+  getReplicaTrafficMetrics
+} from "./dashboardApi";
 import { HttpError } from "./http";
 import { createReplicaCredential, listReplicas, revokeReplica } from "./replicasApi";
 import { getStorageStatus } from "./storageApi";
@@ -107,6 +115,52 @@ describe("admin API clients", () => {
 
     expect(metrics.totalBytesSynced).toBe(5);
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/metrics/replica-traffic", {
+      headers: {
+        accept: "application/json"
+      }
+    });
+  });
+
+  it("fetches detailed traffic metrics from protected admin endpoints", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse([{ bucket: "media", originBytesServed: 1, originRequests: 1, replicaBytesSynced: 2, fragmentEvents: 1 }]))
+      .mockResolvedValueOnce(jsonResponse([{ bucket: "media", key: "a.txt", originBytesServed: 1, originRequests: 1, replicaBytesSynced: 2, fragmentEvents: 1 }]))
+      .mockResolvedValueOnce(jsonResponse({
+        replicaId: "replica-1",
+        replicaName: "edge-1",
+        bytesSynced: 2,
+        bytesServed: 0,
+        fragmentsSynced: 1,
+        fragmentsServed: 0,
+        syncFailures: 0,
+        authFailures: 0,
+        fragmentEvents: 1
+      }));
+
+    await getBucketTrafficMetrics();
+    await getObjectTrafficMetrics();
+    await getReplicaDetailMetrics("replica/1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/metrics/buckets", {
+      headers: { accept: "application/json" }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/metrics/objects", {
+      headers: { accept: "application/json" }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/metrics/replicas/replica%2F1", {
+      headers: { accept: "application/json" }
+    });
+  });
+
+  it("fetches filtered audit events from the protected admin endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse([{ id: "audit-1", event: "access_package_revoked", principal: "admin", outcome: "success", detail: "package_id=1", createdAt: "2026-06-29T12:00:00Z" }])
+    );
+
+    const events = await listAuditEvents({ event: "access_package_revoked", outcome: "success", limit: 25 });
+
+    expect(events[0].event).toBe("access_package_revoked");
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/audit-events?event=access_package_revoked&outcome=success&limit=25", {
       headers: {
         accept: "application/json"
       }

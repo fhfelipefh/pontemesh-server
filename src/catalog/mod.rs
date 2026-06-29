@@ -321,6 +321,63 @@ pub struct ReplicaPolicyUpdateRecord {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct AuthorizedReplicaFragment {
+    pub object: ObjectRecord,
+    pub bucket_name: String,
+    pub object_key: String,
+    pub manifest_id: String,
+    pub fragment_index: i64,
+    pub fragment_hash: String,
+    pub byte_range_start: i64,
+    pub byte_range_end: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketTrafficMetric {
+    pub bucket: String,
+    pub origin_bytes_served: i64,
+    pub origin_requests: i64,
+    pub replica_bytes_synced: i64,
+    pub fragment_events: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectTrafficMetric {
+    pub bucket: String,
+    pub key: String,
+    pub origin_bytes_served: i64,
+    pub origin_requests: i64,
+    pub replica_bytes_synced: i64,
+    pub fragment_events: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaDetailMetric {
+    pub replica_id: String,
+    pub replica_name: String,
+    pub bytes_synced: i64,
+    pub bytes_served: i64,
+    pub fragments_synced: i64,
+    pub fragments_served: i64,
+    pub sync_failures: i64,
+    pub auth_failures: i64,
+    pub fragment_events: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditEventFilter {
+    pub event: Option<String>,
+    pub principal: Option<String>,
+    pub outcome: Option<String>,
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+    pub limit: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessPackageRecord {
@@ -1652,6 +1709,79 @@ impl Catalog {
             .ok_or_else(|| anyhow::anyhow!("replica object synchronization is not authorized"))
     }
 
+    pub async fn authorize_replica_fragment_sync(
+        &self,
+        replica_id: &str,
+        allowed_buckets: &[String],
+        manifest_id: &str,
+        fragment_id: &str,
+    ) -> anyhow::Result<AuthorizedReplicaFragment> {
+        let (fragment_manifest_id, fragment_index, fragment_hash) = parse_fragment_id(fragment_id)?;
+        if fragment_manifest_id != manifest_id {
+            bail!("fragment does not belong to requested manifest");
+        }
+
+        let row = query(
+            r#"
+            SELECT b.name AS bucket_name, o.object_key, v.size_bytes, v.content_type,
+                   v.object_hash, v.storage_path, v.created_at, o.state,
+                   m.id::text AS manifest_id,
+                   f.fragment_index, f.fragment_hash,
+                   f.byte_range_start, f.byte_range_end
+            FROM object_manifests m
+            JOIN object_manifest_fragments f ON f.manifest_id = m.id
+            JOIN object_versions v ON v.id = m.object_version_id
+            JOIN objects o ON o.current_version_id = v.id
+            JOIN buckets b ON b.id = o.bucket_id
+            JOIN bucket_policies p ON p.bucket_id = b.id
+            JOIN replica_credentials r ON r.id = $1::uuid
+            WHERE m.id = $2::uuid
+              AND f.fragment_index = $3
+              AND f.fragment_hash = $4
+              AND r.revoked_at IS NULL
+              AND r.allowed_buckets ? b.name
+              AND b.name = ANY($5)
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+              AND p.allow_replica_edge = TRUE
+            "#,
+        )
+        .bind(replica_id)
+        .bind(manifest_id)
+        .bind(fragment_index)
+        .bind(&fragment_hash)
+        .bind(allowed_buckets)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to authorize replica fragment synchronization")?;
+
+        let Some(row) = row else {
+            bail!("replica fragment synchronization is not authorized");
+        };
+
+        Ok(AuthorizedReplicaFragment {
+            object: ObjectRecord {
+                key: row.get("object_key"),
+                size_bytes: row.get("size_bytes"),
+                content_type: row
+                    .get::<Option<String>, _>("content_type")
+                    .unwrap_or_else(|| "application/octet-stream".to_owned()),
+                sha256: row.get("object_hash"),
+                storage_path: row.get("storage_path"),
+                created_at: format_datetime(row.get("created_at")),
+                state: row.get("state"),
+            },
+            bucket_name: row.get("bucket_name"),
+            object_key: row.get("object_key"),
+            manifest_id: row.get("manifest_id"),
+            fragment_index: row.get("fragment_index"),
+            fragment_hash: row.get("fragment_hash"),
+            byte_range_start: row.get("byte_range_start"),
+            byte_range_end: row.get("byte_range_end"),
+        })
+    }
+
     pub async fn list_replica_sync_objects(
         &self,
         allowed_buckets: &[String],
@@ -1964,6 +2094,67 @@ impl Catalog {
         Ok(())
     }
 
+    pub async fn record_fragment_transfer_event(
+        &self,
+        source_type: &str,
+        replica_id: Option<&str>,
+        bucket_name: &str,
+        object_key: &str,
+        manifest_id: &str,
+        fragment_index: i64,
+        fragment_hash: &str,
+        event_type: &str,
+        bytes_transferred: i64,
+        outcome: &str,
+        detail: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        validate_non_negative(bytes_transferred, "bytesTransferred")?;
+        let result = query(
+            r#"
+            WITH target AS (
+                SELECT b.id AS bucket_id, o.id AS object_id, m.id AS manifest_id
+                FROM buckets b
+                JOIN objects o ON o.bucket_id = b.id
+                JOIN object_versions v ON v.id = o.current_version_id
+                JOIN object_manifests m ON m.object_version_id = v.id
+                WHERE b.name = $3
+                  AND o.object_key = $4
+                  AND m.id = $5::uuid
+                  AND b.deleted_at IS NULL
+                  AND o.deleted_at IS NULL
+            )
+            INSERT INTO fragment_transfer_events (
+                source_type, replica_id, bucket_id, object_id, object_manifest_id,
+                fragment_index, fragment_hash, event_type, bytes_transferred,
+                outcome, detail
+            )
+            SELECT $1, $2::uuid, bucket_id, object_id, manifest_id,
+                $6, $7, $8, $9, $10, $11
+            FROM target
+            "#,
+        )
+        .bind(source_type)
+        .bind(replica_id)
+        .bind(bucket_name)
+        .bind(object_key)
+        .bind(manifest_id)
+        .bind(fragment_index)
+        .bind(fragment_hash)
+        .bind(event_type)
+        .bind(bytes_transferred)
+        .bind(outcome)
+        .bind(detail)
+        .execute(&self.pool)
+        .await
+        .context("failed to record fragment transfer event")?;
+        if result.rows_affected() == 0 {
+            bail!("fragment transfer target not found");
+        }
+        Ok(())
+    }
+
     pub async fn list_replica_policy_updates(
         &self,
         replica_id: &str,
@@ -2148,6 +2339,20 @@ impl Catalog {
         }))
     }
 
+    pub async fn revoke_access_package(&self, package_id: &str) -> anyhow::Result<()> {
+        let result = query(
+            "UPDATE access_packages SET revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL",
+        )
+        .bind(package_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to revoke access package")?;
+        if result.rows_affected() == 0 {
+            bail!("access package not found or already revoked: {package_id}");
+        }
+        Ok(())
+    }
+
     pub async fn record_audit_event(
         &self,
         event: &str,
@@ -2176,19 +2381,32 @@ impl Catalog {
         Ok(audit_event_from_row(row))
     }
 
-    pub async fn list_audit_events(&self, limit: i64) -> anyhow::Result<Vec<AuditEventRecord>> {
+    pub async fn list_audit_events_filtered(
+        &self,
+        filter: AuditEventFilter,
+    ) -> anyhow::Result<Vec<AuditEventRecord>> {
         let rows = query(
             r#"
             SELECT id::text, event_type, metadata, created_at
             FROM audit_events
+            WHERE ($1::text IS NULL OR event_type = $1)
+              AND ($2::text IS NULL OR metadata->>'principal' = $2)
+              AND ($3::text IS NULL OR metadata->>'outcome' = $3)
+              AND ($4::timestamptz IS NULL OR created_at >= $4)
+              AND ($5::timestamptz IS NULL OR created_at <= $5)
             ORDER BY created_at DESC
-            LIMIT $1
+            LIMIT $6
             "#,
         )
-        .bind(limit.clamp(1, 200))
+        .bind(filter.event)
+        .bind(filter.principal)
+        .bind(filter.outcome)
+        .bind(filter.since)
+        .bind(filter.until)
+        .bind(filter.limit.clamp(1, 500))
         .fetch_all(&self.pool)
         .await
-        .context("failed to list audit events")?;
+        .context("failed to list filtered audit events")?;
 
         Ok(rows.into_iter().map(audit_event_from_row).collect())
     }
@@ -2266,6 +2484,157 @@ impl Catalog {
             range_requests: row.get("range_requests"),
             total_bytes_served: row.get("total_bytes_served"),
         })
+    }
+
+    pub async fn bucket_traffic_metrics(&self) -> anyhow::Result<Vec<BucketTrafficMetric>> {
+        let rows = query(
+            r#"
+            WITH origin AS (
+                SELECT bucket_id, SUM(bytes_served)::bigint AS bytes_served,
+                       COUNT(*)::bigint AS requests
+                FROM origin_transfer_events
+                GROUP BY bucket_id
+            ),
+            fragments AS (
+                SELECT bucket_id,
+                       SUM(CASE WHEN source_type = 'REPLICA_EDGE' THEN bytes_transferred ELSE 0 END)::bigint AS replica_bytes_synced,
+                       COUNT(*)::bigint AS fragment_events
+                FROM fragment_transfer_events
+                GROUP BY bucket_id
+            )
+            SELECT
+                b.name AS bucket_name,
+                COALESCE(origin.bytes_served, 0)::bigint AS origin_bytes_served,
+                COALESCE(origin.requests, 0)::bigint AS origin_requests,
+                COALESCE(fragments.replica_bytes_synced, 0)::bigint AS replica_bytes_synced,
+                COALESCE(fragments.fragment_events, 0)::bigint AS fragment_events
+            FROM buckets b
+            LEFT JOIN origin ON origin.bucket_id = b.id
+            LEFT JOIN fragments ON fragments.bucket_id = b.id
+            WHERE b.deleted_at IS NULL
+            ORDER BY b.name ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to load bucket traffic metrics")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| BucketTrafficMetric {
+                bucket: row.get("bucket_name"),
+                origin_bytes_served: row.get("origin_bytes_served"),
+                origin_requests: row.get("origin_requests"),
+                replica_bytes_synced: row.get("replica_bytes_synced"),
+                fragment_events: row.get("fragment_events"),
+            })
+            .collect())
+    }
+
+    pub async fn object_traffic_metrics(&self) -> anyhow::Result<Vec<ObjectTrafficMetric>> {
+        let rows = query(
+            r#"
+            WITH origin AS (
+                SELECT object_id, SUM(bytes_served)::bigint AS bytes_served,
+                       COUNT(*)::bigint AS requests
+                FROM origin_transfer_events
+                GROUP BY object_id
+            ),
+            fragments AS (
+                SELECT object_id,
+                       SUM(CASE WHEN source_type = 'REPLICA_EDGE' THEN bytes_transferred ELSE 0 END)::bigint AS replica_bytes_synced,
+                       COUNT(*)::bigint AS fragment_events
+                FROM fragment_transfer_events
+                GROUP BY object_id
+            )
+            SELECT
+                b.name AS bucket_name,
+                o.object_key,
+                COALESCE(origin.bytes_served, 0)::bigint AS origin_bytes_served,
+                COALESCE(origin.requests, 0)::bigint AS origin_requests,
+                COALESCE(fragments.replica_bytes_synced, 0)::bigint AS replica_bytes_synced,
+                COALESCE(fragments.fragment_events, 0)::bigint AS fragment_events
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            LEFT JOIN origin ON origin.object_id = o.id
+            LEFT JOIN fragments ON fragments.object_id = o.id
+            WHERE b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+            ORDER BY b.name ASC, o.object_key ASC
+            LIMIT 500
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to load object traffic metrics")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| ObjectTrafficMetric {
+                bucket: row.get("bucket_name"),
+                key: row.get("object_key"),
+                origin_bytes_served: row.get("origin_bytes_served"),
+                origin_requests: row.get("origin_requests"),
+                replica_bytes_synced: row.get("replica_bytes_synced"),
+                fragment_events: row.get("fragment_events"),
+            })
+            .collect())
+    }
+
+    pub async fn replica_detail_metrics(
+        &self,
+        replica_id: &str,
+    ) -> anyhow::Result<Option<ReplicaDetailMetric>> {
+        let row = query(
+            r#"
+            WITH metrics AS (
+                SELECT replica_id,
+                       SUM(bytes_synced)::bigint AS bytes_synced,
+                       SUM(bytes_served)::bigint AS bytes_served,
+                       SUM(fragments_synced)::bigint AS fragments_synced,
+                       SUM(fragments_served)::bigint AS fragments_served,
+                       SUM(sync_failures)::bigint AS sync_failures,
+                       SUM(auth_failures)::bigint AS auth_failures
+                FROM replica_metric_events
+                GROUP BY replica_id
+            ),
+            fragments AS (
+                SELECT replica_id, COUNT(*)::bigint AS fragment_events
+                FROM fragment_transfer_events
+                GROUP BY replica_id
+            )
+            SELECT
+                r.id::text AS replica_id,
+                r.name AS replica_name,
+                COALESCE(metrics.bytes_synced, 0)::bigint AS bytes_synced,
+                COALESCE(metrics.bytes_served, 0)::bigint AS bytes_served,
+                COALESCE(metrics.fragments_synced, 0)::bigint AS fragments_synced,
+                COALESCE(metrics.fragments_served, 0)::bigint AS fragments_served,
+                COALESCE(metrics.sync_failures, 0)::bigint AS sync_failures,
+                COALESCE(metrics.auth_failures, 0)::bigint AS auth_failures,
+                COALESCE(fragments.fragment_events, 0)::bigint AS fragment_events
+            FROM replica_credentials r
+            LEFT JOIN metrics ON metrics.replica_id = r.id
+            LEFT JOIN fragments ON fragments.replica_id = r.id
+            WHERE r.id = $1::uuid
+            "#,
+        )
+        .bind(replica_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load replica detail metrics")?;
+
+        Ok(row.map(|row| ReplicaDetailMetric {
+            replica_id: row.get("replica_id"),
+            replica_name: row.get("replica_name"),
+            bytes_synced: row.get("bytes_synced"),
+            bytes_served: row.get("bytes_served"),
+            fragments_synced: row.get("fragments_synced"),
+            fragments_served: row.get("fragments_served"),
+            sync_failures: row.get("sync_failures"),
+            auth_failures: row.get("auth_failures"),
+            fragment_events: row.get("fragment_events"),
+        }))
     }
 }
 
@@ -2523,6 +2892,23 @@ fn parse_string_vec(value: serde_json::Value) -> anyhow::Result<Vec<String>> {
 
 fn parse_i64_vec(value: serde_json::Value) -> anyhow::Result<Vec<i64>> {
     serde_json::from_value(value).context("failed to parse integer list")
+}
+
+fn parse_fragment_id(value: &str) -> anyhow::Result<(String, i64, String)> {
+    let parts = value.split(':').collect::<Vec<_>>();
+    if parts.len() != 3 {
+        bail!("fragmentId must use manifestId:index:sha256 format");
+    }
+    let index = parts[1]
+        .parse::<i64>()
+        .context("fragment index is invalid")?;
+    if index < 0 {
+        bail!("fragment index must be non-negative");
+    }
+    if parts[2].len() != 64 || !parts[2].chars().all(|ch| ch.is_ascii_hexdigit()) {
+        bail!("fragment hash must be a SHA-256 hex digest");
+    }
+    Ok((parts[0].to_owned(), index, parts[2].to_owned()))
 }
 
 fn format_datetime(value: chrono::DateTime<chrono::Utc>) -> String {

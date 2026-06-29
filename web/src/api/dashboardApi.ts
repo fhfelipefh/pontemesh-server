@@ -61,6 +61,35 @@ export type ReplicaTrafficMetrics = {
   authFailures: number;
 };
 
+export type BucketTrafficMetric = {
+  bucket: string;
+  originBytesServed: number;
+  originRequests: number;
+  replicaBytesSynced: number;
+  fragmentEvents: number;
+};
+
+export type ObjectTrafficMetric = {
+  bucket: string;
+  key: string;
+  originBytesServed: number;
+  originRequests: number;
+  replicaBytesSynced: number;
+  fragmentEvents: number;
+};
+
+export type ReplicaDetailMetric = {
+  replicaId: string;
+  replicaName: string;
+  bytesSynced: number;
+  bytesServed: number;
+  fragmentsSynced: number;
+  fragmentsServed: number;
+  syncFailures: number;
+  authFailures: number;
+  fragmentEvents: number;
+};
+
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   const response = await fetch("/api/admin/dashboard/summary", {
     headers: {
@@ -99,4 +128,34 @@ export async function getReplicaTrafficMetrics(): Promise<ReplicaTrafficMetrics>
   });
   await ensureOk(response);
   return response.json() as Promise<ReplicaTrafficMetrics>;
+}
+
+export async function getBucketTrafficMetrics(): Promise<BucketTrafficMetric[]> {
+  const response = await fetch("/api/admin/metrics/buckets", {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<BucketTrafficMetric[]>;
+}
+
+export async function getObjectTrafficMetrics(): Promise<ObjectTrafficMetric[]> {
+  const response = await fetch("/api/admin/metrics/objects", {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<ObjectTrafficMetric[]>;
+}
+
+export async function getReplicaDetailMetrics(replicaId: string): Promise<ReplicaDetailMetric> {
+  const response = await fetch(`/api/admin/metrics/replicas/${encodeURIComponent(replicaId)}`, {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<ReplicaDetailMetric>;
 }
