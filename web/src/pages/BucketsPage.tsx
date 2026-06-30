@@ -200,7 +200,6 @@ export function BucketsPage() {
             <div className="admin-panel__header">
               <div>
                 <h2>{selectedBucket}</h2>
-                <p>{t("setup.objects.description")}</p>
               </div>
               <button
                 className="icon-button"
