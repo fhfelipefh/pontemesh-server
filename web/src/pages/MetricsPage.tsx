@@ -40,7 +40,6 @@ export function MetricsPage() {
         <div>
           <span>{t("setup.metrics.overview")}</span>
           <h1>{t("setup.metrics.title")}</h1>
-          <p>{t("setup.metrics.description")}</p>
         </div>
       </section>
       <Metric icon={<Activity size={20} />} label={t("setup.metrics.totalRequests")} value={String(metrics.totalRequests)} />

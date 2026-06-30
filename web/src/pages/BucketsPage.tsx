@@ -148,7 +148,6 @@ export function BucketsPage() {
         <div className="admin-panel__header">
           <div>
             <h1>{t("setup.buckets.title")}</h1>
-            <p>{t("setup.buckets.description")}</p>
           </div>
         </div>
 

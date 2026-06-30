@@ -140,7 +140,6 @@ export function DashboardPage() {
         <div className="admin-panel__header">
           <div>
             <h2>{t("setup.dashboard.buckets.title")}</h2>
-            <p>{t("setup.dashboard.buckets.description")}</p>
           </div>
           <Link className="admin-link-button" to="/buckets">{t("setup.dashboard.buckets.open")}</Link>
         </div>
@@ -155,7 +154,6 @@ export function DashboardPage() {
         <div className="admin-panel__header">
           <div>
             <h2>{t("setup.dashboard.health.title")}</h2>
-            <p>{t("setup.dashboard.health.description")}</p>
           </div>
         </div>
         {failedHealthItems.length > 0 && (
