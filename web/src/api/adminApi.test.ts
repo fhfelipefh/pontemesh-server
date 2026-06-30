@@ -5,7 +5,7 @@ import {
   revokeApplicationCredential
 } from "./applicationCredentialsApi";
 import { listAuditEvents } from "./auditApi";
-import { listBuckets } from "./bucketsApi";
+import { deleteObject, getObjectDownloadUrl, listBuckets, listObjects, uploadObject } from "./bucketsApi";
 import {
   getBucketTrafficMetrics,
   getDashboardSummary,
@@ -81,6 +81,67 @@ describe("admin API clients", () => {
         accept: "application/json"
       }
     });
+  });
+
+  it("manages bucket objects through protected admin routes", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({
+        items: [{
+          key: "folder/hello world.txt",
+          sizeBytes: 5,
+          contentType: "text/plain",
+          sha256: "abc",
+          createdAt: "2026-06-30T12:00:00Z",
+          updatedAt: "2026-06-30T12:00:00Z",
+          state: "AVAILABLE"
+        }],
+        page: 1,
+        pageSize: 20,
+        totalItems: 1,
+        totalPages: 1
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        key: "folder/hello world.txt",
+        sizeBytes: 5,
+        contentType: "text/plain",
+        sha256: "abc",
+        createdAt: "2026-06-30T12:00:00Z",
+        updatedAt: "2026-06-30T12:00:00Z",
+        state: "AVAILABLE"
+      }, 201))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await listObjects("bucket/name", { query: "hello", page: 1, pageSize: 20 });
+    await uploadObject("bucket/name", new File(["hello"], "hello.txt", { type: "text/plain" }), "folder/hello world.txt");
+    await deleteObject("bucket/name", "folder/hello world.txt");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/buckets/bucket%2Fname/objects?query=hello&page=1&pageSize=20", {
+      headers: {
+        accept: "application/json"
+      }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/buckets/bucket%2Fname/objects", {
+      method: "POST",
+      body: expect.any(FormData)
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/buckets/bucket%2Fname/objects/folder/hello%20world.txt", {
+      method: "DELETE"
+    });
+    expect(getObjectDownloadUrl("bucket/name", "folder/hello world.txt")).toBe(
+      "/api/admin/buckets/bucket%2Fname/objects/folder/hello%20world.txt"
+    );
+  });
+
+  it("surfaces bucket object 401 responses", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ error: "authentication required" }, 401)
+    );
+
+    await expect(listObjects("assets", { page: 1, pageSize: 20 })).rejects.toMatchObject({
+      name: "HttpError",
+      status: 401,
+      message: "authentication required"
+    } satisfies Partial<HttpError>);
   });
 
   it("fetches Origin traffic metrics from the protected admin endpoint", async () => {

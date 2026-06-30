@@ -7,7 +7,7 @@ test.describe("Basic accessibility quality", () => {
     await installAdminApiFixtures(page);
   });
 
-  for (const route of ["/dashboard", "/buckets", "/settings"]) {
+  for (const route of ["/dashboard", "/buckets", "/objects", "/settings"]) {
     test(`${route} should not have serious or critical accessibility violations`, async ({ page }) => {
       await page.goto(route);
 

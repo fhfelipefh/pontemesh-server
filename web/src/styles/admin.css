@@ -547,10 +547,18 @@
 
 .settings-create-key-button {
   width: auto;
+  max-width: 280px;
   min-width: 148px;
   min-height: 44px;
   padding: 0 20px;
   flex: 0 0 auto;
+}
+
+.inline-form .button,
+.inline-form .settings-create-key-button {
+  justify-self: start;
+  width: auto;
+  max-width: 280px;
 }
 
 .settings-modal-field span,
@@ -707,13 +715,13 @@
 }
 
 .settings-revoke-button {
-  color: #BE123C;
-  background: rgba(244, 63, 94, 0.1);
+  color: #9F1239;
+  background: rgba(159, 18, 57, 0.1);
 }
 
 .settings-revoke-button:hover,
 .settings-revoke-button:focus-visible {
-  background: #BE123C;
+  background: #9F1239;
 }
 
 .settings-revoke-button:disabled {
@@ -1073,11 +1081,13 @@
   font-weight: 800;
 }
 
-.admin-content:has(.buckets-page) {
+.admin-content:has(.buckets-page),
+.admin-content:has(.objects-page) {
   overflow: hidden;
 }
 
-.buckets-page {
+.buckets-page,
+.objects-page {
   height: 100%;
   min-height: 0;
   display: grid;
@@ -1159,6 +1169,7 @@
 .page-size-select select {
   min-width: 0;
   width: 100%;
+  min-height: 36px;
   border: 0;
   color: var(--pm-deep-navy);
   background: transparent;
@@ -1217,6 +1228,62 @@
   border-radius: 12px;
 }
 
+.objects-card {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.object-manager {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  gap: 16px;
+}
+
+.objects-bucket-bar,
+.objects-bucket-select,
+.objects-bucket-summary {
+  display: flex;
+  align-items: center;
+}
+
+.objects-bucket-bar {
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--pm-border);
+  border-radius: 12px;
+  padding: 12px;
+  background: #F8FAFC;
+}
+
+.objects-bucket-select {
+  min-width: min(100%, 360px);
+  gap: 10px;
+  color: var(--pm-muted);
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.objects-bucket-select select {
+  min-width: 0;
+  flex: 1;
+  min-height: 38px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 0 10px;
+  color: var(--pm-deep-navy);
+  background: var(--pm-surface);
+  font-weight: 850;
+}
+
+.objects-bucket-summary {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--pm-muted);
+  font-size: 0.88rem;
+  font-weight: 850;
+}
+
 .buckets-table,
 .object-table--drawer {
   min-width: 780px;
@@ -1268,8 +1335,8 @@
   min-height: 34px;
   border-radius: 9px;
   padding: 0 10px;
-  color: var(--pm-primary-blue);
-  background: rgba(37, 99, 235, 0.08);
+  color: #1D4ED8;
+  background: rgba(29, 78, 216, 0.1);
   font-size: 0.84rem;
   font-weight: 850;
   text-decoration: none;
@@ -1284,8 +1351,8 @@
 }
 
 .table-action--danger {
-  color: var(--pm-danger);
-  background: rgba(220, 38, 38, 0.08);
+  color: #B91C1C;
+  background: rgba(185, 28, 28, 0.1);
 }
 
 .table-action--danger:hover,
@@ -1380,11 +1447,7 @@
 
 .bucket-file-picker input {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
+  display: none;
 }
 
 .bucket-file-picker button {
@@ -1394,8 +1457,8 @@
   gap: 7px;
   min-height: 34px;
   border-radius: 9px;
-  color: var(--pm-primary-blue);
-  background: rgba(37, 99, 235, 0.08);
+  color: #1D4ED8;
+  background: rgba(29, 78, 216, 0.1);
   font-weight: 850;
   cursor: pointer;
 }
@@ -1503,6 +1566,132 @@
   max-width: 340px;
 }
 
+.upload-progress-panel {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 60;
+  width: min(390px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid rgba(215, 222, 232, 0.92);
+  border-radius: 12px;
+  background: var(--pm-surface);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.24);
+}
+
+.upload-progress-panel header {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 14px;
+  color: var(--pm-deep-navy);
+  background: #F8FAFC;
+  border-bottom: 1px solid var(--pm-border);
+}
+
+.upload-progress-panel__list {
+  display: grid;
+}
+
+.upload-progress-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 32px;
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid rgba(215, 222, 232, 0.65);
+}
+
+.upload-progress-item:first-child {
+  border-top: 0;
+}
+
+.upload-progress-item__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: #1D4ED8;
+  background: rgba(29, 78, 216, 0.1);
+}
+
+.upload-progress-item[data-status="complete"] .upload-progress-item__icon {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.13);
+}
+
+.upload-progress-item[data-status="error"] .upload-progress-item__icon {
+  color: #B91C1C;
+  background: rgba(185, 28, 28, 0.1);
+}
+
+.upload-progress-item__body {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.upload-progress-item__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.upload-progress-item__row strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--pm-deep-navy);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-progress-item__row span,
+.upload-progress-item small {
+  color: var(--pm-muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.upload-progress-bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #E2E8F0;
+}
+
+.upload-progress-bar span {
+  display: block;
+  height: 100%;
+  min-width: 8px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1D4ED8, var(--pm-accent-teal));
+  transition: width 160ms ease;
+}
+
+.upload-progress-item[data-status="error"] .upload-progress-bar span {
+  background: #B91C1C;
+}
+
+.upload-progress-item button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--pm-muted);
+  cursor: pointer;
+}
+
+.upload-progress-item button:hover,
+.upload-progress-item button:focus-visible {
+  color: var(--pm-deep-navy);
+  background: #E2E8F0;
+  outline: none;
+}
+
 @media (max-width: 1120px) {
   .admin-shell {
     height: auto;
@@ -1566,7 +1755,8 @@
   }
 
   .buckets-toolbar,
-  .bucket-drawer__tools {
+  .bucket-drawer__tools,
+  .objects-bucket-bar {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1578,6 +1768,12 @@
   .buckets-search {
     width: 100%;
     min-width: 0;
+  }
+
+  .objects-bucket-select,
+  .objects-bucket-summary {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .settings-page__grid {
@@ -1735,6 +1931,7 @@
   .settings-modal__primary,
   .settings-secondary-button {
     width: 100%;
+    max-width: none;
   }
 
   .settings-modal__actions {
@@ -1744,5 +1941,11 @@
 
   .settings-secret-list dd {
     align-items: start;
+  }
+
+  .upload-progress-panel {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
   }
 }

@@ -76,7 +76,6 @@ export function ReplicasPage() {
       <header className="settings-page__header">
         <div>
           <h1>{t("setup.replicas.title")}</h1>
-          <p>{t("setup.replicas.description")}</p>
         </div>
       </header>
       <section className="settings-card">
@@ -87,7 +86,6 @@ export function ReplicasPage() {
             </div>
             <div>
               <h2>{t("setup.replicas.credentials")}</h2>
-              <p>{t("setup.replicas.credentialsDescription")}</p>
             </div>
           </div>
         </div>

@@ -3,11 +3,13 @@ import { Navigate, Route, BrowserRouter as Router, Routes, useLocation } from "r
 import { AuthUser, getCurrentUser, logout } from "./api/authApi";
 import { getSetupStatus } from "./api/setupApi";
 import { AdminLayout } from "./components/AdminLayout";
+import { UploadProgressProvider } from "./components/UploadProgress";
 import { BucketsPage } from "./pages/BucketsPage";
 import { ConfigurePage } from "./pages/ConfigurePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MetricsPage } from "./pages/MetricsPage";
+import { ObjectsPage } from "./pages/ObjectsPage";
 import { ReplicasPage } from "./pages/ReplicasPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UnlockPage } from "./pages/UnlockPage";
@@ -25,6 +27,12 @@ function SetupRoutes() {
   }, [location.pathname]);
 
   useEffect(() => {
+    if (setupRequired === null) {
+      setUser(null);
+      setAuthLoaded(false);
+      return;
+    }
+
     if (setupRequired !== false) {
       setUser(null);
       setAuthLoaded(true);
@@ -90,6 +98,7 @@ function SetupRoutes() {
       />
       <Route path="/dashboard" element={adminElement(<DashboardPage />)} />
       <Route path="/buckets" element={adminElement(<BucketsPage />)} />
+      <Route path="/objects" element={adminElement(<ObjectsPage />)} />
       <Route path="/replicas" element={adminElement(<ReplicasPage />)} />
       <Route path="/metrics" element={adminElement(<MetricsPage />)} />
       <Route path="/settings" element={adminElement(<SettingsPage />)} />
@@ -100,8 +109,10 @@ function SetupRoutes() {
 
 export function App() {
   return (
-    <Router>
-      <SetupRoutes />
-    </Router>
+    <UploadProgressProvider>
+      <Router>
+        <SetupRoutes />
+      </Router>
+    </UploadProgressProvider>
   );
 }

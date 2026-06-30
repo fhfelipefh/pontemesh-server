@@ -91,6 +91,15 @@
       "totalItems": "{{count}} items",
       "pageIndicator": "Page {{page}} of {{totalPages}}"
     },
+    "uploads": {
+      "title": "Uploads",
+      "uploading": "Uploading",
+      "waiting": "Waiting",
+      "percent": "{{percent}}%",
+      "complete": "Complete",
+      "failed": "Failed",
+      "close": "Close upload"
+    },
     "dashboard": {
       "instance": "Instance",
       "uptime": "Process uptime",
@@ -140,7 +149,6 @@
     },
     "buckets": {
       "title": "Buckets",
-      "description": "Manage real catalog buckets.",
       "name": "Bucket name",
       "namePlaceholder": "documents",
       "search": "Search bucket",
@@ -163,7 +171,10 @@
       "confirmDeleteDescription": "Confirm deletion of bucket {{name}}. Buckets with objects will not be deleted."
     },
     "objects": {
+      "title": "Objects",
       "count": "objects",
+      "bucket": "Bucket",
+      "refresh": "Refresh",
       "key": "Object key",
       "keyPlaceholder": "optional/path/file.ext",
       "file": "File",
@@ -181,6 +192,8 @@
       "loadFailed": "Failed to load objects.",
       "uploadFailed": "Failed to upload object.",
       "deleteFailed": "Failed to delete object.",
+      "noBucketsTitle": "No buckets are available.",
+      "noBucketsDescription": "Create a bucket before uploading or listing objects.",
       "emptyTitle": "This bucket does not have objects yet.",
       "emptyDescription": "Upload a file to get started.",
       "noResultsTitle": "No objects found.",
@@ -203,9 +216,7 @@
     },
     "replicas": {
       "title": "Replicas",
-      "description": "Manage Replica/Edge identities authorized by the Origin.",
       "credentials": "Replica credentials",
-      "credentialsDescription": "Create scoped credentials for Replica/Edge synchronization.",
       "name": "Replica name",
       "namePlaceholder": "edge-1",
       "allowedBuckets": "Allowed buckets",
@@ -229,7 +240,6 @@
       "title": "Settings",
       "applications": {
         "title": "Application credentials",
-        "description": "Tokens for SDKs and applications to consume Ponte Mesh contracts.",
         "name": "Name",
         "namePlaceholder": "default-sdk",
         "create": "Create application",
@@ -247,7 +257,6 @@
       },
       "s3": {
         "title": "S3 Credentials",
-        "description": "Keys for S3-compatible clients.",
         "create": "Create key",
         "createModalTitle": "Create S3 credential",
         "createModalDescription": "Set a name to identify this key in the panel.",

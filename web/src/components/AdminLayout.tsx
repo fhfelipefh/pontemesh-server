@@ -31,7 +31,7 @@ export function AdminLayout({ children, instanceName, username, onLogout }: Admi
   const navItems = [
     { to: "/dashboard", label: t("setup.nav.dashboard"), icon: Gauge, enabled: true },
     { to: "/buckets", label: t("setup.nav.buckets"), icon: Boxes, enabled: true },
-    { to: "/objects", label: t("setup.nav.objects"), icon: HardDrive, enabled: false },
+    { to: "/objects", label: t("setup.nav.objects"), icon: HardDrive, enabled: true },
     { to: "/replicas", label: t("setup.nav.replicas"), icon: Share2, enabled: true },
     { to: "/metrics", label: t("setup.nav.metrics"), icon: BarChart3, enabled: true },
     { to: "/settings", label: t("setup.nav.settings"), icon: Settings, enabled: true }

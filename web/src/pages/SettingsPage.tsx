@@ -216,7 +216,6 @@ function ApplicationCredentialsCard({
           </div>
           <div>
             <h2>{t("setup.settings.applications.title")}</h2>
-            <p>{t("setup.settings.applications.description")}</p>
           </div>
         </div>
       </div>

@@ -988,6 +988,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_object_routes_require_session_and_handle_multipart_lifecycle() {
+        let Some(ctx) = TestContext::new("admin-object-routes").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let admin_cookie = login_cookie(app.clone()).await;
+
+        let create_bucket = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/buckets")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"admin-objects"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_bucket.status(), StatusCode::CREATED);
+
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/admin-objects/objects")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let boundary = "pontemesh-test-boundary";
+        let object_body = b"hello admin object routes";
+        let multipart = multipart_body(boundary, "folder/hello world.txt", object_body);
+        let upload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/buckets/admin-objects/objects")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(multipart))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(upload.status(), StatusCode::CREATED);
+        let upload_body = response_text(upload).await;
+        assert!(upload_body.contains("folder/hello world.txt"));
+
+        let list = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/admin-objects/objects?query=hello&page=1&pageSize=10")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list.status(), StatusCode::OK);
+        let list_body = response_text(list).await;
+        assert!(list_body.contains("folder/hello world.txt"));
+        assert!(list_body.contains(r#""totalItems":1"#));
+
+        let download = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/admin-objects/objects/folder/hello%20world.txt")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(download.status(), StatusCode::OK);
+        assert_eq!(header_value(&download, header::CONTENT_TYPE), "text/plain");
+        assert_eq!(response_bytes(download).await.as_ref(), object_body);
+
+        let delete = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/api/admin/buckets/admin-objects/objects/folder/hello%20world.txt")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(delete.status(), StatusCode::OK);
+
+        let audit_counts: (i64, i64) = sqlx_core::query_as::query_as(
+            r#"
+            SELECT
+                COUNT(*) FILTER (WHERE event_type = 'object_uploaded')::bigint AS uploaded,
+                COUNT(*) FILTER (WHERE event_type = 'object_deleted')::bigint AS deleted
+            FROM audit_events
+            "#,
+        )
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("audit counts");
+        assert_eq!(audit_counts, (1, 1));
+    }
+
+    #[tokio::test]
     async fn postgres_origin_catalog_policy_metrics_revocation_and_replica_flow() {
         let Some(ctx) = TestContext::new("postgres-origin-flow").await else {
             return;
@@ -2153,6 +2271,23 @@ mod tests {
 
     fn to_hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn multipart_body(boundary: &str, key: &str, bytes: &[u8]) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"key\"\r\n\r\n");
+        body.extend_from_slice(key.as_bytes());
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"file\"; filename=\"hello.txt\"\r\n",
+        );
+        body.extend_from_slice(b"Content-Type: text/plain\r\n\r\n");
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        body
     }
 
     fn test_home(name: &str) -> PontemeshHome {

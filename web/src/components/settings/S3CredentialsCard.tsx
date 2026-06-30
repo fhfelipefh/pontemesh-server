@@ -66,7 +66,6 @@ export function S3CredentialsCard({
           </div>
           <div>
             <h2>{t("setup.settings.s3.title")}</h2>
-            <p>{t("setup.settings.s3.description")}</p>
           </div>
         </div>
         <Button

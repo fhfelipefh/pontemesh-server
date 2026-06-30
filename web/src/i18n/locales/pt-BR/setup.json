@@ -91,6 +91,15 @@
       "totalItems": "{{count}} itens",
       "pageIndicator": "Página {{page}} de {{totalPages}}"
     },
+    "uploads": {
+      "title": "Uploads",
+      "uploading": "Enviando",
+      "waiting": "Aguardando",
+      "percent": "{{percent}}%",
+      "complete": "Concluído",
+      "failed": "Falhou",
+      "close": "Fechar upload"
+    },
     "dashboard": {
       "instance": "Instância",
       "uptime": "Tempo em execução",
@@ -140,7 +149,6 @@
     },
     "buckets": {
       "title": "Buckets",
-      "description": "Gerencie buckets reais do catálogo.",
       "name": "Nome do bucket",
       "namePlaceholder": "documents",
       "search": "Buscar bucket",
@@ -163,7 +171,10 @@
       "confirmDeleteDescription": "Confirme a exclusão do bucket {{name}}. Buckets com objetos não serão excluídos."
     },
     "objects": {
+      "title": "Objetos",
       "count": "objetos",
+      "bucket": "Bucket",
+      "refresh": "Atualizar",
       "key": "Chave do objeto",
       "keyPlaceholder": "caminho/opcional/arquivo.ext",
       "file": "Arquivo",
@@ -181,6 +192,8 @@
       "loadFailed": "Falha ao carregar objetos.",
       "uploadFailed": "Falha ao enviar objeto.",
       "deleteFailed": "Falha ao excluir objeto.",
+      "noBucketsTitle": "Nenhum bucket disponível.",
+      "noBucketsDescription": "Crie um bucket antes de enviar ou listar objetos.",
       "emptyTitle": "Este bucket ainda não possui objetos.",
       "emptyDescription": "Envie um arquivo para começar.",
       "noResultsTitle": "Nenhum objeto encontrado.",
@@ -203,9 +216,7 @@
     },
     "replicas": {
       "title": "Réplicas",
-      "description": "Gerencie identidades Replica/Edge autorizadas pelo Origin.",
       "credentials": "Credenciais de réplica",
-      "credentialsDescription": "Crie credenciais escopadas para sincronização de Replica/Edge.",
       "name": "Nome da réplica",
       "namePlaceholder": "edge-1",
       "allowedBuckets": "Buckets permitidos",
@@ -229,7 +240,6 @@
       "title": "Configurações",
       "applications": {
         "title": "Credenciais de aplicação",
-        "description": "Tokens para SDKs e aplicações consumirem contratos Ponte Mesh.",
         "name": "Nome",
         "namePlaceholder": "default-sdk",
         "create": "Criar aplicação",
@@ -247,7 +257,6 @@
       },
       "s3": {
         "title": "Credenciais S3",
-        "description": "Chaves para clientes S3-compatíveis.",
         "create": "Criar chave",
         "createModalTitle": "Criar credencial S3",
         "createModalDescription": "Defina um nome para identificar esta chave no painel.",

@@ -79,7 +79,18 @@ const objects = [
   }
 ];
 
-export async function installAdminApiFixtures(page: Page) {
+type AdminFixtureOptions = {
+  buckets?: typeof buckets;
+  objectsByBucket?: Record<string, typeof objects>;
+};
+
+export async function installAdminApiFixtures(page: Page, options: AdminFixtureOptions = {}) {
+  const fixtureBuckets = options.buckets ?? buckets;
+  const fixtureObjectsByBucket = options.objectsByBucket ?? {
+    assets: objects,
+    documents: objects.slice(1)
+  };
+
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -111,16 +122,23 @@ export async function installAdminApiFixtures(page: Page) {
 
     if (path === "/api/admin/buckets") {
       if (request.method() === "POST") {
-        return json(route, buckets[0]);
+        return json(route, fixtureBuckets[0]);
       }
-      return json(route, pageResponse(buckets));
+      return json(route, pageResponse(fixtureBuckets));
     }
 
-    if (path.match(/^\/api\/admin\/buckets\/[^/]+\/objects$/)) {
+    const objectListMatch = path.match(/^\/api\/admin\/buckets\/([^/]+)\/objects$/);
+    if (objectListMatch) {
+      const bucketName = decodeURIComponent(objectListMatch[1]);
       if (request.method() === "POST") {
         return json(route, objects[0]);
       }
-      return json(route, pageResponse(objects));
+      const query = url.searchParams.get("query")?.toLowerCase() ?? "";
+      const bucketObjects = fixtureObjectsByBucket[bucketName] ?? [];
+      const filteredObjects = query
+        ? bucketObjects.filter((object) => object.key.toLowerCase().includes(query))
+        : bucketObjects;
+      return json(route, pageResponse(filteredObjects));
     }
 
     if (path.match(/^\/api\/admin\/buckets\/[^/]+(\/objects\/.+)?$/)) {
