@@ -76,20 +76,6 @@ export function DashboardPage() {
 
   return (
     <div className="dashboard-grid">
-      <section className="admin-hero">
-        <div>
-          <span>{t("setup.dashboard.overview")}</span>
-          <h1>{summary.instance.name}</h1>
-          <p>
-            {t("setup.dashboard.role")} {t(`setup.roles.${summary.instance.role}`)} · {t("setup.dashboard.environment")}{" "}
-            {t(`setup.environment.${summary.instance.environment}`)}
-          </p>
-        </div>
-        <div className="admin-hero__meta">
-          <strong>{t("setup.dashboard.version")} {summary.instance.version}</strong>
-        </div>
-      </section>
-
       {updateError && (
         <section className="dashboard-update-error" role="status">
           <AlertTriangle size={17} aria-hidden="true" />
