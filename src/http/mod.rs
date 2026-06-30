@@ -247,6 +247,7 @@ mod tests {
     use hmac::{Hmac, Mac};
     use sha2::{Digest, Sha256};
     use sqlx::PgPool;
+    use sqlx_core::row::Row;
     use std::{
         fs,
         sync::OnceLock,
@@ -465,6 +466,82 @@ mod tests {
         assert_eq!(put_object.status(), StatusCode::OK);
         assert!(put_object.headers().contains_key("ETag"));
         assert!(put_object.headers().contains_key("x-amz-request-id"));
+        assert_eq!(header_value(&put_object, header::CONTENT_LENGTH), "0");
+        let etag = header_value(&put_object, "ETag").to_owned();
+        assert_eq!(etag, format!("\"{}\"", sha256_hex(object_body)));
+
+        let object_row = sqlx_core::query::query(
+            r#"
+            SELECT v.size_bytes, v.content_type, v.object_hash, v.storage_path
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            JOIN object_versions v ON v.id = o.current_version_id
+            WHERE b.name = $1 AND o.object_key = $2
+            "#,
+        )
+        .bind("compat-bucket")
+        .bind("prefix/hello.txt")
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("object row");
+        assert_eq!(
+            object_row.get::<i64, _>("size_bytes"),
+            object_body.len() as i64
+        );
+        assert_eq!(object_row.get::<String, _>("content_type"), "text/plain");
+        assert_eq!(
+            object_row.get::<String, _>("object_hash"),
+            sha256_hex(object_body)
+        );
+        let stored_path = object_row.get::<String, _>("storage_path");
+        assert_eq!(fs::read(&stored_path).expect("stored object"), object_body);
+
+        let audit_count: i64 = sqlx_core::query_scalar::query_scalar(
+            "SELECT COUNT(*)::bigint FROM audit_events WHERE event_type = 's3_object_put'",
+        )
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("audit count");
+        assert_eq!(audit_count, 1);
+
+        let default_body = b"expect header upload";
+        let default_put = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/compat-bucket/default.bin")
+                        .header(header::EXPECT, "100-continue")
+                        .body(Body::from(default_body.as_slice())),
+                    default_body,
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(default_put.status(), StatusCode::OK);
+        assert_eq!(header_value(&default_put, header::CONTENT_LENGTH), "0");
+
+        let default_head = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::HEAD)
+                        .uri("/compat-bucket/default.bin")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(default_head.status(), StatusCode::OK);
+        assert_eq!(
+            header_value(&default_head, header::CONTENT_TYPE),
+            "application/octet-stream"
+        );
 
         let list_objects = s3_app
             .clone()
@@ -1900,6 +1977,18 @@ mod tests {
         );
         assert!(response.headers().contains_key(header::CONTENT_LENGTH));
         assert!(response.headers().contains_key("x-amz-request-id"));
+    }
+
+    fn header_value<K>(response: &axum::response::Response, name: K) -> &str
+    where
+        K: axum::http::header::AsHeaderName,
+    {
+        response
+            .headers()
+            .get(name)
+            .expect("header present")
+            .to_str()
+            .expect("header text")
     }
 
     fn signed_s3_request(

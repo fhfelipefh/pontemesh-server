@@ -99,6 +99,13 @@ pub struct NewObjectFragment {
     pub priority: String,
 }
 
+struct ObjectAuditEvent<'a> {
+    event: &'a str,
+    principal: &'a str,
+    outcome: &'a str,
+    detail: &'a str,
+}
+
 #[derive(Debug, Clone)]
 pub struct ObjectManifest {
     pub manifest_id: String,
@@ -845,17 +852,33 @@ impl Catalog {
     }
 
     pub async fn insert_object(&self, object: NewObject) -> anyhow::Result<ObjectSummary> {
-        self.insert_or_replace_object(object, false).await
+        self.insert_or_replace_object(object, false, None).await
     }
 
-    pub async fn put_object(&self, object: NewObject) -> anyhow::Result<ObjectSummary> {
-        self.insert_or_replace_object(object, true).await
+    pub async fn put_object_with_audit(
+        &self,
+        object: NewObject,
+        principal: &str,
+        detail: &str,
+    ) -> anyhow::Result<ObjectSummary> {
+        self.insert_or_replace_object(
+            object,
+            true,
+            Some(ObjectAuditEvent {
+                event: "s3_object_put",
+                principal,
+                outcome: "success",
+                detail,
+            }),
+        )
+        .await
     }
 
     async fn insert_or_replace_object(
         &self,
         object: NewObject,
         replace_existing: bool,
+        audit_event: Option<ObjectAuditEvent<'_>>,
     ) -> anyhow::Result<ObjectSummary> {
         validate_bucket_name(&object.bucket_name)?;
         validate_object_key(&object.key)?;
@@ -953,6 +976,22 @@ impl Catalog {
         .execute(&mut *tx)
         .await
         .context("failed to update current object version")?;
+
+        if let Some(audit_event) = audit_event {
+            record_audit_event_in_tx(
+                &mut tx,
+                audit_event.event,
+                None,
+                None,
+                None,
+                serde_json::json!({
+                    "principal": audit_event.principal,
+                    "outcome": audit_event.outcome,
+                    "detail": audit_event.detail
+                }),
+            )
+            .await?;
+        }
 
         tx.commit()
             .await
@@ -2951,6 +2990,12 @@ pub fn validate_object_key(key: &str) -> anyhow::Result<()> {
     if key.len() > 1024 {
         bail!("object key cannot exceed 1024 characters");
     }
+    if key.contains('\0') {
+        bail!("object key cannot contain null bytes");
+    }
+    if key.contains('\\') {
+        bail!("object key cannot contain backslashes");
+    }
     let path = Path::new(key);
     if path.is_absolute() {
         bail!("object key must be relative");
@@ -3061,6 +3106,16 @@ mod tests {
         assert_eq!(total_pages(10, 10), 1);
         assert_eq!(total_pages(11, 10), 2);
         assert_eq!(total_pages(101, 10), 11);
+    }
+
+    #[test]
+    fn validate_object_key_rejects_path_traversal_and_unsafe_paths() {
+        assert!(validate_object_key("folder/hello.txt").is_ok());
+        assert!(validate_object_key("../hello.txt").is_err());
+        assert!(validate_object_key("folder/../hello.txt").is_err());
+        assert!(validate_object_key("folder\\..\\hello.txt").is_err());
+        assert!(validate_object_key("/absolute/hello.txt").is_err());
+        assert!(validate_object_key("folder/\0/hello.txt").is_err());
     }
 
     #[test]

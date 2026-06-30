@@ -1,6 +1,9 @@
 use crate::{
     audit,
-    catalog::{self, BucketSummary, NewObject, ObjectRecord, ObjectSummary},
+    catalog::{
+        self, BucketSummary, NewObject, NewObjectFragment, NewObjectManifest, ObjectRecord,
+        ObjectSummary,
+    },
     config,
     http::AppState,
     s3_auth::S3Identity,
@@ -8,14 +11,17 @@ use crate::{
 use anyhow::{Context, bail};
 use axum::{
     Extension,
-    body::{Body, Bytes},
+    body::Body,
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::Response,
 };
+use http_body_util::BodyExt;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::{fs, path::PathBuf};
+use std::{cmp, fs, path::PathBuf};
+use tokio::io::AsyncWriteExt;
+use tracing::{info, warn};
 
 #[derive(Debug, Deserialize)]
 pub struct ListObjectsQuery {
@@ -126,9 +132,26 @@ pub async fn put_object(
     Extension(identity): Extension<S3Identity>,
     headers: HeaderMap,
     Path((bucket_name, object_key)): Path<(String, String)>,
-    body: Bytes,
+    body: Body,
 ) -> Response {
-    match put_object_inner(&state, &bucket_name, &object_key, &headers, body).await {
+    let request_id = request_id();
+    info!(
+        bucket = %bucket_name,
+        object_key = %object_key,
+        request_id = %request_id,
+        "put_object_started"
+    );
+    match put_object_inner(
+        &state,
+        &identity.access_key_id,
+        &bucket_name,
+        &object_key,
+        &headers,
+        body,
+        &request_id,
+    )
+    .await
+    {
         Ok(object) => {
             audit::event(
                 "s3_object_put",
@@ -136,22 +159,31 @@ pub async fn put_object(
                 "success",
                 &format!("bucket={bucket_name}; key={}", object.key),
             );
-            record_origin_audit(
-                &state,
-                "s3_object_put",
-                &identity.access_key_id,
-                "success",
-                &format!("bucket={bucket_name}; key={}", object.key),
-            )
-            .await;
+            info!(
+                bucket = %bucket_name,
+                object_key = %object.key,
+                size_bytes = object.size_bytes,
+                request_id = %request_id,
+                "put_object_completed"
+            );
             Response::builder()
                 .status(StatusCode::OK)
                 .header("ETag", format!("\"{}\"", object.sha256))
-                .header("x-amz-request-id", request_id())
+                .header("x-amz-request-id", request_id)
+                .header(header::CONTENT_LENGTH, "0")
                 .body(Body::empty())
                 .expect("valid PutObject response")
         }
-        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+        Err(error) => {
+            warn!(
+                bucket = %bucket_name,
+                object_key = %object_key,
+                request_id = %request_id,
+                error = %error,
+                "put_object_failed"
+            );
+            s3_bad_request(error, Some(&bucket_name), Some(&object_key))
+        }
     }
 }
 
@@ -289,10 +321,12 @@ async fn create_bucket_inner(state: &AppState, bucket_name: &str) -> anyhow::Res
 
 async fn put_object_inner(
     state: &AppState,
+    principal: &str,
     bucket_name: &str,
     object_key: &str,
     headers: &HeaderMap,
-    body: Bytes,
+    body: Body,
+    request_id: &str,
 ) -> anyhow::Result<ObjectSummary> {
     catalog::validate_bucket_name(bucket_name)?;
     catalog::validate_object_key(object_key)?;
@@ -302,34 +336,218 @@ async fn put_object_inner(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("application/octet-stream")
         .to_owned();
-    let sha256 = format!("{:x}", Sha256::digest(&body));
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
-    let manifest = catalog::build_object_manifest(&body, policy.fragment_size_bytes)?;
 
     let storage_path = config::configured_storage_dir(&state.paths)?;
     let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
+    let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/uploads");
+    fs::create_dir_all(&temp_dir).with_context(|| {
+        format!(
+            "failed to create temporary upload directory {}",
+            temp_dir.display()
+        )
+    })?;
     fs::create_dir_all(&bucket_dir).with_context(|| {
         format!(
             "failed to create bucket storage directory {}",
             bucket_dir.display()
         )
     })?;
-    let object_path = bucket_dir.join(format!("{}-{}", uuid::Uuid::new_v4(), sha256));
-    fs::write(&object_path, &body)
-        .with_context(|| format!("failed to write object data {}", object_path.display()))?;
+    let upload_id = uuid::Uuid::new_v4();
+    let temp_path = temp_dir.join(format!("{upload_id}.tmp"));
+    let streamed = match write_body_to_temp_object(
+        body,
+        &temp_path,
+        policy.fragment_size_bytes,
+        bucket_name,
+        object_key,
+        request_id,
+    )
+    .await
+    {
+        Ok(streamed) => streamed,
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error);
+        }
+    };
+    let object_path = bucket_dir.join(format!("{}-{}", upload_id, streamed.sha256));
+    if let Err(error) = fs::rename(&temp_path, &object_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error)
+            .with_context(|| format!("failed to move object data {}", object_path.display()));
+    }
+    info!(
+        bucket = %bucket_name,
+        object_key = %object_key,
+        size_bytes = streamed.size_bytes,
+        request_id = %request_id,
+        "put_object_storage_written"
+    );
 
-    state
+    let detail = format!("bucket={bucket_name}; key={object_key}");
+    let object = match state
         .catalog
-        .put_object(NewObject {
-            bucket_name: bucket_name.to_owned(),
-            key: object_key.trim_start_matches('/').to_owned(),
-            size_bytes: i64::try_from(body.len()).context("uploaded object is too large")?,
-            content_type,
-            sha256,
-            storage_path: object_path.display().to_string(),
-            manifest,
-        })
+        .put_object_with_audit(
+            NewObject {
+                bucket_name: bucket_name.to_owned(),
+                key: object_key.trim_start_matches('/').to_owned(),
+                size_bytes: streamed.size_bytes,
+                content_type,
+                sha256: streamed.sha256,
+                storage_path: object_path.display().to_string(),
+                manifest: streamed.manifest,
+            },
+            principal,
+            &detail,
+        )
         .await
+    {
+        Ok(object) => object,
+        Err(error) => {
+            let _ = fs::remove_file(&object_path);
+            return Err(error);
+        }
+    };
+    info!(
+        bucket = %bucket_name,
+        object_key = %object_key,
+        size_bytes = object.size_bytes,
+        request_id = %request_id,
+        "put_object_catalog_saved"
+    );
+    Ok(object)
+}
+
+struct StreamedObject {
+    size_bytes: i64,
+    sha256: String,
+    manifest: NewObjectManifest,
+}
+
+async fn write_body_to_temp_object(
+    mut body: Body,
+    temp_path: &PathBuf,
+    fragment_size_bytes: i64,
+    bucket_name: &str,
+    object_key: &str,
+    request_id: &str,
+) -> anyhow::Result<StreamedObject> {
+    if fragment_size_bytes <= 0 {
+        bail!("fragmentSizeBytes must be positive");
+    }
+    let fragment_size =
+        usize::try_from(fragment_size_bytes).context("fragment size is too large")?;
+    let mut file = tokio::fs::File::create(temp_path)
+        .await
+        .with_context(|| format!("failed to create temporary upload {}", temp_path.display()))?;
+    let mut object_hasher = Sha256::new();
+    let mut fragment_hasher = Sha256::new();
+    let mut fragments = Vec::new();
+    let mut fragment_len = 0usize;
+    let mut fragment_start = 0i64;
+    let mut size_bytes = 0i64;
+
+    while let Some(frame) = body.frame().await {
+        let frame = frame.context("failed to read request body")?;
+        let Some(chunk) = frame.data_ref() else {
+            continue;
+        };
+        if chunk.is_empty() {
+            continue;
+        }
+        file.write_all(chunk)
+            .await
+            .with_context(|| format!("failed to write upload chunk {}", temp_path.display()))?;
+        object_hasher.update(chunk);
+
+        let mut remaining = chunk.as_ref();
+        while !remaining.is_empty() {
+            let capacity = fragment_size - fragment_len;
+            let take = cmp::min(capacity, remaining.len());
+            fragment_hasher.update(&remaining[..take]);
+            fragment_len += take;
+            size_bytes = size_bytes
+                .checked_add(i64::try_from(take).context("uploaded object is too large")?)
+                .context("uploaded object is too large")?;
+            remaining = &remaining[take..];
+
+            if fragment_len == fragment_size {
+                push_streamed_fragment(
+                    &mut fragments,
+                    &mut fragment_hasher,
+                    &mut fragment_start,
+                    &mut fragment_len,
+                )?;
+            }
+        }
+    }
+
+    if fragment_len > 0 {
+        push_streamed_fragment(
+            &mut fragments,
+            &mut fragment_hasher,
+            &mut fragment_start,
+            &mut fragment_len,
+        )?;
+    }
+
+    file.flush()
+        .await
+        .with_context(|| format!("failed to flush upload {}", temp_path.display()))?;
+    drop(file);
+
+    let sha256 = format!("{:x}", object_hasher.finalize());
+    info!(
+        bucket = %bucket_name,
+        object_key = %object_key,
+        size_bytes,
+        request_id = %request_id,
+        "put_object_body_received"
+    );
+    Ok(StreamedObject {
+        size_bytes,
+        sha256,
+        manifest: NewObjectManifest {
+            fragment_size_bytes,
+            fragments,
+        },
+    })
+}
+
+fn push_streamed_fragment(
+    fragments: &mut Vec<NewObjectFragment>,
+    fragment_hasher: &mut Sha256,
+    fragment_start: &mut i64,
+    fragment_len: &mut usize,
+) -> anyhow::Result<()> {
+    let size_bytes = i64::try_from(*fragment_len).context("fragment size cannot fit in i64")?;
+    if size_bytes == 0 {
+        return Ok(());
+    }
+    let index = i64::try_from(fragments.len()).context("fragment index cannot fit in i64")?;
+    let byte_range_start = *fragment_start;
+    let byte_range_end = byte_range_start
+        .checked_add(size_bytes.saturating_sub(1))
+        .context("fragment byte range is too large")?;
+    let sha256 = format!("{:x}", fragment_hasher.finalize_reset());
+    fragments.push(NewObjectFragment {
+        index,
+        byte_range_start,
+        byte_range_end,
+        size_bytes,
+        sha256,
+        priority: if index == 0 {
+            "INITIAL".to_owned()
+        } else {
+            "NORMAL".to_owned()
+        },
+    });
+    *fragment_start = byte_range_end
+        .checked_add(1)
+        .context("fragment byte range is too large")?;
+    *fragment_len = 0;
+    Ok(())
 }
 
 async fn get_object_inner(
