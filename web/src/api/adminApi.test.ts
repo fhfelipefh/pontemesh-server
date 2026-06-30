@@ -60,17 +60,23 @@ describe("admin API clients", () => {
         usedPercent: null,
         warnings: []
       }))
-      .mockResolvedValueOnce(jsonResponse([]));
+      .mockResolvedValueOnce(jsonResponse({
+        items: [],
+        page: 1,
+        pageSize: 20,
+        totalItems: 0,
+        totalPages: 1
+      }));
 
     await getStorageStatus();
-    await listBuckets();
+    await listBuckets({ page: 1, pageSize: 20 });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/storage/status", {
       headers: {
         accept: "application/json"
       }
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/buckets", {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/buckets?page=1&pageSize=20", {
       headers: {
         accept: "application/json"
       }

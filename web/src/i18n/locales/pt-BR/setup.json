@@ -69,16 +69,9 @@
       "objects": "Objetos",
       "replicas": "Réplicas",
       "metrics": "Métricas",
-      "settings": "Configurações"
-    },
-    "roles": {
-      "origin": "Origin",
-      "replica-edge": "Replica/Edge"
-    },
-    "environment": {
-      "native": "nativo",
-      "container": "container",
-      "unknown": "desconhecido"
+      "settings": "Configurações",
+      "collapseSidebar": "Recolher sidebar",
+      "expandSidebar": "Expandir sidebar"
     },
     "common": {
       "loading": "Carregando...",
@@ -88,14 +81,18 @@
       "no": "Não",
       "ok": "OK",
       "cancel": "Cancelar",
-      "failed": "Falhou"
+      "confirm": "Confirmar",
+      "close": "Fechar",
+      "search": "Buscar",
+      "previous": "Anterior",
+      "next": "Próxima",
+      "itemsPerPage": "Itens por página",
+      "actions": "Ações",
+      "totalItems": "{{count}} itens",
+      "pageIndicator": "Página {{page}} de {{totalPages}}"
     },
     "dashboard": {
       "instance": "Instância",
-      "overview": "Visão geral real da instância",
-      "role": "Papel:",
-      "environment": "Ambiente:",
-      "version": "Versão",
       "uptime": "Tempo em execução",
       "memory": "Memória",
       "totalBuckets": "Total de buckets",
@@ -121,21 +118,16 @@
       },
       "buckets": {
         "title": "Catálogo de buckets",
-        "description": "Contagem real registrada no catálogo local.",
         "open": "Abrir buckets"
       },
       "health": {
         "title": "Saúde da instância",
-        "description": "Verificações reais feitas pelo backend nesta instância.",
         "database": "Banco de dados",
         "storage": "Storage",
-        "setup": "Setup concluído",
         "connected": "conectado",
         "unavailable": "indisponível",
         "writable": "gravável",
         "notWritable": "sem permissão de escrita",
-        "setupReady": "concluído",
-        "setupIncomplete": "pendente",
         "operational": "sem alertas",
         "attention": "requer atenção",
         "alert": "Uma ou mais verificações da instância requerem atenção."
@@ -151,36 +143,54 @@
       "description": "Gerencie buckets reais do catálogo.",
       "name": "Nome do bucket",
       "namePlaceholder": "documents",
+      "search": "Buscar bucket",
       "create": "Criar bucket",
+      "createDescription": "Informe um nome válido para o novo bucket.",
+      "open": "Abrir bucket",
       "delete": "Excluir bucket",
+      "objectCount": "Objetos",
+      "totalSize": "Tamanho",
+      "createdAt": "Criado em",
+      "loading": "Carregando buckets",
       "loadFailed": "Falha ao carregar buckets.",
       "createFailed": "Falha ao criar bucket.",
       "deleteFailed": "Falha ao excluir bucket.",
       "emptyTitle": "Nenhum bucket criado ainda.",
-      "emptyDescription": "Crie seu primeiro bucket para começar a armazenar objetos."
+      "emptyDescription": "Crie seu primeiro bucket para começar a armazenar objetos.",
+      "noResultsTitle": "Nenhum bucket encontrado.",
+      "noResultsDescription": "Ajuste a busca para encontrar outro bucket.",
+      "confirmDeleteTitle": "Excluir bucket",
+      "confirmDeleteDescription": "Confirme a exclusão do bucket {{name}}. Buckets com objetos não serão excluídos."
     },
     "objects": {
-      "description": "Arquivos reais armazenados neste bucket.",
       "count": "objetos",
       "key": "Chave do objeto",
       "keyPlaceholder": "caminho/opcional/arquivo.ext",
       "file": "Arquivo",
       "upload": "Enviar objeto",
+      "uploading": "Enviando objeto",
+      "chooseFile": "Escolher arquivo",
+      "noFileChosen": "Nenhum arquivo escolhido",
       "search": "Buscar objetos",
       "size": "Tamanho",
-      "state": "Estado",
-      "createdAt": "Criado em",
+      "contentType": "Content-Type",
+      "updatedAt": "Última modificação",
+      "download": "Baixar objeto",
       "delete": "Excluir objeto",
+      "loading": "Carregando objetos",
       "loadFailed": "Falha ao carregar objetos.",
       "uploadFailed": "Falha ao enviar objeto.",
       "deleteFailed": "Falha ao excluir objeto.",
       "emptyTitle": "Este bucket ainda não possui objetos.",
-      "emptyDescription": "Envie um arquivo para começar."
+      "emptyDescription": "Envie um arquivo para começar.",
+      "noResultsTitle": "Nenhum objeto encontrado.",
+      "noResultsDescription": "Ajuste a busca para encontrar outro objeto.",
+      "confirmDeleteTitle": "Excluir objeto",
+      "confirmDeleteDescription": "Confirme a exclusão do objeto {{key}}."
     },
     "metrics": {
       "title": "Tráfego do Origin",
       "overview": "Métricas operacionais",
-      "description": "Tráfego servido diretamente pelo plano de dados do Origin.",
       "totalRequests": "Total de requisições",
       "fullObjectRequests": "Requisições de objeto completo",
       "rangeRequests": "Requisições por intervalo",
@@ -217,7 +227,6 @@
     },
     "settings": {
       "title": "Configurações",
-      "description": "Gerencie as credenciais e parâmetros operacionais da instância.",
       "applications": {
         "title": "Credenciais de aplicação",
         "description": "Tokens para SDKs e aplicações consumirem contratos Ponte Mesh.",
@@ -267,13 +276,7 @@
         "revokeFailed": "Falha ao revogar chave S3.",
         "emptyTitle": "Nenhuma credencial S3 criada ainda.",
         "emptyDescription": "Crie uma chave para conectar clientes S3-compatíveis.",
-        "helpTitle": "Sobre as credenciais S3",
         "helpText": "As credenciais S3 permitem que aplicações e ferramentas acessem seus buckets de forma segura. Mantenha suas chaves protegidas e revogue aquelas que não estiverem mais em uso."
-      },
-      "help": {
-        "title": "Precisa de ajuda?",
-        "description": "Consulte a documentação.",
-        "docs": "Ver documentação"
       }
     }
   }

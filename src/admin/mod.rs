@@ -10,9 +10,9 @@ use crate::{
 use anyhow::Context;
 use axum::{
     Extension, Json,
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{Multipart, Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,8 @@ use std::{fs, path::PathBuf};
 
 const DEFAULT_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 10;
 const MAX_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 100;
+const DEFAULT_STORAGE_PAGE_SIZE: u32 = 20;
+const MAX_STORAGE_PAGE_SIZE: u32 = 100;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +57,22 @@ struct HealthSummary {
 #[derive(Debug, Deserialize)]
 pub struct CreateBucketRequest {
     name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListBucketsQuery {
+    query: Option<String>,
+    page: Option<u32>,
+    page_size: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListObjectsQuery {
+    query: Option<String>,
+    page: Option<u32>,
+    page_size: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,8 +242,16 @@ pub async fn replica_detail_metrics(
     }
 }
 
-pub async fn list_buckets(State(state): State<AppState>) -> Response {
-    match state.catalog.list_buckets().await {
+pub async fn list_buckets(
+    State(state): State<AppState>,
+    Query(query): Query<ListBucketsQuery>,
+) -> Response {
+    let (page, page_size) = normalize_storage_pagination(query.page, query.page_size);
+    match state
+        .catalog
+        .list_buckets_page(query.query.as_deref(), page, page_size)
+        .await
+    {
         Ok(buckets) => Json(buckets).into_response(),
         Err(error) => internal_error(error),
     }
@@ -369,8 +395,14 @@ pub async fn update_bucket_policy(
 pub async fn list_objects(
     State(state): State<AppState>,
     Path(bucket_name): Path<String>,
+    Query(query): Query<ListObjectsQuery>,
 ) -> Response {
-    match state.catalog.list_objects(&bucket_name).await {
+    let (page, page_size) = normalize_storage_pagination(query.page, query.page_size);
+    match state
+        .catalog
+        .list_objects_page(&bucket_name, query.query.as_deref(), page, page_size)
+        .await
+    {
         Ok(objects) => Json(objects).into_response(),
         Err(error) => bad_request(error),
     }
@@ -408,8 +440,28 @@ pub async fn get_object(
     State(state): State<AppState>,
     Path((bucket_name, object_key)): Path<(String, String)>,
 ) -> Response {
-    match state.catalog.get_object(&bucket_name, &object_key).await {
-        Ok(Some(object)) => Json(object).into_response(),
+    match state
+        .catalog
+        .get_object_record(&bucket_name, &object_key)
+        .await
+    {
+        Ok(Some(object)) if object.state == "AVAILABLE" => match fs::read(&object.storage_path) {
+            Ok(bytes) => Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, object.content_type.as_str())
+                .header(header::CONTENT_LENGTH, bytes.len().to_string())
+                .header(
+                    header::CONTENT_DISPOSITION,
+                    format!(
+                        "attachment; filename=\"{}\"",
+                        download_filename(&object.key)
+                    ),
+                )
+                .body(Body::from(bytes))
+                .expect("valid object download response"),
+            Err(error) => internal_error(anyhow::Error::new(error)),
+        },
+        Ok(Some(_)) => bad_request(anyhow::anyhow!("object is not available")),
         Ok(None) => not_found("object not found"),
         Err(error) => bad_request(error),
     }
@@ -596,6 +648,14 @@ fn normalize_s3_access_key_pagination(query: &ListS3AccessKeysQuery) -> (u32, u3
         .page_size
         .unwrap_or(DEFAULT_S3_ACCESS_KEYS_PAGE_SIZE)
         .clamp(1, MAX_S3_ACCESS_KEYS_PAGE_SIZE);
+    (page, page_size)
+}
+
+fn normalize_storage_pagination(page: Option<u32>, page_size: Option<u32>) -> (u32, u32) {
+    let page = page.unwrap_or(1).max(1);
+    let page_size = page_size
+        .unwrap_or(DEFAULT_STORAGE_PAGE_SIZE)
+        .clamp(1, MAX_STORAGE_PAGE_SIZE);
     (page, page_size)
 }
 
@@ -896,6 +956,20 @@ async fn upload_object_inner(
 
 fn bucket_storage_dir(storage_path: PathBuf, bucket_name: &str) -> PathBuf {
     storage_path.join("buckets").join(bucket_name)
+}
+
+fn download_filename(object_key: &str) -> String {
+    object_key
+        .rsplit('/')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("object")
+        .chars()
+        .map(|ch| match ch {
+            '"' | '\\' | '\r' | '\n' => '_',
+            _ => ch,
+        })
+        .collect()
 }
 
 fn default_application_scopes() -> Vec<String> {

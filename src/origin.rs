@@ -926,6 +926,7 @@ mod tests {
                     content_type: "image/jpeg".to_owned(),
                     sha256: "abc123".to_owned(),
                     created_at: "2026-06-29T12:00:00Z".to_owned(),
+                    updated_at: "2026-06-29T12:00:00Z".to_owned(),
                     state: "AVAILABLE".to_owned(),
                 },
                 ObjectSummary {
@@ -934,6 +935,7 @@ mod tests {
                     content_type: "video/mp4".to_owned(),
                     sha256: "def456".to_owned(),
                     created_at: "2026-06-29T12:02:00Z".to_owned(),
+                    updated_at: "2026-06-29T12:02:00Z".to_owned(),
                     state: "AVAILABLE".to_owned(),
                 },
             ],

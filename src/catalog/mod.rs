@@ -25,13 +25,34 @@ pub struct BucketSummary {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PaginatedBuckets {
+    pub items: Vec<BucketSummary>,
+    pub page: u32,
+    pub page_size: u32,
+    pub total_items: i64,
+    pub total_pages: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ObjectSummary {
     pub key: String,
     pub size_bytes: i64,
     pub content_type: String,
     pub sha256: String,
     pub created_at: String,
+    pub updated_at: String,
     pub state: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginatedObjects {
+    pub items: Vec<ObjectSummary>,
+    pub page: u32,
+    pub page_size: u32,
+    pub total_items: i64,
+    pub total_pages: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -643,6 +664,72 @@ impl Catalog {
             .collect())
     }
 
+    pub async fn list_buckets_page(
+        &self,
+        query_text: Option<&str>,
+        page: u32,
+        page_size: u32,
+    ) -> anyhow::Result<PaginatedBuckets> {
+        let normalized_query = normalize_optional_name(query_text.unwrap_or(""));
+        let total: i64 = query_scalar(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM buckets b
+            WHERE b.deleted_at IS NULL
+              AND ($1::text IS NULL OR b.name ILIKE '%' || $1 || '%')
+            "#,
+        )
+        .bind(normalized_query.as_deref())
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to count buckets")?;
+        let total_pages = total_pages(total, page_size);
+        let page = page.min(total_pages).max(1);
+        let offset = i64::from(page.saturating_sub(1)) * i64::from(page_size);
+        let limit = i64::from(page_size);
+        let rows = query(
+            r#"
+            SELECT
+                b.name,
+                b.created_at,
+                COUNT(o.id)::bigint AS object_count,
+                COALESCE(SUM(v.size_bytes), 0)::bigint AS total_bytes
+            FROM buckets b
+            LEFT JOIN objects o
+                ON o.bucket_id = b.id AND o.deleted_at IS NULL
+            LEFT JOIN object_versions v
+                ON v.id = o.current_version_id
+            WHERE b.deleted_at IS NULL
+              AND ($1::text IS NULL OR b.name ILIKE '%' || $1 || '%')
+            GROUP BY b.id, b.name, b.created_at
+            ORDER BY b.created_at DESC, b.name ASC
+            LIMIT $2 OFFSET $3
+            "#,
+        )
+        .bind(normalized_query.as_deref())
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list buckets")?;
+
+        Ok(PaginatedBuckets {
+            items: rows
+                .into_iter()
+                .map(|row| BucketSummary {
+                    name: row.get("name"),
+                    created_at: format_datetime(row.get("created_at")),
+                    object_count: row.get("object_count"),
+                    total_bytes: row.get("total_bytes"),
+                })
+                .collect(),
+            page,
+            page_size,
+            total_items: total,
+            total_pages,
+        })
+    }
+
     pub async fn get_bucket(&self, name: &str) -> anyhow::Result<Option<BucketSummary>> {
         validate_bucket_name(name)?;
         let row = query(
@@ -835,7 +922,7 @@ impl Catalog {
         let rows = query(
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
-                v.created_at, o.state
+                v.created_at, v.created_at AS updated_at, o.state
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.id = o.current_version_id
@@ -849,6 +936,71 @@ impl Catalog {
         .context("failed to list objects")?;
 
         Ok(rows.into_iter().map(object_summary_from_row).collect())
+    }
+
+    pub async fn list_objects_page(
+        &self,
+        bucket_name: &str,
+        query_text: Option<&str>,
+        page: u32,
+        page_size: u32,
+    ) -> anyhow::Result<PaginatedObjects> {
+        validate_bucket_name(bucket_name)?;
+        let normalized_query = normalize_optional_name(query_text.unwrap_or(""));
+        let bucket_id: Option<String> =
+            query_scalar("SELECT id::text FROM buckets WHERE name = $1 AND deleted_at IS NULL")
+                .bind(bucket_name)
+                .fetch_optional(&self.pool)
+                .await
+                .context("failed to load bucket")?;
+        let bucket_id =
+            bucket_id.ok_or_else(|| anyhow::anyhow!("bucket not found: {bucket_name}"))?;
+        let total: i64 = query_scalar(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM objects o
+            WHERE o.bucket_id = $1::uuid
+              AND o.deleted_at IS NULL
+              AND ($2::text IS NULL OR o.object_key ILIKE '%' || $2 || '%')
+            "#,
+        )
+        .bind(&bucket_id)
+        .bind(normalized_query.as_deref())
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to count objects")?;
+        let total_pages = total_pages(total, page_size);
+        let page = page.min(total_pages).max(1);
+        let offset = i64::from(page.saturating_sub(1)) * i64::from(page_size);
+        let limit = i64::from(page_size);
+        let rows = query(
+            r#"
+            SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
+                v.created_at, v.created_at AS updated_at, o.state
+            FROM objects o
+            JOIN object_versions v ON v.id = o.current_version_id
+            WHERE o.bucket_id = $1::uuid
+              AND o.deleted_at IS NULL
+              AND ($2::text IS NULL OR o.object_key ILIKE '%' || $2 || '%')
+            ORDER BY v.created_at DESC, o.object_key ASC
+            LIMIT $3 OFFSET $4
+            "#,
+        )
+        .bind(&bucket_id)
+        .bind(normalized_query.as_deref())
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list objects")?;
+
+        Ok(PaginatedObjects {
+            items: rows.into_iter().map(object_summary_from_row).collect(),
+            page,
+            page_size,
+            total_items: total,
+            total_pages,
+        })
     }
 
     pub async fn insert_object(&self, object: NewObject) -> anyhow::Result<ObjectSummary> {
@@ -1002,26 +1154,9 @@ impl Catalog {
             content_type: object.content_type,
             sha256: object.sha256,
             created_at: format_datetime(version_row.get("created_at")),
+            updated_at: format_datetime(version_row.get("created_at")),
             state: "AVAILABLE".to_owned(),
         })
-    }
-
-    pub async fn get_object(
-        &self,
-        bucket_name: &str,
-        object_key: &str,
-    ) -> anyhow::Result<Option<ObjectSummary>> {
-        Ok(self
-            .get_object_record(bucket_name, object_key)
-            .await?
-            .map(|record| ObjectSummary {
-                key: record.key,
-                size_bytes: record.size_bytes,
-                content_type: record.content_type,
-                sha256: record.sha256,
-                created_at: record.created_at,
-                state: record.state,
-            }))
     }
 
     pub async fn get_object_record(
@@ -2770,6 +2905,7 @@ fn object_summary_from_row(row: PgRow) -> ObjectSummary {
             .unwrap_or_else(|| "application/octet-stream".to_owned()),
         sha256: row.get("object_hash"),
         created_at: format_datetime(row.get("created_at")),
+        updated_at: format_datetime(row.get("updated_at")),
         state: row.get("state"),
     }
 }

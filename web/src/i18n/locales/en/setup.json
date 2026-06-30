@@ -69,16 +69,9 @@
       "objects": "Objects",
       "replicas": "Replicas",
       "metrics": "Metrics",
-      "settings": "Settings"
-    },
-    "roles": {
-      "origin": "Origin",
-      "replica-edge": "Replica/Edge"
-    },
-    "environment": {
-      "native": "native",
-      "container": "container",
-      "unknown": "unknown"
+      "settings": "Settings",
+      "collapseSidebar": "Collapse sidebar",
+      "expandSidebar": "Expand sidebar"
     },
     "common": {
       "loading": "Loading...",
@@ -88,14 +81,18 @@
       "no": "No",
       "ok": "OK",
       "cancel": "Cancel",
-      "failed": "Failed"
+      "confirm": "Confirm",
+      "close": "Close",
+      "search": "Search",
+      "previous": "Previous",
+      "next": "Next",
+      "itemsPerPage": "Items per page",
+      "actions": "Actions",
+      "totalItems": "{{count}} items",
+      "pageIndicator": "Page {{page}} of {{totalPages}}"
     },
     "dashboard": {
       "instance": "Instance",
-      "overview": "Real instance overview",
-      "role": "Role:",
-      "environment": "Environment:",
-      "version": "Version",
       "uptime": "Process uptime",
       "memory": "Memory",
       "totalBuckets": "Total buckets",
@@ -121,21 +118,16 @@
       },
       "buckets": {
         "title": "Bucket catalog",
-        "description": "Real count registered in the local catalog.",
         "open": "Open buckets"
       },
       "health": {
         "title": "Instance health",
-        "description": "Real checks performed by the backend on this instance.",
         "database": "Database",
         "storage": "Storage",
-        "setup": "Setup completed",
         "connected": "connected",
         "unavailable": "unavailable",
         "writable": "writable",
         "notWritable": "not writable",
-        "setupReady": "completed",
-        "setupIncomplete": "pending",
         "operational": "no alerts",
         "attention": "needs attention",
         "alert": "One or more instance checks need attention."
@@ -151,36 +143,54 @@
       "description": "Manage real catalog buckets.",
       "name": "Bucket name",
       "namePlaceholder": "documents",
+      "search": "Search bucket",
       "create": "Create bucket",
+      "createDescription": "Enter a valid name for the new bucket.",
+      "open": "Open bucket",
       "delete": "Delete bucket",
+      "objectCount": "Objects",
+      "totalSize": "Size",
+      "createdAt": "Created at",
+      "loading": "Loading buckets",
       "loadFailed": "Failed to load buckets.",
       "createFailed": "Failed to create bucket.",
       "deleteFailed": "Failed to delete bucket.",
       "emptyTitle": "No buckets have been created yet.",
-      "emptyDescription": "Create your first bucket to start storing objects."
+      "emptyDescription": "Create your first bucket to start storing objects.",
+      "noResultsTitle": "No buckets found.",
+      "noResultsDescription": "Adjust the search to find another bucket.",
+      "confirmDeleteTitle": "Delete bucket",
+      "confirmDeleteDescription": "Confirm deletion of bucket {{name}}. Buckets with objects will not be deleted."
     },
     "objects": {
-      "description": "Real files stored in this bucket.",
       "count": "objects",
       "key": "Object key",
       "keyPlaceholder": "optional/path/file.ext",
       "file": "File",
       "upload": "Upload object",
+      "uploading": "Uploading object",
+      "chooseFile": "Choose file",
+      "noFileChosen": "No file chosen",
       "search": "Search objects",
       "size": "Size",
-      "state": "State",
-      "createdAt": "Created at",
+      "contentType": "Content-Type",
+      "updatedAt": "Last modified",
+      "download": "Download object",
       "delete": "Delete object",
+      "loading": "Loading objects",
       "loadFailed": "Failed to load objects.",
       "uploadFailed": "Failed to upload object.",
       "deleteFailed": "Failed to delete object.",
       "emptyTitle": "This bucket does not have objects yet.",
-      "emptyDescription": "Upload a file to get started."
+      "emptyDescription": "Upload a file to get started.",
+      "noResultsTitle": "No objects found.",
+      "noResultsDescription": "Adjust the search to find another object.",
+      "confirmDeleteTitle": "Delete object",
+      "confirmDeleteDescription": "Confirm deletion of object {{key}}."
     },
     "metrics": {
       "title": "Origin traffic",
       "overview": "Operational metrics",
-      "description": "Traffic served directly by the Origin data plane.",
       "totalRequests": "Total requests",
       "fullObjectRequests": "Full object requests",
       "rangeRequests": "Range requests",
@@ -217,7 +227,6 @@
     },
     "settings": {
       "title": "Settings",
-      "description": "Manage instance credentials and operational parameters.",
       "applications": {
         "title": "Application credentials",
         "description": "Tokens for SDKs and applications to consume Ponte Mesh contracts.",
@@ -267,13 +276,7 @@
         "revokeFailed": "Failed to revoke S3 key.",
         "emptyTitle": "No S3 credentials have been created yet.",
         "emptyDescription": "Create a key to connect S3-compatible clients.",
-        "helpTitle": "About S3 credentials",
         "helpText": "S3 credentials allow applications and tools to access your buckets securely. Keep your keys protected and revoke keys that are no longer in use."
-      },
-      "help": {
-        "title": "Need help?",
-        "description": "Read the documentation or contact our team.",
-        "docs": "View documentation"
       }
     }
   }

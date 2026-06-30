@@ -4,6 +4,8 @@ import {
   Gauge,
   HardDrive,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Share2
 } from "lucide-react";
@@ -24,6 +26,8 @@ type AdminLayoutProps = {
 export function AdminLayout({ children, instanceName, username, onLogout }: AdminLayoutProps) {
   const { t } = useTranslation();
   const [resolvedInstanceName, setResolvedInstanceName] = useState(instanceName);
+  const [version, setVersion] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("pontemesh.sidebarCollapsed") === "true");
   const navItems = [
     { to: "/dashboard", label: t("setup.nav.dashboard"), icon: Gauge, enabled: true },
     { to: "/buckets", label: t("setup.nav.buckets"), icon: Boxes, enabled: true },
@@ -39,12 +43,22 @@ export function AdminLayout({ children, instanceName, username, onLogout }: Admi
       return;
     }
     getInstanceSummary()
-      .then((summary) => setResolvedInstanceName(summary.name))
-      .catch(() => setResolvedInstanceName(undefined));
+      .then((summary) => {
+        setResolvedInstanceName(summary.name);
+        setVersion(summary.version);
+      })
+      .catch(() => {
+        setResolvedInstanceName(undefined);
+        setVersion("");
+      });
   }, [instanceName]);
 
+  useEffect(() => {
+    localStorage.setItem("pontemesh.sidebarCollapsed", String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
   return (
-    <div className="admin-shell">
+    <div className="admin-shell" data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"}>
       <aside className="admin-sidebar">
         <div className="admin-brand">
           <img src={logoIcon} alt="" aria-hidden="true" />
@@ -55,20 +69,32 @@ export function AdminLayout({ children, instanceName, username, onLogout }: Admi
             const Icon = item.icon;
             if (!item.enabled) {
               return (
-                <span className="admin-nav__item admin-nav__item--disabled" key={item.to}>
+                <span className="admin-nav__item admin-nav__item--disabled" key={item.to} title={item.label}>
                   <Icon size={18} aria-hidden="true" />
-                  {item.label}
+                  <span className="admin-nav__label">{item.label}</span>
                 </span>
               );
             }
             return (
-              <NavLink className="admin-nav__item" to={item.to} key={item.to}>
+              <NavLink className="admin-nav__item" to={item.to} key={item.to} title={item.label}>
                 <Icon size={18} aria-hidden="true" />
-                {item.label}
+                <span className="admin-nav__label">{item.label}</span>
               </NavLink>
             );
           })}
         </nav>
+        <div className="admin-sidebar__footer">
+          {version ? <span className="sidebar-version">v{version}</span> : null}
+          <button
+            className="sidebar-toggle"
+            type="button"
+            aria-label={sidebarCollapsed ? t("setup.nav.expandSidebar") : t("setup.nav.collapseSidebar")}
+            title={sidebarCollapsed ? t("setup.nav.expandSidebar") : t("setup.nav.collapseSidebar")}
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
+          </button>
+        </div>
       </aside>
 
       <div className="admin-main">
