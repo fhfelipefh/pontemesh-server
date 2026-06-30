@@ -3,6 +3,8 @@ use crate::{
     web_assets,
 };
 use axum::{
+    extract::DefaultBodyLimit,
+    handler::Handler,
     Router, middleware,
     routing::{any, delete, get, post, put},
 };
@@ -81,6 +83,7 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         .route("/api/admin/system/resources", get(admin::system_resources))
         .route("/api/admin/storage/status", get(admin::storage_status))
         .route("/api/admin/audit-events", get(admin::list_audit_events))
+        .route("/api/admin/logs/application", get(admin::application_logs))
         .route(
             "/api/admin/metrics/origin-traffic",
             get(admin::origin_traffic_metrics),
@@ -115,7 +118,11 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         )
         .route(
             "/api/admin/buckets/{bucket_name}/objects",
-            get(admin::list_objects).post(admin::upload_object),
+            get(admin::list_objects).post(
+                admin::upload_object.layer(DefaultBodyLimit::max(
+                    admin::admin_upload_body_limit_bytes(),
+                )),
+            ),
         )
         .route(
             "/api/admin/buckets/{bucket_name}/objects/{*object_key}",

@@ -1,17 +1,19 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Boxes, CheckCircle2, Cpu, Database, HardDrive, Server, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, Boxes, CheckCircle2, Cpu, Database, HardDrive, ListTree, Server, ShieldCheck, XCircle } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { DashboardSummary, getDashboardSummary } from "../api/dashboardApi";
+import { ApplicationLogEntry, DashboardSummary, getApplicationLogs, getDashboardSummary } from "../api/dashboardApi";
 import { HttpError } from "../api/http";
 import { ErrorMessage } from "../components/ErrorMessage";
 
 const DASHBOARD_REFRESH_INTERVAL_MS = 10_000;
+const LOG_REFRESH_INTERVAL_MS = 3_000;
 
 export function DashboardPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [logs, setLogs] = useState<ApplicationLogEntry[]>([]);
   const [error, setError] = useState("");
   const [updateError, setUpdateError] = useState("");
 
@@ -35,9 +37,20 @@ export function DashboardPage() {
     }
   }, [navigate, t]);
 
+  const refreshLogs = useCallback(async () => {
+    try {
+      setLogs(await getApplicationLogs());
+    } catch (loadError) {
+      if (loadError instanceof HttpError && loadError.status === 401) {
+        navigate("/login", { replace: true });
+      }
+    }
+  }, [navigate]);
+
   useEffect(() => {
     void refreshDashboard(true);
-  }, [refreshDashboard]);
+    void refreshLogs();
+  }, [refreshDashboard, refreshLogs]);
 
   useEffect(() => {
     if (!summary) {
@@ -50,6 +63,18 @@ export function DashboardPage() {
 
     return () => window.clearInterval(interval);
   }, [refreshDashboard, summary]);
+
+  useEffect(() => {
+    if (!summary) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshLogs();
+    }, LOG_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(interval);
+  }, [refreshLogs, summary]);
 
   if (error) {
     return <ErrorMessage message={error} />;
@@ -120,6 +145,8 @@ export function DashboardPage() {
         detail={failedHealthItems.length === 0 ? t("setup.dashboard.health.operational") : t("setup.dashboard.health.attention")}
       />
 
+      <ApplicationLogs logs={logs} />
+
       <section className="admin-panel admin-panel--wide">
         <div className="admin-panel__header">
           <div>
@@ -182,6 +209,35 @@ export function DashboardPage() {
   );
 }
 
+function ApplicationLogs({ logs }: { logs: ApplicationLogEntry[] }) {
+  const { t } = useTranslation();
+  return (
+    <section className="admin-panel admin-panel--wide application-logs" aria-live="polite">
+      <div className="admin-panel__header">
+        <div>
+          <h2>{t("setup.dashboard.logs.title")}</h2>
+          <p>{t("setup.dashboard.logs.description")}</p>
+        </div>
+        <ListTree size={19} aria-hidden="true" />
+      </div>
+      {logs.length === 0 ? (
+        <div className="application-logs__empty">{t("setup.dashboard.logs.empty")}</div>
+      ) : (
+        <ol className="application-logs__list">
+          {logs.map((log) => (
+            <li className="application-log" data-level={log.level} key={`${log.timestamp}-${log.target}-${log.message}`}>
+              <time dateTime={log.timestamp}>{formatLogTime(log.timestamp)}</time>
+              <span>{log.level}</span>
+              <strong>{log.target}</strong>
+              <p>{log.message}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 function MetricCard({ icon, label, value, detail }: {
   icon: ReactNode;
   label: string;
@@ -229,6 +285,18 @@ function Warnings({ warnings }: { warnings: string[] }) {
       </ul>
     </section>
   );
+}
+
+function formatLogTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
 }
 
 function formatBytes(value: number | null, t: (key: string) => string): string {

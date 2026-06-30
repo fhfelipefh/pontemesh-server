@@ -359,6 +359,85 @@
   letter-spacing: 0;
 }
 
+.application-logs {
+  min-height: 260px;
+}
+
+.application-logs .admin-panel__header svg {
+  flex: 0 0 auto;
+  color: var(--pm-primary-blue);
+}
+
+.application-logs__empty {
+  border: 1px dashed rgba(148, 163, 184, 0.55);
+  border-radius: 8px;
+  padding: 18px;
+  color: var(--pm-muted);
+  font-weight: 800;
+}
+
+.application-logs__list {
+  display: grid;
+  max-height: 360px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  gap: 8px;
+}
+
+.application-log {
+  display: grid;
+  grid-template-columns: 82px 58px minmax(96px, 140px) minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border: 1px solid rgba(215, 222, 232, 0.86);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(248, 250, 252, 0.86);
+}
+
+.application-log[data-level="error"] {
+  border-color: rgba(220, 38, 38, 0.28);
+  background: rgba(254, 242, 242, 0.78);
+}
+
+.application-log[data-level="warn"] {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(255, 251, 235, 0.78);
+}
+
+.application-log time,
+.application-log span,
+.application-log strong {
+  color: var(--pm-muted);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.application-log span {
+  color: var(--pm-primary-blue);
+}
+
+.application-log[data-level="error"] span {
+  color: var(--pm-danger);
+}
+
+.application-log[data-level="warn"] span {
+  color: #b45309;
+}
+
+.application-log p {
+  min-width: 0;
+  margin: 0;
+  color: var(--pm-deep-navy);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .usage-bar {
   height: 10px;
   overflow: hidden;

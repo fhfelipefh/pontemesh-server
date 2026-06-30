@@ -129,6 +129,11 @@
         "title": "Catálogo de buckets",
         "open": "Abrir buckets"
       },
+      "logs": {
+        "title": "Logs da aplicação",
+        "description": "Eventos recentes do servidor, falhas de operação e exceções capturadas pelo plano administrativo.",
+        "empty": "Nenhum evento registrado nesta execução."
+      },
       "health": {
         "title": "Saúde da instância",
         "database": "Banco de dados",

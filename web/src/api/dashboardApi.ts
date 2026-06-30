@@ -90,6 +90,13 @@ export type ReplicaDetailMetric = {
   fragmentEvents: number;
 };
 
+export type ApplicationLogEntry = {
+  timestamp: string;
+  level: "info" | "warn" | "error" | string;
+  target: string;
+  message: string;
+};
+
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   const response = await fetch("/api/admin/dashboard/summary", {
     headers: {
@@ -98,6 +105,16 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   });
   await ensureOk(response);
   return response.json() as Promise<DashboardSummary>;
+}
+
+export async function getApplicationLogs(limit = 80): Promise<ApplicationLogEntry[]> {
+  const response = await fetch(`/api/admin/logs/application?limit=${encodeURIComponent(String(limit))}`, {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<ApplicationLogEntry[]>;
 }
 
 export async function getInstanceSummary(): Promise<InstanceSummary> {

@@ -5,7 +5,7 @@ use crate::{
     config::{self, InstanceRole},
     http::AppState,
     security::s3_secret::s3_secret_encryption_key,
-    system::{environment, resources, storage},
+    system::{application_logs, environment, resources, storage},
 };
 use anyhow::Context;
 use axum::{
@@ -19,10 +19,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 
+const ADMIN_UPLOAD_BODY_LIMIT_BYTES: usize = 512 * 1024 * 1024;
 const DEFAULT_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 10;
 const MAX_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 100;
 const DEFAULT_STORAGE_PAGE_SIZE: u32 = 20;
 const MAX_STORAGE_PAGE_SIZE: u32 = 100;
+const DEFAULT_APPLICATION_LOGS_LIMIT: usize = 80;
+const MAX_APPLICATION_LOGS_LIMIT: usize = 200;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,6 +125,12 @@ pub struct AuditEventsQuery {
     limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationLogsQuery {
+    limit: Option<usize>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ErrorResponse {
     error: String,
@@ -201,6 +210,14 @@ pub async fn list_audit_events(
         Ok(events) => Json(events).into_response(),
         Err(error) => internal_error(error),
     }
+}
+
+pub async fn application_logs(Query(query): Query<ApplicationLogsQuery>) -> Response {
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_APPLICATION_LOGS_LIMIT)
+        .clamp(1, MAX_APPLICATION_LOGS_LIMIT);
+    Json(application_logs::recent(limit)).into_response()
 }
 
 pub async fn origin_traffic_metrics(State(state): State<AppState>) -> Response {
@@ -416,6 +433,12 @@ pub async fn upload_object(
 ) -> Response {
     match upload_object_inner(&state, &bucket_name, multipart).await {
         Ok(object) => {
+            let detail = format!(
+                "user={} bucket={bucket_name} key={} size_bytes={}",
+                session.username, object.key, object.size_bytes
+            );
+            tracing::info!(target: "pontemesh_admin", "{detail}");
+            application_logs::info("admin.upload", detail);
             audit::event(
                 "object_uploaded",
                 Some(&session.username),
@@ -432,7 +455,23 @@ pub async fn upload_object(
             .await;
             (StatusCode::CREATED, Json(object)).into_response()
         }
-        Err(error) => bad_request(error),
+        Err(error) => {
+            let detail = format!(
+                "user={} bucket={bucket_name} upload_failed: {error:#}",
+                session.username
+            );
+            tracing::error!(target: "pontemesh_admin", "{detail}");
+            application_logs::error("admin.upload", detail.clone());
+            record_admin_audit(
+                &state,
+                "object_upload_failed",
+                &session.username,
+                "failure",
+                &format!("bucket={bucket_name}; error={error:#}"),
+            )
+            .await;
+            bad_request(upload_error_for_response(error))
+        }
     }
 }
 
@@ -902,12 +941,12 @@ async fn upload_object_inner(
             "file" => {
                 file_name = field.file_name().map(ToOwned::to_owned);
                 content_type = field.content_type().map(ToOwned::to_owned);
-                file_bytes = Some(
-                    field
-                        .bytes()
-                        .await
-                        .context("failed to read uploaded file")?,
-                );
+                file_bytes = Some(field.bytes().await.with_context(|| {
+                    format!(
+                        "failed to read uploaded file; administrative uploads are limited to {}",
+                        format_size(ADMIN_UPLOAD_BODY_LIMIT_BYTES)
+                    )
+                })?);
             }
             _ => {}
         }
@@ -956,6 +995,32 @@ async fn upload_object_inner(
 
 fn bucket_storage_dir(storage_path: PathBuf, bucket_name: &str) -> PathBuf {
     storage_path.join("buckets").join(bucket_name)
+}
+
+pub fn admin_upload_body_limit_bytes() -> usize {
+    ADMIN_UPLOAD_BODY_LIMIT_BYTES
+}
+
+fn upload_error_for_response(error: anyhow::Error) -> anyhow::Error {
+    let detail = format!("{error:#}");
+    let detail_lower = detail.to_ascii_lowercase();
+    if detail_lower.contains("length limit") || detail_lower.contains("body limit") {
+        anyhow::anyhow!(
+            "uploaded file exceeds the administrative upload limit of {}",
+            format_size(ADMIN_UPLOAD_BODY_LIMIT_BYTES)
+        )
+    } else {
+        anyhow::anyhow!(detail)
+    }
+}
+
+fn format_size(bytes: usize) -> String {
+    const MIB: usize = 1024 * 1024;
+    if bytes % MIB == 0 {
+        format!("{} MiB", bytes / MIB)
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 fn download_filename(object_key: &str) -> String {
