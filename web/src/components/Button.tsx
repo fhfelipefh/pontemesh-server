@@ -1,13 +1,12 @@
-import { ReactNode } from "react";
+import { ButtonHTMLAttributes, ReactNode } from "react";
 
-type ButtonProps = {
+type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
   children: ReactNode;
   className?: string;
   icon?: ReactNode;
   type?: "button" | "submit";
   disabled?: boolean;
   loading?: boolean;
-  onClick?: () => void;
 };
 
 export function Button({
@@ -17,10 +16,12 @@ export function Button({
   type = "button",
   disabled = false,
   loading = false,
-  onClick
+  onClick,
+  ...buttonProps
 }: ButtonProps) {
   return (
     <button
+      {...buttonProps}
       className={className ? `button ${className}` : "button"}
       type={type}
       disabled={disabled || loading}

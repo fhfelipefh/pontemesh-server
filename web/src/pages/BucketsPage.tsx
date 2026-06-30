@@ -60,22 +60,38 @@ export function BucketsPage() {
         pageSize: bucketPageSize
       });
       setBucketPage(nextPage);
-      if (activeBucket) {
-        const refreshed = nextPage.items.find((bucket) => bucket.name === activeBucket.name);
-        if (refreshed) {
-          setActiveBucket(refreshed);
+      setActiveBucket((currentBucket) => {
+        if (!currentBucket) {
+          return currentBucket;
         }
-      }
+
+        return nextPage.items.find((bucket) => bucket.name === currentBucket.name) ?? currentBucket;
+      });
     } catch (loadError) {
       setBucketError(loadError instanceof Error ? loadError.message : t("setup.buckets.loadFailed"));
     } finally {
       setLoadingBuckets(false);
     }
-  }, [activeBucket, bucketPageNumber, bucketPageSize, bucketSearch, t]);
+  }, [bucketPageNumber, bucketPageSize, bucketSearch, t]);
 
   useEffect(() => {
     refreshBuckets();
   }, [refreshBuckets]);
+
+  useEffect(() => {
+    if (!createModalOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setCreateModalOpen(false);
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [createModalOpen]);
 
   function handleBucketSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,6 +149,7 @@ export function BucketsPage() {
           </div>
           <Button
             className="buckets-create-button"
+            data-testid="create-bucket-button"
             type="button"
             icon={<Plus size={17} aria-hidden="true" />}
             onClick={() => setCreateModalOpen(true)}
@@ -146,6 +163,7 @@ export function BucketsPage() {
             <label>
               <Search size={17} aria-hidden="true" />
               <input
+                data-testid="bucket-search-input"
                 value={bucketQuery}
                 onChange={(event) => setBucketQuery(event.target.value)}
                 placeholder={t("setup.buckets.search")}
@@ -176,7 +194,7 @@ export function BucketsPage() {
               description={bucketSearchActive ? t("setup.buckets.noResultsDescription") : t("setup.buckets.emptyDescription")}
             />
           ) : (
-            <div className="buckets-table" role="table" aria-label={t("setup.buckets.title")}>
+            <div className="buckets-table" data-testid="bucket-list" role="table" aria-label={t("setup.buckets.title")}>
               <div className="buckets-table__head" role="row">
                 <span role="columnheader">{t("setup.buckets.name")}</span>
                 <span role="columnheader">{t("setup.buckets.objectCount")}</span>
@@ -185,7 +203,7 @@ export function BucketsPage() {
                 <span role="columnheader">{t("setup.common.actions")}</span>
               </div>
               {bucketPage.items.map((bucket) => (
-                <div className="buckets-table__row" role="row" key={bucket.name}>
+                <div className="buckets-table__row" data-testid="bucket-row" role="row" key={bucket.name}>
                   <span role="cell" title={bucket.name}>{bucket.name}</span>
                   <span role="cell">{bucket.objectCount}</span>
                   <span role="cell">{formatBytes(bucket.totalBytes)}</span>
@@ -238,14 +256,27 @@ export function BucketsPage() {
       ) : null}
 
       {createModalOpen ? (
-        <div className="settings-modal-backdrop" role="presentation">
-          <form className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="create-bucket-title" onSubmit={handleCreateBucket}>
+        <div className="settings-modal-backdrop" data-testid="modal-backdrop" role="presentation">
+          <form
+            className="settings-modal"
+            data-testid="create-bucket-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-bucket-title"
+            onSubmit={handleCreateBucket}
+          >
             <div className="settings-modal__header">
               <div>
                 <h3 id="create-bucket-title">{t("setup.buckets.create")}</h3>
                 <p>{t("setup.buckets.createDescription")}</p>
               </div>
-              <button className="settings-modal__close" type="button" aria-label={t("setup.common.close")} onClick={() => setCreateModalOpen(false)}>
+              <button
+                className="settings-modal__close"
+                data-testid="create-bucket-close"
+                type="button"
+                aria-label={t("setup.common.close")}
+                onClick={() => setCreateModalOpen(false)}
+              >
                 <X size={18} aria-hidden="true" />
               </button>
             </div>
@@ -350,8 +381,20 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
     refreshObjects();
   }, [refreshObjects, refreshNonce]);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!file) {
       return;
     }
@@ -361,7 +404,7 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
       await uploadObject(bucket.name, file, objectKey);
       setFile(null);
       setObjectKey("");
-      event.currentTarget.reset();
+      form.reset();
       await refreshObjects();
       await onChanged();
     } catch (uploadError) {
@@ -386,8 +429,8 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
   const hasObjects = objectsPage.items.length > 0;
 
   return (
-    <div className="bucket-drawer-backdrop" role="presentation">
-      <aside className="bucket-drawer" role="dialog" aria-modal="true" aria-labelledby="bucket-drawer-title">
+    <div className="bucket-drawer-backdrop" data-testid="modal-backdrop" role="presentation">
+      <aside className="bucket-drawer" data-testid="bucket-details-dialog" role="dialog" aria-modal="true" aria-labelledby="bucket-drawer-title">
         <header className="bucket-drawer__header">
           <div>
             <h2 id="bucket-drawer-title">{bucket.name}</h2>
@@ -395,7 +438,13 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
               {bucket.objectCount} {t("setup.objects.count")} · {formatBytes(bucket.totalBytes)}
             </p>
           </div>
-          <button className="settings-modal__close" type="button" aria-label={t("setup.common.close")} onClick={onClose}>
+          <button
+            className="settings-modal__close"
+            data-testid="bucket-details-close"
+            type="button"
+            aria-label={t("setup.common.close")}
+            onClick={onClose}
+          >
             <X size={18} aria-hidden="true" />
           </button>
         </header>
@@ -418,7 +467,7 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
             </button>
             <small>{file?.name ?? t("setup.objects.noFileChosen")}</small>
           </div>
-          <Button type="submit" loading={uploading} disabled={!file} icon={<UploadCloud size={17} aria-hidden="true" />}>
+          <Button data-testid="upload-object-button" type="submit" loading={uploading} disabled={!file} icon={<UploadCloud size={17} aria-hidden="true" />}>
             {uploading ? t("setup.objects.uploading") : t("setup.objects.upload")}
           </Button>
         </form>
@@ -428,6 +477,7 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
             <label>
               <Search size={17} aria-hidden="true" />
               <input
+                data-testid="object-search-input"
                 value={objectQuery}
                 onChange={(event) => setObjectQuery(event.target.value)}
                 placeholder={t("setup.objects.search")}
@@ -521,14 +571,20 @@ function ConfirmDialog({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="settings-modal-backdrop" role="presentation">
-      <div className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div className="settings-modal-backdrop" data-testid="modal-backdrop" role="presentation">
+      <div className="settings-modal" data-testid="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
         <div className="settings-modal__header">
           <div>
             <h3 id="confirm-title">{title}</h3>
             <p>{description}</p>
           </div>
-          <button className="settings-modal__close" type="button" aria-label={t("setup.common.close")} onClick={onCancel}>
+          <button
+            className="settings-modal__close"
+            data-testid="confirm-dialog-close"
+            type="button"
+            aria-label={t("setup.common.close")}
+            onClick={onCancel}
+          >
             <X size={18} aria-hidden="true" />
           </button>
         </div>

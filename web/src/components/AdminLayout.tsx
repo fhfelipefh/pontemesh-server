@@ -59,7 +59,7 @@ export function AdminLayout({ children, instanceName, username, onLogout }: Admi
 
   return (
     <div className="admin-shell" data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"}>
-      <aside className="admin-sidebar">
+      <aside className="admin-sidebar" data-testid="app-sidebar">
         <div className="admin-brand">
           <img src={logoIcon} alt="" aria-hidden="true" />
           <span>Ponte Mesh</span>
@@ -84,9 +84,10 @@ export function AdminLayout({ children, instanceName, username, onLogout }: Admi
           })}
         </nav>
         <div className="admin-sidebar__footer">
-          {version ? <span className="sidebar-version">v{version}</span> : null}
+          {version ? <span className="sidebar-version" data-testid="sidebar-version">v{version}</span> : null}
           <button
             className="sidebar-toggle"
+            data-testid="sidebar-toggle"
             type="button"
             aria-label={sidebarCollapsed ? t("setup.nav.expandSidebar") : t("setup.nav.collapseSidebar")}
             title={sidebarCollapsed ? t("setup.nav.expandSidebar") : t("setup.nav.collapseSidebar")}

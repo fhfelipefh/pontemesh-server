@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint . --ext .ts,.tsx",
     "test": "vitest run",
-    "validate": "npm run i18n:check && npm run typecheck && npm run lint",
+    "test:ui": "playwright test",
+    "test:ui:quality": "playwright test tests/ui-quality",
+    "validate": "npm run i18n:check && npm run typecheck && npm run lint && npm run test:ui:quality",
     "build": "npm run i18n:prune && npm run validate && vite build",
     "build:ci": "npm run i18n:check && npm run validate && vite build",
     "preview": "vite preview"
@@ -27,6 +29,8 @@
     "vite": "^6.0.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",

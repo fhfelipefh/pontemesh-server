@@ -100,7 +100,8 @@
 
 .admin-nav__item--disabled {
   cursor: not-allowed;
-  opacity: 0.46;
+  color: var(--pm-muted);
+  opacity: 1;
 }
 
 .admin-sidebar__footer {
@@ -118,7 +119,6 @@
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.02em;
-  opacity: 0.35;
   text-align: center;
   user-select: none;
 }
@@ -1163,6 +1163,20 @@
   color: var(--pm-deep-navy);
   background: transparent;
   outline: none;
+}
+
+.buckets-search input {
+  flex: 1 1 180px;
+  min-height: 38px;
+}
+
+.buckets-search .button {
+  width: auto;
+  min-width: 116px;
+  min-height: 40px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  padding-block: 8px;
 }
 
 .buckets-search label:focus-within,
