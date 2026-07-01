@@ -103,7 +103,7 @@ test.describe("Objects page", () => {
     await page.goto("/objects");
     await expect(page.getByTestId("object-search-input")).toBeVisible();
 
-    const searchBox = await page.getByTestId("object-search-control").boundingBox();
+    const searchBox = await page.getByTestId("object-search-input").boundingBox();
     const refreshButton = await page.getByRole("button", { name: /refresh|atualizar/i }).boundingBox();
     const uploadButton = await page.getByTestId("open-upload-object-button").boundingBox();
     const tableCard = await page.getByTestId("objects-table-card").boundingBox();
