@@ -33,11 +33,14 @@ O subconjunto S3-like deve contemplar, no mínimo:
 * Create Bucket;
 * List Buckets;
 * PUT Object;
+* Copy Object;
 * List Objects;
+* Get Bucket Location;
 * HEAD Object;
 * GET Object;
 * GET Object com `Range`;
 * Multipart Upload;
+* Delete Objects em lote;
 * DELETE Object como deleção lógica;
 * URL temporária ou mecanismo equivalente.
 
@@ -49,7 +52,9 @@ separados. O painel usa `http://localhost:8080`; o endpoint S3-compatible usa
 GET /
 PUT /{bucket}
 GET /{bucket}?list-type=2
+GET /{bucket}?location
 HEAD /{bucket}
+POST /{bucket}?delete
 DELETE /{bucket}
 PUT /{bucket}/{objectKey}
 HEAD /{bucket}/{objectKey}
@@ -107,6 +112,14 @@ Ao receber um objeto, o Origin deve:
 
 O envio de objeto ocorre pelo Origin.
 
+## Copy Object
+
+Operação responsável por copiar um objeto existente usando `x-amz-copy-source`.
+
+Na implementação atual, o Origin lê o objeto de origem no storage configurado,
+grava uma nova cópia física, registra nova versão no catálogo e gera manifesto
+próprio para o destino. O destino não é um alias do objeto original.
+
 ## List Objects
 
 Operação responsável por listar objetos dentro de um bucket.
@@ -122,6 +135,13 @@ A resposta pode incluir informações como:
 * data de modificação;
 * estado de disponibilidade;
 * metadados básicos.
+
+## Get Bucket Location
+
+Operação responsável por retornar a região lógica do bucket.
+
+Na implementação atual, a resposta é `us-east-1`, suficiente para clientes S3
+que validam localização antes de operar no bucket.
 
 ## HEAD Object
 
@@ -194,6 +214,15 @@ Após a deleção lógica, o Origin deve:
 * registrar evento de auditoria;
 * comunicar revogações a Replica/Edge quando aplicável;
 * impedir que fontes revogadas continuem sendo elegíveis.
+
+## Delete Objects
+
+Operação responsável por remover logicamente múltiplos objetos em uma chamada
+`POST /{bucket}?delete`.
+
+Cada chave do XML de entrada é processada individualmente. Chaves inexistentes
+são tratadas de forma idempotente como removidas, comportamento esperado por
+clientes S3.
 
 ## URL temporária ou mecanismo equivalente
 

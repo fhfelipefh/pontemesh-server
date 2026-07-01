@@ -29,6 +29,8 @@ pub struct ListObjectsQuery {
     list_type: Option<String>,
     prefix: Option<String>,
     uploads: Option<String>,
+    location: Option<String>,
+    delete: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,6 +120,20 @@ pub async fn list_objects(
     Path(bucket_name): Path<String>,
     Query(query): Query<ListObjectsQuery>,
 ) -> Response {
+    if query.location.is_some() {
+        return match state.catalog.get_bucket(&bucket_name).await {
+            Ok(Some(_)) => s3_xml_response(StatusCode::OK, bucket_location_xml()),
+            Ok(None) => s3_error(
+                StatusCode::NOT_FOUND,
+                "NoSuchBucket",
+                "The specified bucket does not exist",
+                Some(&bucket_name),
+                None,
+            ),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
     if query.uploads.is_some() {
         return match state
             .catalog
@@ -151,6 +167,26 @@ pub async fn list_objects(
     }
 }
 
+pub async fn post_bucket(
+    State(state): State<AppState>,
+    Extension(identity): Extension<S3Identity>,
+    Path(bucket_name): Path<String>,
+    Query(query): Query<ListObjectsQuery>,
+    body: Body,
+) -> Response {
+    if query.delete.is_some() {
+        return delete_objects(state, identity, bucket_name, body).await;
+    }
+
+    s3_error(
+        StatusCode::BAD_REQUEST,
+        "InvalidArgument",
+        "POST Bucket supports only DeleteObjects",
+        Some(&bucket_name),
+        None,
+    )
+}
+
 pub async fn put_object(
     State(state): State<AppState>,
     Extension(identity): Extension<S3Identity>,
@@ -170,6 +206,10 @@ pub async fn put_object(
             body,
         )
         .await;
+    }
+
+    if headers.contains_key("x-amz-copy-source") {
+        return copy_object(state, identity, headers, bucket_name, object_key).await;
     }
 
     let request_id = request_id();
@@ -557,6 +597,59 @@ async fn abort_multipart_upload(
     }
 }
 
+async fn copy_object(
+    state: AppState,
+    identity: S3Identity,
+    headers: HeaderMap,
+    bucket_name: String,
+    object_key: String,
+) -> Response {
+    match copy_object_inner(
+        &state,
+        &identity.access_key_id,
+        &bucket_name,
+        &object_key,
+        &headers,
+    )
+    .await
+    {
+        Ok(object) => {
+            record_origin_audit(
+                &state,
+                "s3_object_copied",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; key={}", object.key),
+            )
+            .await;
+            s3_xml_response(StatusCode::OK, copy_object_xml(&object))
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn delete_objects(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    body: Body,
+) -> Response {
+    match delete_objects_inner(&state, &identity.access_key_id, &bucket_name, body).await {
+        Ok(result) => {
+            record_origin_audit(
+                &state,
+                "s3_objects_deleted",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; deleted={}", result.deleted.len()),
+            )
+            .await;
+            s3_xml_response(StatusCode::OK, delete_objects_xml(&result))
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+    }
+}
+
 async fn create_bucket_inner(state: &AppState, bucket_name: &str) -> anyhow::Result<BucketSummary> {
     catalog::validate_bucket_name(bucket_name)?;
     let storage_path = config::configured_storage_dir(&state.paths)?;
@@ -795,6 +888,144 @@ async fn complete_multipart_upload_inner(
     Ok(object)
 }
 
+async fn copy_object_inner(
+    state: &AppState,
+    principal: &str,
+    destination_bucket: &str,
+    destination_key: &str,
+    headers: &HeaderMap,
+) -> anyhow::Result<ObjectSummary> {
+    catalog::validate_bucket_name(destination_bucket)?;
+    catalog::validate_object_key(destination_key)?;
+    let copy_source = headers
+        .get("x-amz-copy-source")
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| anyhow::anyhow!("x-amz-copy-source header is required"))?;
+    let (source_bucket, source_key) = parse_copy_source(copy_source)?;
+    let source = state
+        .catalog
+        .get_object_record(&source_bucket, &source_key)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("copy source object not found"))?;
+    if source.state != "AVAILABLE" {
+        bail!("copy source object is not available");
+    }
+    let policy = state.catalog.get_bucket_policy(destination_bucket).await?;
+    let storage_path = config::configured_storage_dir(&state.paths)?;
+    let bucket_dir = bucket_storage_dir(storage_path, destination_bucket);
+    let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/uploads");
+    fs::create_dir_all(&temp_dir).with_context(|| {
+        format!(
+            "failed to create temporary upload directory {}",
+            temp_dir.display()
+        )
+    })?;
+    fs::create_dir_all(&bucket_dir).with_context(|| {
+        format!(
+            "failed to create bucket storage directory {}",
+            bucket_dir.display()
+        )
+    })?;
+    let copy_id = uuid::Uuid::new_v4();
+    let temp_path = temp_dir.join(format!("{copy_id}-copy.tmp"));
+    let copied = match copy_file_to_temp_object(
+        &source.storage_path,
+        &temp_path,
+        policy.fragment_size_bytes,
+    )
+    .await
+    {
+        Ok(copied) => copied,
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error);
+        }
+    };
+    let object_path = bucket_dir.join(format!("{}-{}", copy_id, copied.sha256));
+    if let Err(error) = fs::rename(&temp_path, &object_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error)
+            .with_context(|| format!("failed to move copied object {}", object_path.display()));
+    }
+    let detail = format!(
+        "source_bucket={source_bucket}; source_key={source_key}; bucket={destination_bucket}; key={destination_key}"
+    );
+    match state
+        .catalog
+        .put_object_with_audit(
+            NewObject {
+                bucket_name: destination_bucket.to_owned(),
+                key: destination_key.trim_start_matches('/').to_owned(),
+                size_bytes: copied.size_bytes,
+                content_type: source.content_type,
+                sha256: copied.sha256,
+                storage_path: object_path.display().to_string(),
+                manifest: copied.manifest,
+            },
+            principal,
+            &detail,
+        )
+        .await
+    {
+        Ok(object) => Ok(object),
+        Err(error) => {
+            let _ = fs::remove_file(&object_path);
+            Err(error)
+        }
+    }
+}
+
+struct DeleteObjectsResult {
+    deleted: Vec<String>,
+    errors: Vec<DeleteObjectError>,
+}
+
+struct DeleteObjectError {
+    key: String,
+    code: String,
+    message: String,
+}
+
+async fn delete_objects_inner(
+    state: &AppState,
+    principal: &str,
+    bucket_name: &str,
+    body: Body,
+) -> anyhow::Result<DeleteObjectsResult> {
+    catalog::validate_bucket_name(bucket_name)?;
+    if state.catalog.get_bucket(bucket_name).await?.is_none() {
+        bail!("bucket not found: {bucket_name}");
+    }
+    let keys = parse_delete_objects(body).await?;
+    let mut deleted = Vec::new();
+    let mut errors = Vec::new();
+    for key in keys {
+        match state.catalog.get_object_record(bucket_name, &key).await {
+            Ok(Some(_)) => match state.catalog.delete_object(bucket_name, &key).await {
+                Ok(()) => deleted.push(key),
+                Err(error) => errors.push(DeleteObjectError {
+                    key,
+                    code: "InternalError".to_owned(),
+                    message: error.to_string(),
+                }),
+            },
+            Ok(None) => deleted.push(key),
+            Err(error) => errors.push(DeleteObjectError {
+                key,
+                code: "InvalidRequest".to_owned(),
+                message: error.to_string(),
+            }),
+        }
+    }
+    audit::event(
+        "s3_objects_deleted",
+        Some(principal),
+        "success",
+        &format!("bucket={bucket_name}; deleted={}", deleted.len()),
+    );
+    Ok(DeleteObjectsResult { deleted, errors })
+}
+
 struct StreamedObject {
     size_bytes: i64,
     sha256: String,
@@ -1014,6 +1245,88 @@ async fn assemble_multipart_object(
     })
 }
 
+async fn copy_file_to_temp_object(
+    source_path: &str,
+    temp_path: &PathBuf,
+    fragment_size_bytes: i64,
+) -> anyhow::Result<StreamedObject> {
+    if fragment_size_bytes <= 0 {
+        bail!("fragmentSizeBytes must be positive");
+    }
+    let fragment_size =
+        usize::try_from(fragment_size_bytes).context("fragment size is too large")?;
+    let mut input = tokio::fs::File::open(source_path)
+        .await
+        .with_context(|| format!("failed to open copy source {source_path}"))?;
+    let mut output = tokio::fs::File::create(temp_path)
+        .await
+        .with_context(|| format!("failed to create copy temp {}", temp_path.display()))?;
+    let mut object_hasher = Sha256::new();
+    let mut fragment_hasher = Sha256::new();
+    let mut fragments = Vec::new();
+    let mut fragment_len = 0usize;
+    let mut fragment_start = 0i64;
+    let mut size_bytes = 0i64;
+    let mut buffer = vec![0u8; 1024 * 1024];
+
+    loop {
+        let read = input
+            .read(&mut buffer)
+            .await
+            .with_context(|| format!("failed to read copy source {source_path}"))?;
+        if read == 0 {
+            break;
+        }
+        let chunk = &buffer[..read];
+        output
+            .write_all(chunk)
+            .await
+            .with_context(|| format!("failed to write copy temp {}", temp_path.display()))?;
+        object_hasher.update(chunk);
+
+        let mut remaining = chunk;
+        while !remaining.is_empty() {
+            let capacity = fragment_size - fragment_len;
+            let take = cmp::min(capacity, remaining.len());
+            fragment_hasher.update(&remaining[..take]);
+            fragment_len += take;
+            size_bytes = size_bytes
+                .checked_add(i64::try_from(take).context("copied object is too large")?)
+                .context("copied object is too large")?;
+            remaining = &remaining[take..];
+            if fragment_len == fragment_size {
+                push_streamed_fragment(
+                    &mut fragments,
+                    &mut fragment_hasher,
+                    &mut fragment_start,
+                    &mut fragment_len,
+                )?;
+            }
+        }
+    }
+
+    if fragment_len > 0 {
+        push_streamed_fragment(
+            &mut fragments,
+            &mut fragment_hasher,
+            &mut fragment_start,
+            &mut fragment_len,
+        )?;
+    }
+    output
+        .flush()
+        .await
+        .with_context(|| format!("failed to flush copy temp {}", temp_path.display()))?;
+    Ok(StreamedObject {
+        size_bytes,
+        sha256: format!("{:x}", object_hasher.finalize()),
+        manifest: NewObjectManifest {
+            fragment_size_bytes,
+            fragments,
+        },
+    })
+}
+
 fn push_streamed_fragment(
     fragments: &mut Vec<NewObjectFragment>,
     fragment_hasher: &mut Sha256,
@@ -1082,6 +1395,27 @@ async fn parse_complete_multipart_upload(body: Body) -> anyhow::Result<Vec<Compl
     Ok(parts)
 }
 
+async fn parse_delete_objects(body: Body) -> anyhow::Result<Vec<String>> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read DeleteObjects body")?
+        .to_bytes();
+    let xml = std::str::from_utf8(&bytes).context("DeleteObjects body is not UTF-8")?;
+    let mut keys = Vec::new();
+    for object_block in xml.split("<Object>").skip(1) {
+        let object_block = object_block
+            .split_once("</Object>")
+            .map(|(object, _)| object)
+            .ok_or_else(|| anyhow::anyhow!("invalid DeleteObjects XML"))?;
+        keys.push(xml_unescape(xml_tag_value(object_block, "Key")?));
+    }
+    if keys.is_empty() {
+        bail!("DeleteObjects must include at least one Object");
+    }
+    Ok(keys)
+}
+
 fn xml_tag_value<'a>(xml: &'a str, tag: &str) -> anyhow::Result<&'a str> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
@@ -1090,6 +1424,17 @@ fn xml_tag_value<'a>(xml: &'a str, tag: &str) -> anyhow::Result<&'a str> {
         .and_then(|(_, rest)| rest.split_once(&close).map(|(value, _)| value))
         .ok_or_else(|| anyhow::anyhow!("missing XML tag {tag}"))?;
     Ok(value.trim())
+}
+
+fn parse_copy_source(raw: &str) -> anyhow::Result<(String, String)> {
+    let raw = raw.trim().trim_start_matches('/');
+    let decoded = percent_decode(raw);
+    let (bucket, key) = decoded
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("x-amz-copy-source must include bucket and key"))?;
+    catalog::validate_bucket_name(bucket)?;
+    catalog::validate_object_key(key)?;
+    Ok((bucket.to_owned(), key.to_owned()))
 }
 
 fn resolve_completed_parts(
@@ -1418,6 +1763,47 @@ fn list_objects_v2_xml(
     )
 }
 
+fn bucket_location_xml() -> String {
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<LocationConstraint xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">us-east-1</LocationConstraint>"
+        .to_owned()
+}
+
+fn copy_object_xml(object: &ObjectSummary) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<CopyObjectResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+<LastModified>{}</LastModified><ETag>&quot;{}&quot;</ETag></CopyObjectResult>",
+        xml_escape(&object.created_at),
+        xml_escape(&object.sha256)
+    )
+}
+
+fn delete_objects_xml(result: &DeleteObjectsResult) -> String {
+    let deleted = result
+        .deleted
+        .iter()
+        .map(|key| format!("<Deleted><Key>{}</Key></Deleted>", xml_escape(key)))
+        .collect::<String>();
+    let errors = result
+        .errors
+        .iter()
+        .map(|error| {
+            format!(
+                "<Error><Key>{}</Key><Code>{}</Code><Message>{}</Message></Error>",
+                xml_escape(&error.key),
+                xml_escape(&error.code),
+                xml_escape(&error.message)
+            )
+        })
+        .collect::<String>();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">{}{}</DeleteResult>",
+        deleted, errors
+    )
+}
+
 fn initiate_multipart_upload_xml(upload: &MultipartUploadRecord) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
@@ -1526,6 +1912,32 @@ fn xml_escape(raw: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+fn xml_unescape(raw: &str) -> String {
+    raw.replace("&apos;", "'")
+        .replace("&quot;", "\"")
+        .replace("&gt;", ">")
+        .replace("&lt;", "<")
+        .replace("&amp;", "&")
+}
+
+fn percent_decode(raw: &str) -> String {
+    let mut output = Vec::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(value) = u8::from_str_radix(&raw[index + 1..index + 3], 16) {
+                output.push(value);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&output).into_owned()
 }
 
 async fn record_origin_audit(

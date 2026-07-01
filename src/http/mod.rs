@@ -56,6 +56,7 @@ pub fn s3_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catalo
         .route(
             "/{bucket_name}",
             put(origin::create_bucket)
+                .post(origin::post_bucket)
                 .get(origin::list_objects)
                 .head(origin::head_bucket)
                 .delete(origin::delete_bucket),
@@ -747,6 +748,26 @@ mod tests {
         assert_eq!(default_put.status(), StatusCode::OK);
         assert_eq!(header_value(&default_put, header::CONTENT_LENGTH), "0");
 
+        let bucket_location = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/compat-bucket?location")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(bucket_location.status(), StatusCode::OK);
+        assert!(
+            response_text(bucket_location)
+                .await
+                .contains("<LocationConstraint")
+        );
+
         let default_head = s3_app
             .clone()
             .oneshot(
@@ -841,6 +862,42 @@ mod tests {
             .expect("router response");
         assert_eq!(get_object.status(), StatusCode::OK);
         assert_eq!(response_bytes(get_object).await, object_body.as_slice());
+
+        let copy_object = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/compat-bucket/prefix/copied.txt")
+                        .header("x-amz-copy-source", "/compat-bucket/prefix/hello.txt")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid copy object request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(copy_object.status(), StatusCode::OK);
+        let copy_object_body = response_text(copy_object).await;
+        assert!(copy_object_body.contains("<CopyObjectResult"));
+        assert!(copy_object_body.contains(&sha256_hex(object_body)));
+
+        let get_copied = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/compat-bucket/prefix/copied.txt")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid get copied object request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_copied.status(), StatusCode::OK);
+        assert_eq!(response_bytes(get_copied).await, object_body.as_slice());
 
         let presigned_get = s3_app
             .clone()
@@ -952,6 +1009,42 @@ mod tests {
             .expect("router response");
         assert_eq!(delete_object.status(), StatusCode::NO_CONTENT);
         assert!(delete_object.headers().contains_key("x-amz-request-id"));
+
+        let delete_objects_body = "<Delete><Object><Key>prefix/copied.txt</Key></Object><Object><Key>missing-batch.txt</Key></Object></Delete>";
+        let delete_objects = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/compat-bucket?delete")
+                        .body(Body::from(delete_objects_body)),
+                    delete_objects_body.as_bytes(),
+                )
+                .expect("valid delete objects request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(delete_objects.status(), StatusCode::OK);
+        let delete_objects_body = response_text(delete_objects).await;
+        assert!(delete_objects_body.contains("<DeleteResult"));
+        assert!(delete_objects_body.contains("<Key>prefix/copied.txt</Key>"));
+        assert!(delete_objects_body.contains("<Key>missing-batch.txt</Key>"));
+
+        let get_batch_deleted = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/compat-bucket/prefix/copied.txt")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid get batch deleted request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_batch_deleted.status(), StatusCode::FORBIDDEN);
 
         let get_deleted_object = s3_app
             .clone()
