@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Ban, Copy, KeyRound, Plus } from "lucide-react";
+import { Activity, Ban, Copy, KeyRound, Network, Plus, ShieldCheck, Wrench } from "lucide-react";
 import {
   ApplicationCredentialSummary,
   CreatedApplicationCredential,
@@ -15,6 +15,20 @@ import {
   listS3AccessKeys,
   revokeS3AccessKey
 } from "../api/s3KeysApi";
+import {
+  CreatedMcpAccessToken,
+  McpAccessTokenSummary,
+  McpActivityRecord,
+  McpSettings,
+  McpStatus,
+  createMcpToken,
+  getMcpSettings,
+  getMcpStatus,
+  listMcpActivity,
+  listMcpTokens,
+  revokeMcpToken,
+  updateMcpSettings
+} from "../api/mcpApi";
 import { S3CredentialsCard } from "../components/settings/S3CredentialsCard";
 
 const S3_KEYS_PAGE_SIZE = 10;
@@ -38,6 +52,17 @@ export function SettingsPage() {
   const [creatingApplication, setCreatingApplication] = useState(false);
   const [revokingApplication, setRevokingApplication] = useState<string | null>(null);
   const [applicationError, setApplicationError] = useState("");
+  const [mcpSettings, setMcpSettings] = useState<McpSettings | null>(null);
+  const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null);
+  const [mcpTokens, setMcpTokens] = useState<McpAccessTokenSummary[]>([]);
+  const [mcpActivity, setMcpActivity] = useState<McpActivityRecord[]>([]);
+  const [mcpTokenName, setMcpTokenName] = useState("default-mcp-client");
+  const [createdMcpToken, setCreatedMcpToken] = useState<CreatedMcpAccessToken | null>(null);
+  const [loadingMcp, setLoadingMcp] = useState(true);
+  const [savingMcp, setSavingMcp] = useState(false);
+  const [creatingMcpToken, setCreatingMcpToken] = useState(false);
+  const [revokingMcpToken, setRevokingMcpToken] = useState<string | null>(null);
+  const [mcpError, setMcpError] = useState("");
 
   const refreshKeys = useCallback(async (page: number) => {
     setLoading(true);
@@ -74,6 +99,31 @@ export function SettingsPage() {
   useEffect(() => {
     void refreshApplications();
   }, [refreshApplications]);
+
+  const refreshMcp = useCallback(async () => {
+    setLoadingMcp(true);
+    setMcpError("");
+    try {
+      const [settings, status, tokens, activity] = await Promise.all([
+        getMcpSettings(),
+        getMcpStatus(),
+        listMcpTokens(),
+        listMcpActivity()
+      ]);
+      setMcpSettings(settings);
+      setMcpStatus(status);
+      setMcpTokens(tokens);
+      setMcpActivity(activity);
+    } catch (loadError) {
+      setMcpError(loadError instanceof Error ? loadError.message : t("setup.settings.mcp.loadFailed"));
+    } finally {
+      setLoadingMcp(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    void refreshMcp();
+  }, [refreshMcp]);
 
   async function handleCreateKey() {
     setCreating(true);
@@ -133,6 +183,61 @@ export function SettingsPage() {
     }
   }
 
+  async function handleUpdateMcpSettings(nextSettings: McpSettings) {
+    setSavingMcp(true);
+    setMcpError("");
+    try {
+      const saved = await updateMcpSettings({
+        enabled: nextSettings.enabled,
+        endpointPath: nextSettings.endpointPath,
+        bindHost: nextSettings.bindHost,
+        requireAuth: nextSettings.requireAuth,
+        readToolsEnabled: nextSettings.readToolsEnabled,
+        writeToolsEnabled: nextSettings.writeToolsEnabled,
+        exposeResources: nextSettings.exposeResources,
+        exposePrompts: nextSettings.exposePrompts,
+        allowLocalhostOnly: nextSettings.allowLocalhostOnly
+      });
+      setMcpSettings(saved);
+      setMcpStatus(await getMcpStatus());
+    } catch (saveError) {
+      setMcpError(saveError instanceof Error ? saveError.message : t("setup.settings.mcp.saveFailed"));
+    } finally {
+      setSavingMcp(false);
+    }
+  }
+
+  async function handleCreateMcpToken() {
+    if (!mcpTokenName.trim()) {
+      return;
+    }
+    setCreatingMcpToken(true);
+    setMcpError("");
+    try {
+      const created = await createMcpToken(mcpTokenName);
+      setCreatedMcpToken(created);
+      setMcpTokenName("");
+      setMcpTokens(await listMcpTokens());
+    } catch (createError) {
+      setMcpError(createError instanceof Error ? createError.message : t("setup.settings.mcp.createTokenFailed"));
+    } finally {
+      setCreatingMcpToken(false);
+    }
+  }
+
+  async function handleRevokeMcpToken(id: string) {
+    setRevokingMcpToken(id);
+    setMcpError("");
+    try {
+      await revokeMcpToken(id);
+      setMcpTokens(await listMcpTokens());
+    } catch (revokeError) {
+      setMcpError(revokeError instanceof Error ? revokeError.message : t("setup.settings.mcp.revokeTokenFailed"));
+    } finally {
+      setRevokingMcpToken(null);
+    }
+  }
+
   return (
     <div className="settings-page">
       <header className="settings-page__header">
@@ -142,6 +247,24 @@ export function SettingsPage() {
       </header>
 
       <div className="settings-page__grid">
+        <McpSettingsCard
+          settings={mcpSettings}
+          status={mcpStatus}
+          tokens={mcpTokens}
+          activity={mcpActivity}
+          tokenName={mcpTokenName}
+          createdToken={createdMcpToken}
+          loading={loadingMcp}
+          saving={savingMcp}
+          creatingToken={creatingMcpToken}
+          revokingToken={revokingMcpToken}
+          error={mcpError}
+          onTokenNameChange={setMcpTokenName}
+          onUpdateSettings={handleUpdateMcpSettings}
+          onCreateToken={handleCreateMcpToken}
+          onDismissCreatedToken={() => setCreatedMcpToken(null)}
+          onRevokeToken={handleRevokeMcpToken}
+        />
         <ApplicationCredentialsCard
           applications={applications}
           createdApplication={createdApplication}
@@ -174,6 +297,210 @@ export function SettingsPage() {
           onRevokeKey={handleRevokeKey}
         />
       </div>
+    </div>
+  );
+}
+
+type McpSettingsCardProps = {
+  settings: McpSettings | null;
+  status: McpStatus | null;
+  tokens: McpAccessTokenSummary[];
+  activity: McpActivityRecord[];
+  tokenName: string;
+  createdToken: CreatedMcpAccessToken | null;
+  loading: boolean;
+  saving: boolean;
+  creatingToken: boolean;
+  revokingToken: string | null;
+  error: string;
+  onTokenNameChange: (value: string) => void;
+  onUpdateSettings: (settings: McpSettings) => void;
+  onCreateToken: () => void;
+  onDismissCreatedToken: () => void;
+  onRevokeToken: (id: string) => void;
+};
+
+function McpSettingsCard({
+  settings,
+  status,
+  tokens,
+  activity,
+  tokenName,
+  createdToken,
+  loading,
+  saving,
+  creatingToken,
+  revokingToken,
+  error,
+  onTokenNameChange,
+  onUpdateSettings,
+  onCreateToken,
+  onDismissCreatedToken,
+  onRevokeToken
+}: McpSettingsCardProps) {
+  const { t, i18n } = useTranslation();
+
+  function update(patch: Partial<McpSettings>) {
+    if (!settings || saving) {
+      return;
+    }
+    onUpdateSettings({ ...settings, ...patch });
+  }
+
+  return (
+    <section className="settings-card settings-card--wide" id="mcp">
+      <div className="settings-card__header">
+        <div className="settings-card__title-group">
+          <div className="settings-card__title-icon">
+            <Network size={20} aria-hidden="true" />
+          </div>
+          <div>
+            <h2>{t("setup.settings.mcp.title")}</h2>
+            <p>{t("setup.settings.mcp.subtitle")}</p>
+          </div>
+        </div>
+      </div>
+
+      {error ? <p className="error-message">{error}</p> : null}
+
+      {loading || !settings || !status ? (
+        <div className="settings-loading">{t("setup.common.loading")}</div>
+      ) : (
+        <>
+          <div className="mcp-summary-grid">
+            <McpSummaryItem icon={<Activity size={17} />} label={t("setup.settings.mcp.status")} value={status.enabled ? t("setup.settings.mcp.enabled") : t("setup.settings.mcp.disabled")} />
+            <McpSummaryItem icon={<Network size={17} />} label={t("setup.settings.mcp.endpoint")} value={status.endpoint} />
+            <McpSummaryItem icon={<ShieldCheck size={17} />} label={t("setup.settings.mcp.accessMode")} value={status.writeToolsEnabled ? t("setup.settings.mcp.readWrite") : t("setup.settings.mcp.readOnly")} />
+            <McpSummaryItem icon={<Wrench size={17} />} label={t("setup.settings.mcp.lastActivity")} value={status.lastActivityAt ? formatDate(status.lastActivityAt, i18n.language) : t("setup.common.unavailable")} />
+          </div>
+
+          <div className="mcp-settings-grid">
+            <ToggleRow label={t("setup.settings.mcp.enable")} checked={settings.enabled} disabled={saving} onChange={(checked) => update({ enabled: checked })} />
+            <ToggleRow label={t("setup.settings.mcp.requireAuth")} checked={settings.requireAuth} disabled />
+            <ToggleRow label={t("setup.settings.mcp.localhostOnly")} checked={settings.allowLocalhostOnly} disabled={saving} onChange={(checked) => update({ allowLocalhostOnly: checked })} />
+            <ToggleRow label={t("setup.settings.mcp.readTools")} checked={settings.readToolsEnabled} disabled={saving} onChange={(checked) => update({ readToolsEnabled: checked })} />
+            <ToggleRow label={t("setup.settings.mcp.writeTools")} checked={settings.writeToolsEnabled} disabled={saving} onChange={(checked) => update({ writeToolsEnabled: checked })} />
+            <ToggleRow label={t("setup.settings.mcp.resources")} checked={settings.exposeResources} disabled={saving} onChange={(checked) => update({ exposeResources: checked })} />
+            <ToggleRow label={t("setup.settings.mcp.prompts")} checked={settings.exposePrompts} disabled={saving} onChange={(checked) => update({ exposePrompts: checked })} />
+          </div>
+
+          <form className="inline-form" onSubmit={(event) => {
+            event.preventDefault();
+            onCreateToken();
+          }}>
+            <input
+              value={tokenName}
+              onChange={(event) => onTokenNameChange(event.target.value)}
+              placeholder={t("setup.settings.mcp.tokenNamePlaceholder")}
+              aria-label={t("setup.settings.mcp.tokenName")}
+            />
+            <button className="settings-create-key-button" type="submit" disabled={creatingToken || !tokenName.trim()}>
+              <Plus size={17} aria-hidden="true" />
+              {t("setup.settings.mcp.createToken")}
+            </button>
+          </form>
+
+          {createdToken ? (
+            <section className="secret-panel" role="status">
+              <strong>{t("setup.settings.mcp.tokenCreated")}</strong>
+              <p>{t("setup.settings.mcp.tokenCreatedHint")}</p>
+              <dl>
+                <div>
+                  <dt>{t("setup.settings.mcp.tokenPrefix")}</dt>
+                  <dd><code>{createdToken.token.tokenPrefix}</code></dd>
+                </div>
+                <div>
+                  <dt>{t("setup.settings.mcp.tokenSecret")}</dt>
+                  <dd>
+                    <code>{createdToken.secret}</code>
+                    <button className="icon-button" type="button" title={t("setup.settings.mcp.copyToken")} aria-label={t("setup.settings.mcp.copyToken")} onClick={() => void navigator.clipboard?.writeText(createdToken.secret)}>
+                      <Copy size={16} aria-hidden="true" />
+                    </button>
+                  </dd>
+                </div>
+              </dl>
+              <button className="settings-secondary-button" type="button" onClick={onDismissCreatedToken}>
+                {t("setup.common.ok")}
+              </button>
+            </section>
+          ) : null}
+
+          <div className="settings-table-wrap">
+            <table className="settings-table">
+              <thead>
+                <tr>
+                  <th>{t("setup.settings.mcp.tokenName")}</th>
+                  <th>{t("setup.settings.mcp.tokenPrefix")}</th>
+                  <th>{t("setup.settings.s3.status")}</th>
+                  <th>{t("setup.settings.s3.lastUsed")}</th>
+                  <th>{t("setup.settings.s3.createdAt")}</th>
+                  <th aria-label={t("setup.settings.s3.actions")} />
+                </tr>
+              </thead>
+              <tbody>
+                {tokens.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>{t("setup.settings.mcp.noTokens")}</td>
+                  </tr>
+                ) : tokens.map((token) => (
+                  <tr key={token.id}>
+                    <td className="settings-table__name">{token.name}</td>
+                    <td><code>{token.tokenPrefix}</code></td>
+                    <td>{token.active ? t("setup.settings.s3.active") : t("setup.settings.s3.revoked")}</td>
+                    <td>{token.lastUsedAt ? formatDate(token.lastUsedAt, i18n.language) : t("setup.common.unavailable")}</td>
+                    <td>{formatDate(token.createdAt, i18n.language)}</td>
+                    <td className="settings-table__actions">
+                      {token.active ? (
+                        <button className="settings-revoke-button" type="button" title={t("setup.settings.mcp.revokeToken")} aria-label={t("setup.settings.mcp.revokeToken")} disabled={revokingToken === token.id} onClick={() => onRevokeToken(token.id)}>
+                          <Ban size={16} aria-hidden="true" />
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <section className="mcp-activity">
+            <h3>{t("setup.settings.mcp.recentActivity")}</h3>
+            {activity.length === 0 ? (
+              <p>{t("setup.settings.mcp.noActivity")}</p>
+            ) : (
+              <ol>
+                {activity.slice(0, 8).map((entry) => (
+                  <li key={entry.id}>
+                    <span>{entry.method}</span>
+                    <strong>{entry.outcome}</strong>
+                    <time dateTime={entry.createdAt}>{formatDate(entry.createdAt, i18n.language)}</time>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        </>
+      )}
+    </section>
+  );
+}
+
+function McpSummaryItem({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="mcp-summary-item">
+      {icon}
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ToggleRow({ label, checked, disabled = false, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange?: (checked: boolean) => void }) {
+  return (
+    <div className="settings-toggle-row">
+      <span>{label}</span>
+      <button type="button" role="switch" aria-checked={checked} aria-label={label} title={label} disabled={disabled} onClick={() => onChange?.(!checked)}>
+        <span aria-hidden="true" />
+      </button>
     </div>
   );
 }

@@ -4,6 +4,7 @@ mod auth;
 mod catalog;
 mod config;
 mod http;
+mod mcp;
 mod mesh;
 mod origin;
 mod replica;

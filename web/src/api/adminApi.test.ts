@@ -417,6 +417,18 @@ function dashboardSummary() {
       setupCompleted: true,
       authenticated: true,
       lastCheckedAt: "2026-06-29T00:00:00Z"
+    },
+    mcp: {
+      enabled: false,
+      endpoint: "/mcp",
+      authRequired: true,
+      readToolsEnabled: true,
+      writeToolsEnabled: false,
+      resourcesEnabled: true,
+      promptsEnabled: true,
+      lastActivityAt: null,
+      activeSessionsCount: 0,
+      recentCallsCount: 0
     }
   };
 }

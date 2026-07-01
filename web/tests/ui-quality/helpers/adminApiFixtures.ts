@@ -40,6 +40,18 @@ const dashboardSummary = {
     setupCompleted: true,
     authenticated: true,
     lastCheckedAt: now
+  },
+  mcp: {
+    enabled: false,
+    endpoint: "/mcp",
+    authRequired: true,
+    readToolsEnabled: true,
+    writeToolsEnabled: false,
+    resourcesEnabled: true,
+    promptsEnabled: true,
+    lastActivityAt: null,
+    activeSessionsCount: 0,
+    recentCallsCount: 0
   }
 };
 
@@ -218,6 +230,44 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
           revoked: false
         }
       ]);
+    }
+
+    if (path === "/api/admin/mcp/settings") {
+      return json(route, {
+        enabled: false,
+        endpointPath: "/mcp",
+        bindHost: null,
+        requireAuth: true,
+        readToolsEnabled: true,
+        writeToolsEnabled: false,
+        exposeResources: true,
+        exposePrompts: true,
+        allowLocalhostOnly: true,
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+
+    if (path === "/api/admin/mcp/status") {
+      return json(route, dashboardSummary.mcp);
+    }
+
+    if (path === "/api/admin/mcp/tokens") {
+      return json(route, [
+        {
+          id: "mcp-token-qa",
+          name: "default-mcp-client",
+          tokenPrefix: "pmcp_qa12345",
+          active: true,
+          createdAt: now,
+          revokedAt: null,
+          lastUsedAt: null
+        }
+      ]);
+    }
+
+    if (path === "/api/admin/mcp/activity") {
+      return json(route, []);
     }
 
     return json(route, { error: `Unhandled UI quality fixture route: ${path}` }, 404);

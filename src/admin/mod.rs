@@ -35,6 +35,7 @@ pub struct DashboardSummary {
     objects: ObjectTotals,
     resources: resources::ResourceUsage,
     health: HealthSummary,
+    mcp: catalog::McpStatus,
 }
 
 #[derive(Debug, Serialize)]
@@ -109,6 +110,12 @@ pub struct CreateReplicaCredentialRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateS3AccessKeyRequest {
     name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMcpTokenRequest {
+    name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -222,6 +229,100 @@ pub async fn application_logs(Query(query): Query<ApplicationLogsQuery>) -> Resp
         .unwrap_or(DEFAULT_APPLICATION_LOGS_LIMIT)
         .clamp(1, MAX_APPLICATION_LOGS_LIMIT);
     Json(application_logs::recent(limit)).into_response()
+}
+
+pub async fn get_mcp_settings(State(state): State<AppState>) -> Response {
+    match state.catalog.get_mcp_settings().await {
+        Ok(settings) => Json(settings).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn update_mcp_settings(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<catalog::McpSettingsUpdate>,
+) -> Response {
+    match state.catalog.update_mcp_settings(payload).await {
+        Ok(settings) => {
+            let event = if settings.enabled {
+                "MCP_ENABLED"
+            } else {
+                "MCP_DISABLED"
+            };
+            audit::event(
+                event,
+                Some(&session.username),
+                "success",
+                "MCP settings updated",
+            );
+            Json(settings).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn mcp_status(State(state): State<AppState>) -> Response {
+    match state.catalog.mcp_status().await {
+        Ok(status) => Json(status).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn list_mcp_tokens(State(state): State<AppState>) -> Response {
+    match state.catalog.list_mcp_access_tokens().await {
+        Ok(tokens) => Json(tokens).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn create_mcp_token(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<CreateMcpTokenRequest>,
+) -> Response {
+    match state
+        .catalog
+        .create_mcp_access_token(&payload.name, Some(&session.user_id))
+        .await
+    {
+        Ok(token) => {
+            audit::event(
+                "MCP_TOKEN_CREATED",
+                Some(&session.username),
+                "success",
+                "MCP token created",
+            );
+            (StatusCode::CREATED, Json(token)).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn revoke_mcp_token(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.catalog.revoke_mcp_access_token(&id).await {
+        Ok(()) => {
+            audit::event(
+                "MCP_TOKEN_REVOKED",
+                Some(&session.username),
+                "success",
+                "MCP token revoked",
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn mcp_activity(State(state): State<AppState>) -> Response {
+    match state.catalog.list_mcp_activity(50).await {
+        Ok(activity) => Json(activity).into_response(),
+        Err(error) => internal_error(error),
+    }
 }
 
 pub async fn origin_traffic_metrics(State(state): State<AppState>) -> Response {
@@ -897,6 +998,7 @@ async fn build_dashboard_summary(state: &AppState) -> anyhow::Result<DashboardSu
         .await
         .context("resources task failed")?;
     let objects = state.catalog.totals().await?;
+    let mcp = state.catalog.mcp_status().await?;
     let database_connected = state.catalog.database_connected().await;
     let storage_writable = storage_status.writable;
 
@@ -905,6 +1007,7 @@ async fn build_dashboard_summary(state: &AppState) -> anyhow::Result<DashboardSu
         storage: storage_status,
         objects,
         resources,
+        mcp,
         health: HealthSummary {
             database_connected,
             storage_writable,

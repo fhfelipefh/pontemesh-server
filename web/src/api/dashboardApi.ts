@@ -33,6 +33,18 @@ export type DashboardSummary = {
     authenticated: boolean;
     lastCheckedAt: string;
   };
+  mcp: {
+    enabled: boolean;
+    endpoint: string;
+    authRequired: boolean;
+    readToolsEnabled: boolean;
+    writeToolsEnabled: boolean;
+    resourcesEnabled: boolean;
+    promptsEnabled: boolean;
+    lastActivityAt: string | null;
+    activeSessionsCount: number;
+    recentCallsCount: number;
+  };
 };
 
 export type InstanceSummary = {

@@ -1,5 +1,5 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Boxes, CheckCircle2, Cpu, Database, HardDrive, ListTree, Server, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, Boxes, CheckCircle2, Cpu, Database, HardDrive, ListTree, Network, Server, ShieldCheck, XCircle } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ApplicationLogEntry, DashboardSummary, getApplicationLogs, getDashboardSummary } from "../api/dashboardApi";
@@ -144,6 +144,13 @@ export function DashboardPage() {
         value={`${healthItems.length - failedHealthItems.length}/${healthItems.length}`}
         detail={failedHealthItems.length === 0 ? t("setup.dashboard.health.operational") : t("setup.dashboard.health.attention")}
       />
+      <MetricCard
+        icon={<Network size={20} />}
+        label={t("setup.dashboard.cards.mcp")}
+        value={summary.mcp.enabled ? t("setup.dashboard.mcp.enabled") : t("setup.dashboard.mcp.disabled")}
+        detail={summary.mcp.enabled ? t("setup.dashboard.mcp.activeDetail", { count: summary.mcp.recentCallsCount }) : summary.mcp.endpoint}
+        to="/settings#mcp"
+      />
 
       <ApplicationLogs logs={logs} />
 
@@ -237,18 +244,29 @@ function ApplicationLogs({ logs }: { logs: ApplicationLogEntry[] }) {
   );
 }
 
-function MetricCard({ icon, label, value, detail }: {
+function MetricCard({ icon, label, value, detail, to }: {
   icon: ReactNode;
   label: string;
   value: string;
   detail: string;
+  to?: string;
 }) {
-  return (
-    <section className="metric-card">
+  const content = (
+    <>
       <div className="metric-card__icon">{icon}</div>
       <span>{label}</span>
       <strong>{value}</strong>
       <small>{detail}</small>
+    </>
+  );
+
+  return to ? (
+    <Link className="metric-card metric-card--link" to={to}>
+      {content}
+    </Link>
+  ) : (
+    <section className="metric-card">
+      {content}
     </section>
   );
 }

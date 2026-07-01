@@ -131,7 +131,13 @@
         "buckets": "Buckets",
         "objects": "Objetos",
         "resources": "Recursos",
-        "health": "Saúde"
+        "health": "Saúde",
+        "mcp": "MCP"
+      },
+      "mcp": {
+        "enabled": "Ativo",
+        "disabled": "Desabilitado",
+        "activeDetail": "{{count}} chamadas recentes"
       },
       "storage": {
         "title": "Uso armazenamento",
@@ -306,6 +312,41 @@
         "revokeFailed": "Falha ao revogar credencial de aplicação.",
         "emptyTitle": "Nenhuma credencial de aplicação criada ainda.",
         "emptyDescription": "Crie uma credencial para SDKs solicitarem pacotes de acesso e manifestos."
+      },
+      "mcp": {
+        "title": "MCP",
+        "subtitle": "Permita que clientes compatíveis com Model Context Protocol observem e operem a instância conforme as permissões configuradas.",
+        "status": "Status do MCP",
+        "enabled": "Habilitado",
+        "disabled": "Desabilitado",
+        "enable": "Habilitar MCP",
+        "endpoint": "Endpoint MCP",
+        "accessMode": "Modo de acesso",
+        "readOnly": "Somente leitura",
+        "readWrite": "Leitura e escrita",
+        "localhostOnly": "Permitir apenas localhost",
+        "requireAuth": "Autenticação obrigatória",
+        "readTools": "Ferramentas de leitura",
+        "writeTools": "Ferramentas de escrita",
+        "resources": "Recursos",
+        "prompts": "Prompts",
+        "lastActivity": "Última atividade",
+        "tokenName": "Nome",
+        "tokenNamePlaceholder": "default-mcp-client",
+        "createToken": "Criar token",
+        "revokeToken": "Revogar token",
+        "tokenCreated": "Token criado",
+        "tokenCreatedHint": "Copie este token agora. Ele não será exibido novamente.",
+        "tokenPrefix": "Prefixo",
+        "tokenSecret": "Token",
+        "copyToken": "Copiar token MCP",
+        "noTokens": "Nenhum token MCP criado ainda.",
+        "recentActivity": "Atividade recente",
+        "noActivity": "Nenhuma chamada registrada ainda.",
+        "loadFailed": "Falha ao carregar configuração MCP.",
+        "saveFailed": "Falha ao salvar configuração MCP.",
+        "createTokenFailed": "Falha ao criar token MCP.",
+        "revokeTokenFailed": "Falha ao revogar token MCP."
       },
       "s3": {
         "title": "Credenciais S3",

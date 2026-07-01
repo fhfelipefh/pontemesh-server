@@ -3,7 +3,7 @@ use crate::{
     security::{random::secure_url_token, token::hash_bearer_token},
 };
 use anyhow::{Context, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, PgPoolOptions, PgRow, Postgres};
@@ -56,7 +56,8 @@ pub struct PaginatedObjects {
     pub total_pages: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ObjectRecord {
     pub key: String,
     pub size_bytes: i64,
@@ -524,6 +525,87 @@ pub struct AuditEventRecord {
     pub outcome: String,
     pub detail: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSettings {
+    pub enabled: bool,
+    pub endpoint_path: String,
+    pub bind_host: Option<String>,
+    pub require_auth: bool,
+    pub read_tools_enabled: bool,
+    pub write_tools_enabled: bool,
+    pub expose_resources: bool,
+    pub expose_prompts: bool,
+    pub allow_localhost_only: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSettingsUpdate {
+    pub enabled: bool,
+    pub endpoint_path: String,
+    pub bind_host: Option<String>,
+    pub require_auth: bool,
+    pub read_tools_enabled: bool,
+    pub write_tools_enabled: bool,
+    pub expose_resources: bool,
+    pub expose_prompts: bool,
+    pub allow_localhost_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpAccessTokenSummary {
+    pub id: String,
+    pub name: String,
+    pub token_prefix: String,
+    pub active: bool,
+    pub created_at: String,
+    pub revoked_at: Option<String>,
+    pub last_used_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedMcpAccessToken {
+    pub token: McpAccessTokenSummary,
+    pub secret: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct McpTokenAuthorization {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpActivityRecord {
+    pub id: String,
+    pub token_id: Option<String>,
+    pub method: String,
+    pub target: Option<String>,
+    pub outcome: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpStatus {
+    pub enabled: bool,
+    pub endpoint: String,
+    pub auth_required: bool,
+    pub read_tools_enabled: bool,
+    pub write_tools_enabled: bool,
+    pub resources_enabled: bool,
+    pub prompts_enabled: bool,
+    pub last_activity_at: Option<String>,
+    pub active_sessions_count: i64,
+    pub recent_calls_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1755,6 +1837,258 @@ impl Catalog {
             bail!("application credential not found or already revoked: {id}");
         }
         Ok(())
+    }
+
+    pub async fn get_mcp_settings(&self) -> anyhow::Result<McpSettings> {
+        let row = query(
+            r#"
+            INSERT INTO mcp_settings (id)
+            VALUES (TRUE)
+            ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
+            RETURNING enabled, endpoint_path, bind_host, require_auth,
+                read_tools_enabled, write_tools_enabled, expose_resources,
+                expose_prompts, allow_localhost_only, created_at, updated_at
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to load MCP settings")?;
+        Ok(mcp_settings_from_row(row))
+    }
+
+    pub async fn update_mcp_settings(
+        &self,
+        update: McpSettingsUpdate,
+    ) -> anyhow::Result<McpSettings> {
+        validate_mcp_settings_update(&update)?;
+        let row = query(
+            r#"
+            INSERT INTO mcp_settings (
+                id, enabled, endpoint_path, bind_host, require_auth,
+                read_tools_enabled, write_tools_enabled, expose_resources,
+                expose_prompts, allow_localhost_only, updated_at
+            )
+            VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+            ON CONFLICT (id) DO UPDATE
+            SET enabled = EXCLUDED.enabled,
+                endpoint_path = EXCLUDED.endpoint_path,
+                bind_host = EXCLUDED.bind_host,
+                require_auth = EXCLUDED.require_auth,
+                read_tools_enabled = EXCLUDED.read_tools_enabled,
+                write_tools_enabled = EXCLUDED.write_tools_enabled,
+                expose_resources = EXCLUDED.expose_resources,
+                expose_prompts = EXCLUDED.expose_prompts,
+                allow_localhost_only = EXCLUDED.allow_localhost_only,
+                updated_at = now()
+            RETURNING enabled, endpoint_path, bind_host, require_auth,
+                read_tools_enabled, write_tools_enabled, expose_resources,
+                expose_prompts, allow_localhost_only, created_at, updated_at
+            "#,
+        )
+        .bind(update.enabled)
+        .bind(&update.endpoint_path)
+        .bind(update.bind_host.as_deref())
+        .bind(update.require_auth)
+        .bind(update.read_tools_enabled)
+        .bind(update.write_tools_enabled)
+        .bind(update.expose_resources)
+        .bind(update.expose_prompts)
+        .bind(update.allow_localhost_only)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to update MCP settings")?;
+        Ok(mcp_settings_from_row(row))
+    }
+
+    pub async fn mcp_status(&self) -> anyhow::Result<McpStatus> {
+        let settings = self.get_mcp_settings().await?;
+        let row = query(
+            r#"
+            SELECT
+                (SELECT MAX(created_at) FROM mcp_activity_events) AS last_activity_at,
+                (SELECT COUNT(*)::bigint FROM mcp_activity_events WHERE created_at > now() - interval '24 hours') AS recent_calls_count
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to load MCP status")?;
+        Ok(McpStatus {
+            enabled: settings.enabled,
+            endpoint: settings.endpoint_path,
+            auth_required: settings.require_auth,
+            read_tools_enabled: settings.read_tools_enabled,
+            write_tools_enabled: settings.write_tools_enabled,
+            resources_enabled: settings.expose_resources,
+            prompts_enabled: settings.expose_prompts,
+            last_activity_at: row
+                .get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_activity_at")
+                .map(format_datetime),
+            active_sessions_count: 0,
+            recent_calls_count: row.get("recent_calls_count"),
+        })
+    }
+
+    pub async fn create_mcp_access_token(
+        &self,
+        name: &str,
+        created_by_user_id: Option<&str>,
+    ) -> anyhow::Result<CreatedMcpAccessToken> {
+        let name = name.trim();
+        if name.is_empty() {
+            bail!("MCP token name cannot be empty");
+        }
+        let secret = secure_url_token("pm_mcp_", 32);
+        let token_prefix = secret.chars().take(14).collect::<String>();
+        let token_hash = hash_bearer_token(&secret);
+        let row = query(
+            r#"
+            INSERT INTO mcp_access_tokens (name, token_prefix, token_hash, created_by_user_id)
+            VALUES ($1, $2, $3, $4::uuid)
+            RETURNING id::text, name, token_prefix, is_active, created_at, revoked_at, last_used_at
+            "#,
+        )
+        .bind(name)
+        .bind(&token_prefix)
+        .bind(token_hash)
+        .bind(created_by_user_id)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to create MCP access token")?;
+        Ok(CreatedMcpAccessToken {
+            token: mcp_access_token_from_row(row),
+            secret,
+        })
+    }
+
+    pub async fn list_mcp_access_tokens(&self) -> anyhow::Result<Vec<McpAccessTokenSummary>> {
+        let rows = query(
+            r#"
+            SELECT id::text, name, token_prefix, is_active, created_at, revoked_at, last_used_at
+            FROM mcp_access_tokens
+            ORDER BY created_at DESC, name ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list MCP access tokens")?;
+        Ok(rows.into_iter().map(mcp_access_token_from_row).collect())
+    }
+
+    pub async fn revoke_mcp_access_token(&self, id: &str) -> anyhow::Result<()> {
+        let result = query(
+            "UPDATE mcp_access_tokens SET is_active = FALSE, revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .context("failed to revoke MCP access token")?;
+        if result.rows_affected() == 0 {
+            bail!("MCP token not found or already revoked: {id}");
+        }
+        Ok(())
+    }
+
+    pub async fn authorize_mcp_token(
+        &self,
+        token: &str,
+    ) -> anyhow::Result<Option<McpTokenAuthorization>> {
+        let token_hash = hash_bearer_token(token);
+        let row = query(
+            r#"
+            SELECT id::text, name
+            FROM mcp_access_tokens
+            WHERE token_hash = $1
+              AND is_active = TRUE
+              AND revoked_at IS NULL
+            "#,
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to authorize MCP token")?;
+        Ok(row.map(|row| McpTokenAuthorization {
+            id: row.get("id"),
+            name: row.get("name"),
+        }))
+    }
+
+    pub async fn record_mcp_token_used(&self, token_id: &str) -> anyhow::Result<()> {
+        query("UPDATE mcp_access_tokens SET last_used_at = now() WHERE id = $1::uuid")
+            .bind(token_id)
+            .execute(&self.pool)
+            .await
+            .context("failed to update MCP token usage")?;
+        Ok(())
+    }
+
+    pub async fn count_recent_mcp_activity(
+        &self,
+        token_id: &str,
+        window_seconds: i64,
+    ) -> anyhow::Result<i64> {
+        let count: i64 = sqlx_core::query_scalar::query_scalar(
+            r#"
+            SELECT COUNT(*)::bigint
+            FROM mcp_activity_events
+            WHERE token_id = $1::uuid
+              AND created_at >= now() - ($2::bigint * INTERVAL '1 second')
+            "#,
+        )
+        .bind(token_id)
+        .bind(window_seconds.max(1))
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to count recent MCP activity")?;
+        Ok(count)
+    }
+
+    pub async fn record_mcp_activity(
+        &self,
+        token_id: Option<&str>,
+        method: &str,
+        target: Option<&str>,
+        outcome: &str,
+        detail: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        query(
+            r#"
+            INSERT INTO mcp_activity_events (token_id, method, target, outcome, detail)
+            VALUES ($1::uuid, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(token_id)
+        .bind(method)
+        .bind(target)
+        .bind(outcome)
+        .bind(detail)
+        .execute(&self.pool)
+        .await
+        .context("failed to record MCP activity")?;
+        self.record_audit_event(
+            mcp_audit_event_for_method(method, outcome),
+            token_id,
+            outcome,
+            &format!("method={method}; target={}", target.unwrap_or("")),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_mcp_activity(&self, limit: i64) -> anyhow::Result<Vec<McpActivityRecord>> {
+        let limit = limit.clamp(1, 100);
+        let rows = query(
+            r#"
+            SELECT id::text, token_id::text, method, target, outcome, created_at
+            FROM mcp_activity_events
+            ORDER BY created_at DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list MCP activity")?;
+        Ok(rows.into_iter().map(mcp_activity_from_row).collect())
     }
 
     pub async fn create_s3_access_key(
@@ -3642,6 +3976,52 @@ fn object_record_from_row(row: PgRow) -> ObjectRecord {
     }
 }
 
+fn mcp_settings_from_row(row: PgRow) -> McpSettings {
+    McpSettings {
+        enabled: row.get("enabled"),
+        endpoint_path: row.get("endpoint_path"),
+        bind_host: row.get("bind_host"),
+        require_auth: row.get("require_auth"),
+        read_tools_enabled: row.get("read_tools_enabled"),
+        write_tools_enabled: row.get("write_tools_enabled"),
+        expose_resources: row.get("expose_resources"),
+        expose_prompts: row.get("expose_prompts"),
+        allow_localhost_only: row.get("allow_localhost_only"),
+        created_at: format_datetime(row.get("created_at")),
+        updated_at: format_datetime(row.get("updated_at")),
+    }
+}
+
+fn mcp_access_token_from_row(row: PgRow) -> McpAccessTokenSummary {
+    McpAccessTokenSummary {
+        id: row.get("id"),
+        name: row.get("name"),
+        token_prefix: row.get("token_prefix"),
+        active: row.get::<bool, _>("is_active")
+            && row
+                .get::<Option<chrono::DateTime<chrono::Utc>>, _>("revoked_at")
+                .is_none(),
+        created_at: format_datetime(row.get("created_at")),
+        revoked_at: row
+            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("revoked_at")
+            .map(format_datetime),
+        last_used_at: row
+            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_used_at")
+            .map(format_datetime),
+    }
+}
+
+fn mcp_activity_from_row(row: PgRow) -> McpActivityRecord {
+    McpActivityRecord {
+        id: row.get("id"),
+        token_id: row.get("token_id"),
+        method: row.get("method"),
+        target: row.get("target"),
+        outcome: row.get("outcome"),
+        created_at: format_datetime(row.get("created_at")),
+    }
+}
+
 fn multipart_upload_from_row(row: PgRow) -> MultipartUploadRecord {
     MultipartUploadRecord {
         upload_id: row.get("upload_id"),
@@ -3890,6 +4270,37 @@ fn validate_bucket_policy(update: &BucketPolicyUpdate) -> anyhow::Result<()> {
         &["ORIGIN_RANGE", "ORIGIN_FULL_OBJECT", "DISABLED"],
     )?;
     Ok(())
+}
+
+fn validate_mcp_settings_update(update: &McpSettingsUpdate) -> anyhow::Result<()> {
+    if update.endpoint_path != "/mcp" {
+        bail!("endpointPath must be /mcp");
+    }
+    if let Some(bind_host) = &update.bind_host {
+        if bind_host.len() > 255 {
+            bail!("bindHost is too long");
+        }
+    }
+    if !update.require_auth {
+        bail!("MCP authentication cannot be disabled");
+    }
+    Ok(())
+}
+
+fn mcp_audit_event_for_method(method: &str, outcome: &str) -> &'static str {
+    if outcome == "failed" {
+        return "MCP_AUTH_FAILED";
+    }
+    if outcome == "rejected" {
+        return "MCP_REQUEST_REJECTED";
+    }
+    if method.starts_with("resources/") {
+        return "MCP_RESOURCE_READ";
+    }
+    if method.starts_with("tools/") {
+        return "MCP_TOOL_CALLED";
+    }
+    "MCP_REQUEST_REJECTED"
 }
 
 fn validate_policy_enum(field: &str, value: &str, allowed: &[&str]) -> anyhow::Result<()> {

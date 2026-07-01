@@ -131,7 +131,13 @@
         "buckets": "Buckets",
         "objects": "Objects",
         "resources": "Resources",
-        "health": "Health"
+        "health": "Health",
+        "mcp": "MCP"
+      },
+      "mcp": {
+        "enabled": "Active",
+        "disabled": "Disabled",
+        "activeDetail": "{{count}} recent calls"
       },
       "storage": {
         "title": "Storage usage",
@@ -306,6 +312,41 @@
         "revokeFailed": "Failed to revoke application credential.",
         "emptyTitle": "No application credentials have been created yet.",
         "emptyDescription": "Create a credential so SDKs can request access packages and manifests."
+      },
+      "mcp": {
+        "title": "MCP",
+        "subtitle": "Allow Model Context Protocol compatible clients to observe and operate this instance according to configured permissions.",
+        "status": "MCP status",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "enable": "Enable MCP",
+        "endpoint": "MCP endpoint",
+        "accessMode": "Access mode",
+        "readOnly": "Read only",
+        "readWrite": "Read and write",
+        "localhostOnly": "Allow localhost only",
+        "requireAuth": "Authentication required",
+        "readTools": "Read tools",
+        "writeTools": "Write tools",
+        "resources": "Resources",
+        "prompts": "Prompts",
+        "lastActivity": "Last activity",
+        "tokenName": "Name",
+        "tokenNamePlaceholder": "default-mcp-client",
+        "createToken": "Create token",
+        "revokeToken": "Revoke token",
+        "tokenCreated": "Token created",
+        "tokenCreatedHint": "Copy this token now. It will not be shown again.",
+        "tokenPrefix": "Prefix",
+        "tokenSecret": "Token",
+        "copyToken": "Copy MCP token",
+        "noTokens": "No MCP tokens have been created yet.",
+        "recentActivity": "Recent activity",
+        "noActivity": "No calls recorded yet.",
+        "loadFailed": "Failed to load MCP configuration.",
+        "saveFailed": "Failed to save MCP configuration.",
+        "createTokenFailed": "Failed to create MCP token.",
+        "revokeTokenFailed": "Failed to revoke MCP token."
       },
       "s3": {
         "title": "S3 Credentials",

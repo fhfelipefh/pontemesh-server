@@ -1,6 +1,6 @@
 use crate::{
-    admin, auth, catalog::Catalog, config::PontemeshHome, mesh, origin, replica, s3_auth, setup,
-    web_assets,
+    admin, auth, catalog::Catalog, config::PontemeshHome, mcp, mesh, origin, replica, s3_auth,
+    setup, web_assets,
 };
 use axum::{
     Json, Router,
@@ -40,6 +40,12 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/auth/me", get(auth::me))
+        .route(
+            "/mcp",
+            post(mcp::transport_http::post_mcp)
+                .get(mcp::transport_http::method_not_allowed)
+                .delete(mcp::transport_http::method_not_allowed),
+        )
         .nest("/pontemesh", pontemesh_routes(state.clone()))
         .merge(admin_routes(state.clone()))
         .route("/api/{*path}", any(setup::routes::api_not_found))
@@ -92,6 +98,20 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         .route("/api/admin/storage/status", get(admin::storage_status))
         .route("/api/admin/audit-events", get(admin::list_audit_events))
         .route("/api/admin/logs/application", get(admin::application_logs))
+        .route(
+            "/api/admin/mcp/settings",
+            get(admin::get_mcp_settings).put(admin::update_mcp_settings),
+        )
+        .route("/api/admin/mcp/status", get(admin::mcp_status))
+        .route(
+            "/api/admin/mcp/tokens",
+            get(admin::list_mcp_tokens).post(admin::create_mcp_token),
+        )
+        .route(
+            "/api/admin/mcp/tokens/{id}",
+            delete(admin::revoke_mcp_token),
+        )
+        .route("/api/admin/mcp/activity", get(admin::mcp_activity))
         .route(
             "/api/admin/metrics/origin-traffic",
             get(admin::origin_traffic_metrics),
@@ -439,7 +459,14 @@ mod tests {
         let dashboard_body = json_body(dashboard).await;
         assert_json_object_keys(
             &dashboard_body,
-            &["health", "instance", "objects", "resources", "storage"],
+            &[
+                "health",
+                "instance",
+                "mcp",
+                "objects",
+                "resources",
+                "storage",
+            ],
         );
         assert_json_object_keys(
             &dashboard_body["instance"],
@@ -461,6 +488,22 @@ mod tests {
             ],
         );
         assert_eq!(dashboard_body["health"]["authenticated"], true);
+        assert_json_object_keys(
+            &dashboard_body["mcp"],
+            &[
+                "activeSessionsCount",
+                "authRequired",
+                "enabled",
+                "endpoint",
+                "lastActivityAt",
+                "promptsEnabled",
+                "readToolsEnabled",
+                "recentCallsCount",
+                "resourcesEnabled",
+                "writeToolsEnabled",
+            ],
+        );
+        assert_eq!(dashboard_body["mcp"]["enabled"], false);
 
         let buckets_before = app
             .clone()
@@ -566,6 +609,232 @@ mod tests {
                 "totalReplicas",
             ],
         );
+    }
+
+    #[tokio::test]
+    async fn mcp_endpoint_is_secure_by_default_and_serves_json_rpc_with_token() {
+        let Some(ctx) = TestContext::new("mcp-json-rpc-contract").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+
+        let disabled = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(disabled.status(), StatusCode::NOT_FOUND);
+
+        let cookie = login_cookie(app.clone()).await;
+        let enable = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/mcp/settings")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"enabled":true,"endpointPath":"/mcp","bindHost":null,"requireAuth":true,"readToolsEnabled":true,"writeToolsEnabled":false,"exposeResources":true,"exposePrompts":true,"allowLocalhostOnly":true}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(enable.status(), StatusCode::OK);
+
+        let no_token = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(no_token.status(), StatusCode::UNAUTHORIZED);
+
+        let invalid_token = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header(header::AUTHORIZATION, "Bearer invalid")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(invalid_token.status(), StatusCode::UNAUTHORIZED);
+
+        let create_token = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/mcp/tokens")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"contract-client"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_token.status(), StatusCode::CREATED);
+        let created_token = json_body(create_token).await;
+        let secret = created_token["secret"].as_str().expect("MCP secret");
+        assert!(secret.starts_with("pmcp_"));
+        assert_eq!(created_token["token"]["tokenPrefix"], &secret[..12]);
+
+        let initialize = mcp_call(
+            app.clone(),
+            secret,
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "contract-test", "version": "0.1.0" }
+            }),
+        )
+        .await;
+        assert_eq!(initialize["result"]["protocolVersion"], "2025-11-25");
+        assert_eq!(
+            initialize["result"]["serverInfo"]["name"],
+            "pontemesh-server"
+        );
+
+        let tools = mcp_call(app.clone(), secret, "tools/list", serde_json::json!({})).await;
+        let tool_names: Vec<&str> = tools["result"]["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert!(tool_names.contains(&"pontemesh_get_health"));
+        assert!(!tool_names.contains(&"pontemesh_create_bucket"));
+
+        let health = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_get_health",
+                "arguments": {}
+            }),
+        )
+        .await;
+        assert_eq!(
+            health["result"]["structuredContent"]["databaseConnected"],
+            true
+        );
+
+        let blocked_write = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_create_bucket",
+                "arguments": { "bucket": "blocked" }
+            }),
+        )
+        .await;
+        assert_eq!(blocked_write["error"]["code"], -32603);
+
+        let resources =
+            mcp_call(app.clone(), secret, "resources/list", serde_json::json!({})).await;
+        assert!(
+            resources["result"]["resources"]
+                .as_array()
+                .expect("resources")
+                .iter()
+                .any(|resource| resource["uri"] == "pontemesh://instance/health")
+        );
+
+        let storage_resource = mcp_call(
+            app.clone(),
+            secret,
+            "resources/read",
+            serde_json::json!({ "uri": "pontemesh://storage/summary" }),
+        )
+        .await;
+        let storage_text = storage_resource["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("resource text");
+        assert!(!storage_text.to_ascii_lowercase().contains("secret"));
+
+        let prompts = mcp_call(app.clone(), secret, "prompts/list", serde_json::json!({})).await;
+        assert!(
+            prompts["result"]["prompts"]
+                .as_array()
+                .expect("prompts")
+                .iter()
+                .any(|prompt| prompt["name"] == "diagnose_instance")
+        );
+
+        let activity = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/mcp/activity")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(activity.status(), StatusCode::OK);
+        let activity_body = json_body(activity).await;
+        assert!(activity_body.as_array().expect("activity").len() >= 4);
+
+        let revoke = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!(
+                        "/api/admin/mcp/tokens/{}",
+                        created_token["token"]["id"].as_str().expect("token id")
+                    ))
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(revoke.status(), StatusCode::NO_CONTENT);
+
+        let revoked = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"jsonrpc":"2.0","id":99,"method":"ping"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(revoked.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -3407,6 +3676,36 @@ mod tests {
         assert!(value["pageSize"].is_number());
         assert!(value["totalItems"].is_number());
         assert!(value["totalPages"].is_number());
+    }
+
+    async fn mcp_call(
+        app: Router,
+        token: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> serde_json::Value {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": method,
+                            "params": params
+                        })
+                        .to_string(),
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_json_content_type(&response);
+        json_body(response).await
     }
 
     fn header_value<K>(response: &axum::response::Response, name: K) -> &str
