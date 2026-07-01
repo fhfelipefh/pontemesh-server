@@ -7,6 +7,7 @@ mod http;
 mod mesh;
 mod origin;
 mod replica;
+mod replica_runtime;
 mod s3_auth;
 mod security;
 mod setup;
@@ -29,10 +30,37 @@ async fn main() -> anyhow::Result<()> {
         internal_secrets.session_secret.len(),
         internal_secrets.token_secret.len(),
     );
-    let catalog = catalog::Catalog::initialize().await?;
-    initialize_s3_bootstrap_key(&paths, &catalog).await?;
     let setup_state = setup::first_run::initialize(&paths)?;
 
+    if setup_state.is_required(&paths) {
+        let catalog = catalog::Catalog::initialize().await?;
+        initialize_s3_bootstrap_key(&paths, &catalog).await?;
+        return run_servers(paths, setup_state, catalog).await;
+    }
+
+    let instance_config = config::load_instance_config(&paths)?;
+    let catalog = catalog::Catalog::initialize().await?;
+
+    match instance_config.instance.role {
+        config::InstanceRole::Origin => {
+            initialize_s3_bootstrap_key(&paths, &catalog).await?;
+            run_servers(paths, setup_state, catalog).await
+        }
+        config::InstanceRole::ReplicaEdge => {
+            let replica_config = config::load_replica_runtime_config(&paths)?;
+            tokio::select! {
+                result = run_servers(paths, setup_state, catalog) => result,
+                result = replica_runtime::run(replica_config) => result,
+            }
+        }
+    }
+}
+
+async fn run_servers(
+    paths: config::PontemeshHome,
+    setup_state: setup::SetupState,
+    catalog: catalog::Catalog,
+) -> anyhow::Result<()> {
     let web_bind_addr = config::load_http_bind_addr(&paths)?;
     let s3_bind_addr = config::default_s3_bind_addr();
     let web_app = http::web_router(paths.clone(), setup_state.clone(), catalog.clone());

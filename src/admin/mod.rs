@@ -954,7 +954,8 @@ async fn upload_object_inner(
         }
     }
 
-    let uploaded_file = uploaded_file.ok_or_else(|| anyhow::anyhow!("upload must include a file"))?;
+    let uploaded_file =
+        uploaded_file.ok_or_else(|| anyhow::anyhow!("upload must include a file"))?;
     let key = requested_key
         .as_deref()
         .map(str::trim)
@@ -1009,7 +1010,8 @@ async fn persist_uploaded_file(
     let mut object_hasher = Sha256::new();
     let mut fragment_hasher = Sha256::new();
     let mut fragments = Vec::new();
-    let fragment_size = usize::try_from(fragment_size_bytes).context("fragment size is too large")?;
+    let fragment_size =
+        usize::try_from(fragment_size_bytes).context("fragment size is too large")?;
     if fragment_size == 0 {
         anyhow::bail!("fragmentSizeBytes must be positive");
     }

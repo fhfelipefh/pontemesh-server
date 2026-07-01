@@ -8,6 +8,8 @@ Na arquitetura proposta, o **Origin** permanece responsável por ingestão, cat�
 
 O plano de dados, por sua vez, pode utilizar fontes auxiliares para distribuir fragmentos de conteúdo quando essa estratégia for segura, autorizada e tecnicamente vantajosa.
 
+O `pontemesh-server` é uma única aplicação. A mesma base de código, o mesmo binário, a mesma imagem Docker e o mesmo painel administrativo operam como **Origin** ou **Replica/Edge** conforme a configuração persistida da instância.
+
 ## Por que este projeto existe
 
 Arquiteturas tradicionais cliente-servidor concentram todo o tráfego no servidor de origem. Essa abordagem simplifica o controle, a segurança e a previsibilidade operacional, mas pode elevar custos de banda, aumentar a carga sobre a infraestrutura central e dificultar a escalabilidade em cenários de múltiplos acessos simultâneos.
@@ -159,6 +161,10 @@ docker compose -p ponte-mesh -f docker/docker-compose.yml up -d --build
 O `docker-compose.yml` sobe o PostgreSQL e passa
 `PONTEMESH_DATABASE_URL=postgres://pontemesh:pontemesh@postgres:5432/pontemesh`
 para o servidor.
+
+A imagem Docker é única: `pontemesh-server`. Ambientes com Origin e uma ou mais
+réplicas devem subir múltiplas instâncias da mesma imagem, cada uma com seu
+próprio `PONTEMESH_HOME`, banco/configuração persistente e parâmetros de rede.
 
 O Docker Compose sobe o projeto `ponte-mesh` com os serviços `server` e
 `postgres`, agrupados como uma única aplicação no Docker Desktop. O PostgreSQL

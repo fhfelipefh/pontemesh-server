@@ -1,6 +1,7 @@
-# Ponte Mesh Server/Replica - Base de conhecimento do repositorio
+# Ponte Mesh Server - Base de conhecimento do repositorio
 
-Este repositorio representa o servidor Origin e o modo Replica/Edge do Ponte Mesh,
+Este repositorio representa a aplicacao unica do Ponte Mesh Server, que pode operar
+como Origin ou Replica/Edge conforme configuracao persistida da instancia,
 baseado na proposta de um framework de alto nivel para distribuicao hibrida de
 conteudo com abstracao de peer-to-peer e fallback por servidor.
 
@@ -82,7 +83,7 @@ Requisitos minimos:
 - `docs/REQUIREMENTS.md`: requisitos funcionais e Não funcionais.
 - `docs/protocol/*.md`: contratos conceituais de manifesto, pacote de acesso,
   fragmentos, fallback, revogacao e selecao de fontes.
-- `docs/operations/*.md`: operacao dos modos Origin, Replica/Edge e Standalone.
+- `docs/operations/*.md`: operacao dos papeis Origin e Replica/Edge.
 - `docs/decisions/*.md`: decisoes arquiteturais.
 
 ## O que evitar

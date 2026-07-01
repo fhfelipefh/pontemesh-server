@@ -19,6 +19,10 @@ export function ConfigurePage() {
   const [adminPassword, setAdminPassword] = useState("");
   const [httpPort, setHttpPort] = useState("8080");
   const [internalStoragePath, setInternalStoragePath] = useState("");
+  const [originBaseUrl, setOriginBaseUrl] = useState("");
+  const [replicaId, setReplicaId] = useState("");
+  const [replicaToken, setReplicaToken] = useState("");
+  const [replicaPublicEndpoint, setReplicaPublicEndpoint] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -41,6 +45,13 @@ export function ConfigurePage() {
       payload.internalStoragePath = internalStoragePath.trim();
     }
 
+    if (role === "replica-edge") {
+      payload.originBaseUrl = originBaseUrl.trim();
+      payload.replicaId = replicaId.trim();
+      payload.replicaToken = replicaToken.trim();
+      payload.replicaPublicEndpoint = replicaPublicEndpoint.trim();
+    }
+
     try {
       setSetupResult(await completeSetup(payload));
     } catch (setupError) {
@@ -50,7 +61,7 @@ export function ConfigurePage() {
     }
   }
 
-  if (setupResult) {
+  if (setupResult?.initialS3AccessKey) {
     return (
       <PageShell
         title={t("setup.configure.s3InitialTitle")}
@@ -80,6 +91,22 @@ export function ConfigurePage() {
           </dl>
           <p>{t("setup.settings.s3.createdHint")}</p>
         </div>
+        <div className="form__footer">
+          <Button type="button" onClick={() => navigate("/login")} icon={<CheckCircle2 size={18} aria-hidden="true" />}>
+            {t("setup.configure.goToLogin")}
+          </Button>
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (setupResult) {
+    return (
+      <PageShell
+        title={t("setup.configure.replicaReadyTitle")}
+        description={t("setup.configure.replicaReadyDescription")}
+        compact
+      >
         <div className="form__footer">
           <Button type="button" onClick={() => navigate("/login")} icon={<CheckCircle2 size={18} aria-hidden="true" />}>
             {t("setup.configure.goToLogin")}
@@ -147,6 +174,47 @@ export function ConfigurePage() {
           onChange={setHttpPort}
           required
         />
+
+        {role === "replica-edge" ? (
+          <section className="storage-summary" aria-labelledby="replica-config-title">
+            <div>
+              <h2 id="replica-config-title">{t("setup.configure.replica.title")}</h2>
+              <p>{t("setup.configure.replica.description")}</p>
+            </div>
+            <TextInput
+              id="originBaseUrl"
+              label={t("setup.configure.replica.originBaseUrl")}
+              value={originBaseUrl}
+              onChange={setOriginBaseUrl}
+              placeholder="https://origin.example.com"
+              required
+            />
+            <TextInput
+              id="replicaPublicEndpoint"
+              label={t("setup.configure.replica.publicEndpoint")}
+              value={replicaPublicEndpoint}
+              onChange={setReplicaPublicEndpoint}
+              placeholder="https://edge.example.com"
+              required
+            />
+            <TextInput
+              id="replicaId"
+              label={t("setup.configure.replica.replicaId")}
+              value={replicaId}
+              onChange={setReplicaId}
+              required
+            />
+            <TextInput
+              id="replicaToken"
+              label={t("setup.configure.replica.replicaToken")}
+              type="password"
+              value={replicaToken}
+              onChange={setReplicaToken}
+              revealable
+              required
+            />
+          </section>
+        ) : null}
 
         <section className="storage-summary" aria-labelledby="storage-summary-title">
           <div>

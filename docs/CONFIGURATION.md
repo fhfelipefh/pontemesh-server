@@ -4,9 +4,11 @@ Este documento descreve a configuração conceitual do `pontemesh-server`.
 
 Este documento serve como referência arquitetural para a configuração do servidor, das réplicas e das políticas operacionais.
 
+O `pontemesh-server` é uma aplicação única. O papel operacional da instância é definido durante o setup ou pelas configurações administrativas. A mesma aplicação pode operar como **Origin** ou **Replica/Edge** de acordo com a configuração persistida.
+
 ## Blocos de configuração
 
-A configuração deve ser organizada conforme o papel executado pelo componente dentro da arquitetura.
+A configuração deve ser organizada conforme o papel operacional persistido para a instância.
 
 Os papéis previstos são:
 
@@ -121,7 +123,7 @@ Regras obrigatórias:
 
 ## Configuração operacional
 
-O papel operacional do processo deve ser explícito.
+O papel operacional da instância deve ser explícito e carregado em runtime.
 
 Valores conceituais possíveis:
 

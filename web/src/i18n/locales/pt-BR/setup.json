@@ -19,6 +19,14 @@
       "role": "Papel da instância",
       "origin": "Origin",
       "replicaEdge": "Replica/Edge",
+      "replica": {
+        "title": "Pareamento com Origin",
+        "description": "Configure como esta instância Replica/Edge se conecta ao Origin.",
+        "originBaseUrl": "Endereço do Origin",
+        "publicEndpoint": "Endereço anunciado da Replica/Edge",
+        "replicaId": "ID da réplica",
+        "replicaToken": "Credencial de pareamento"
+      },
       "adminUsername": "Usuário administrador inicial",
       "adminPassword": "Senha do administrador inicial",
       "httpPort": "Porta HTTP",
@@ -35,6 +43,8 @@
       "finish": "Finalizar configuração",
       "finishing": "Finalizando...",
       "setupFailed": "Falha ao concluir a configuração.",
+      "replicaReadyTitle": "Replica/Edge configurada",
+      "replicaReadyDescription": "Esta instância do Ponte Mesh vai operar com o papel Replica/Edge usando a configuração de pareamento persistida.",
       "s3InitialTitle": "Chave S3",
       "s3InitialDescription": "Use esta chave com clientes S3-compatible após entrar no painel.",
       "s3InitialWarning": "Copie sua chave S3 agora. Esse segredo não será exibido novamente.",

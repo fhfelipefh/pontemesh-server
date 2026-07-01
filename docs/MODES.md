@@ -2,6 +2,8 @@
 
 Este documento descreve os papéis operacionais previstos para o `pontemesh-server`.
 
+O `pontemesh-server` é um único servidor, binário, painel administrativo e imagem Docker. O papel da instância é uma configuração de runtime persistida no setup ou nas configurações administrativas.
+
 A arquitetura considera dois papéis principais:
 
 * **Origin**;

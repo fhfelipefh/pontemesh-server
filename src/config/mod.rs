@@ -118,6 +118,7 @@ pub struct InstanceConfig {
     pub instance: InstanceSection,
     pub http: HttpSection,
     pub storage: StorageSection,
+    pub replica: Option<ReplicaSection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,7 +127,7 @@ pub struct InstanceSection {
     pub role: InstanceRole,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum InstanceRole {
     Origin,
@@ -147,6 +148,27 @@ pub struct StorageSection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalStorageSection {
     pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplicaSection {
+    pub origin_base_url: String,
+    pub replica_id: String,
+    pub replica_token: String,
+    pub public_endpoint: String,
+    pub sync_interval_seconds: Option<u64>,
+    pub health_interval_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplicaRuntimeConfig {
+    pub origin_base_url: String,
+    pub replica_id: String,
+    pub replica_token: String,
+    pub public_endpoint: String,
+    pub sync_interval_seconds: u64,
+    pub health_interval_seconds: u64,
+    pub storage_path: PathBuf,
 }
 
 pub fn load_http_bind_addr(paths: &PontemeshHome) -> anyhow::Result<SocketAddr> {
@@ -200,6 +222,39 @@ pub fn load_instance_config(paths: &PontemeshHome) -> anyhow::Result<InstanceCon
     toml::from_str(&raw_config).context("failed to parse Ponte Mesh config.toml")
 }
 
+pub fn configured_instance_role(paths: &PontemeshHome) -> anyhow::Result<Option<InstanceRole>> {
+    if !paths.setup_lock_file().exists() || !paths.config_file().exists() {
+        return Ok(None);
+    }
+
+    Ok(Some(load_instance_config(paths)?.instance.role))
+}
+
+pub fn require_instance_role(paths: &PontemeshHome, expected: InstanceRole) -> anyhow::Result<()> {
+    let Some(role) = configured_instance_role(paths)? else {
+        bail!("initial setup must be completed before this operation");
+    };
+
+    if role != expected {
+        bail!(
+            "operation requires instance role {}; current role is {}",
+            expected.as_config_value(),
+            role.as_config_value()
+        );
+    }
+
+    Ok(())
+}
+
+impl InstanceRole {
+    pub fn as_config_value(self) -> &'static str {
+        match self {
+            InstanceRole::Origin => "origin",
+            InstanceRole::ReplicaEdge => "replica-edge",
+        }
+    }
+}
+
 pub fn configured_storage_dir(paths: &PontemeshHome) -> anyhow::Result<PathBuf> {
     if let Some(path) = paths.storage_dir_from_env()? {
         return Ok(path);
@@ -212,6 +267,30 @@ pub fn configured_storage_dir(paths: &PontemeshHome) -> anyhow::Result<PathBuf> 
     Ok(paths.storage_dir())
 }
 
+pub fn load_replica_runtime_config(paths: &PontemeshHome) -> anyhow::Result<ReplicaRuntimeConfig> {
+    let config = load_instance_config(paths)?;
+    if !matches!(config.instance.role, InstanceRole::ReplicaEdge) {
+        bail!("replica runtime requires instance.role = replica-edge");
+    }
+    let replica = config
+        .replica
+        .ok_or_else(|| anyhow::anyhow!("replica-edge config requires [replica] section"))?;
+    let storage_path = configured_storage_dir(paths)?;
+    validate_url(&replica.origin_base_url, "replica.origin_base_url")?;
+    validate_url(&replica.public_endpoint, "replica.public_endpoint")?;
+    validate_non_empty(&replica.replica_id, "replica.replica_id")?;
+    validate_non_empty(&replica.replica_token, "replica.replica_token")?;
+    Ok(ReplicaRuntimeConfig {
+        origin_base_url: replica.origin_base_url.trim_end_matches('/').to_owned(),
+        replica_id: replica.replica_id,
+        replica_token: replica.replica_token,
+        public_endpoint: replica.public_endpoint.trim_end_matches('/').to_owned(),
+        sync_interval_seconds: replica.sync_interval_seconds.unwrap_or(30).max(5),
+        health_interval_seconds: replica.health_interval_seconds.unwrap_or(30).max(5),
+        storage_path,
+    })
+}
+
 pub fn database_url_from_env() -> anyhow::Result<String> {
     let url = env::var(PONTEMESH_DATABASE_URL_ENV)
         .with_context(|| format!("{PONTEMESH_DATABASE_URL_ENV} must be set to a PostgreSQL URL"))?;
@@ -222,4 +301,111 @@ pub fn database_url_from_env() -> anyhow::Result<String> {
         bail!("{PONTEMESH_DATABASE_URL_ENV} must use postgres:// or postgresql://");
     }
     Ok(url)
+}
+
+fn validate_non_empty(value: &str, field: &str) -> anyhow::Result<()> {
+    if value.trim().is_empty() {
+        bail!("{field} cannot be empty");
+    }
+    Ok(())
+}
+
+fn validate_url(value: &str, field: &str) -> anyhow::Result<()> {
+    validate_non_empty(value, field)?;
+    if !value.starts_with("http://") && !value.starts_with("https://") {
+        bail!("{field} must be an HTTP or HTTPS URL");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn loads_replica_runtime_config() {
+        let home = test_home("replica-config");
+        home.ensure_layout().expect("layout");
+        fs::write(
+            home.setup_lock_file(),
+            "completed_at = \"2026-06-30T00:00:00Z\"\n",
+        )
+        .expect("setup lock");
+        fs::write(
+            home.config_file(),
+            r#"
+[instance]
+name = "edge"
+role = "replica-edge"
+
+[http]
+bind = "127.0.0.1"
+port = 8080
+
+[storage.local]
+path = "/tmp/pontemesh-edge-storage"
+
+[replica]
+origin_base_url = "https://origin.example.com/"
+replica_id = "replica-1"
+replica_token = "replica-token"
+public_endpoint = "https://edge.example.com/"
+sync_interval_seconds = 1
+health_interval_seconds = 2
+"#,
+        )
+        .expect("config");
+
+        let config = load_replica_runtime_config(&home).expect("replica config");
+        assert_eq!(config.origin_base_url, "https://origin.example.com");
+        assert_eq!(config.public_endpoint, "https://edge.example.com");
+        assert_eq!(config.sync_interval_seconds, 5);
+        assert_eq!(config.health_interval_seconds, 5);
+    }
+
+    #[test]
+    fn replica_runtime_config_requires_replica_section() {
+        let home = test_home("replica-config-missing");
+        home.ensure_layout().expect("layout");
+        fs::write(
+            home.config_file(),
+            r#"
+[instance]
+name = "edge"
+role = "replica-edge"
+
+[http]
+bind = "127.0.0.1"
+port = 8080
+
+[storage.local]
+path = "/tmp/pontemesh-edge-storage"
+"#,
+        )
+        .expect("config");
+
+        let error = load_replica_runtime_config(&home).expect_err("missing replica section");
+        assert!(error.to_string().contains("[replica]"));
+    }
+
+    #[test]
+    fn cargo_features_do_not_select_instance_role() {
+        let cargo_toml = include_str!("../../Cargo.toml");
+        assert!(!cargo_toml.contains("origin = []"));
+        assert!(!cargo_toml.contains("replica = []"));
+        assert!(!cargo_toml.contains("replication = []"));
+        for role in ["origin", "replica", "replication"] {
+            assert!(!cargo_toml.contains(&format!("--features {role}")));
+        }
+    }
+
+    fn test_home(name: &str) -> PontemeshHome {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos();
+        PontemeshHome::from_path(std::env::temp_dir().join(format!("pontemesh-{name}-{nanos}")))
+            .expect("test home")
+    }
 }

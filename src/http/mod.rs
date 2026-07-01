@@ -3,9 +3,11 @@ use crate::{
     web_assets,
 };
 use axum::{
-    extract::DefaultBodyLimit,
+    Json, Router,
+    extract::{DefaultBodyLimit, Request, State},
     handler::Handler,
-    Router, middleware,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{any, delete, get, post, put},
 };
 use std::time::Instant;
@@ -69,6 +71,10 @@ pub fn s3_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catalo
             state.clone(),
             s3_auth::require_s3_signature,
         ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_origin_instance,
+        ))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
 }
@@ -104,6 +110,15 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             "/api/admin/metrics/replicas/{replica_id}",
             get(admin::replica_detail_metrics),
         )
+        .merge(origin_admin_routes(state.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            auth::require_admin_session,
+        ))
+}
+
+fn origin_admin_routes(state: AppState) -> Router<AppState> {
+    Router::new()
         .route(
             "/api/admin/buckets",
             get(admin::list_buckets).post(admin::create_bucket),
@@ -118,9 +133,7 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         )
         .route(
             "/api/admin/buckets/{bucket_name}/objects",
-            get(admin::list_objects).post(
-                admin::upload_object.layer(DefaultBodyLimit::disable()),
-            ),
+            get(admin::list_objects).post(admin::upload_object.layer(DefaultBodyLimit::disable())),
         )
         .route(
             "/api/admin/buckets/{bucket_name}/objects/{*object_key}",
@@ -168,7 +181,7 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         )
         .route_layer(middleware::from_fn_with_state(
             state,
-            auth::require_admin_session,
+            require_origin_instance,
         ))
 }
 
@@ -233,6 +246,25 @@ fn pontemesh_routes(state: AppState) -> Router<AppState> {
         .merge(package_routes)
         .merge(application_routes)
         .merge(replica_routes)
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            require_origin_instance,
+        ))
+}
+
+async fn require_origin_instance(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    match crate::config::require_instance_role(&state.paths, crate::config::InstanceRole::Origin) {
+        Ok(()) => next.run(request).await,
+        Err(error) => (
+            axum::http::StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -1111,6 +1143,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replica_edge_instance_blocks_origin_exclusive_admin_routes_at_runtime() {
+        let Some(ctx) =
+            TestContext::new_with_role("replica-edge-runtime-role", InstanceRole::ReplicaEdge)
+                .await
+        else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let admin_cookie = login_cookie(app.clone()).await;
+
+        let create_bucket = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/buckets")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"name":"replica-must-not-create-origin-bucket"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_bucket.status(), StatusCode::CONFLICT);
+        assert!(
+            response_text(create_bucket)
+                .await
+                .contains("operation requires instance role origin")
+        );
+    }
+
+    #[tokio::test]
     async fn postgres_origin_catalog_policy_metrics_revocation_and_replica_flow() {
         let Some(ctx) = TestContext::new("postgres-origin-flow").await else {
             return;
@@ -1366,10 +1432,16 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(sync_plan.status(), StatusCode::OK);
-        assert!(
-            response_text(sync_plan)
-                .await
-                .contains(r#""key":"folder/hello.txt""#)
+        let sync_plan_body: serde_json::Value =
+            serde_json::from_str(&response_text(sync_plan).await).expect("sync plan JSON");
+        assert_eq!(sync_plan_body["objects"][0]["key"], "folder/hello.txt");
+        assert_eq!(
+            sync_plan_body["objects"][0]["manifestId"].as_str(),
+            Some(manifest_id.as_str())
+        );
+        assert_eq!(
+            sync_plan_body["objects"][0]["fragments"][0]["fragmentId"].as_str(),
+            manifest_body["fragments"][0]["fragmentId"].as_str()
         );
 
         let announce_availability = app
@@ -1974,6 +2046,10 @@ mod tests {
 
     impl TestContext {
         async fn new(name: &str) -> Option<Self> {
+            Self::new_with_role(name, InstanceRole::Origin).await
+        }
+
+        async fn new_with_role(name: &str, role: InstanceRole) -> Option<Self> {
             let database_url = match std::env::var("TEST_DATABASE_URL") {
                 Ok(value) => value,
                 Err(_) => {
@@ -1985,7 +2061,7 @@ mod tests {
             reset_database(&database_url).await;
             let paths = test_home(name);
             paths.ensure_layout().expect("test home layout");
-            write_test_config(&paths);
+            write_test_config(&paths, role);
             fs::write(paths.setup_lock_file(), "completed_at = \"test\"\n").expect("setup lock");
             let catalog = Catalog::initialize_with_url(&database_url)
                 .await
@@ -2304,11 +2380,11 @@ mod tests {
         PontemeshHome::from_path(root).expect("test home")
     }
 
-    fn write_test_config(paths: &PontemeshHome) {
+    fn write_test_config(paths: &PontemeshHome, role: InstanceRole) {
         let config = InstanceConfig {
             instance: InstanceSection {
                 name: "Test Origin".to_owned(),
-                role: InstanceRole::Origin,
+                role,
             },
             http: HttpSection {
                 bind: "127.0.0.1".to_owned(),
@@ -2319,6 +2395,14 @@ mod tests {
                     path: paths.storage_dir(),
                 },
             },
+            replica: (role == InstanceRole::ReplicaEdge).then(|| crate::config::ReplicaSection {
+                origin_base_url: "https://origin.example.com".to_owned(),
+                replica_id: "replica-test".to_owned(),
+                replica_token: "replica-token".to_owned(),
+                public_endpoint: "https://edge.example.com".to_owned(),
+                sync_interval_seconds: Some(30),
+                health_interval_seconds: Some(30),
+            }),
         };
         let raw_config = toml::to_string(&config).expect("serialize config");
         fs::write(paths.config_file(), raw_config).expect("write config");

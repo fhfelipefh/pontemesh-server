@@ -2,7 +2,7 @@ use crate::{
     audit,
     config::{
         HttpSection, InstanceConfig, InstanceRole, InstanceSection, LocalStorageSection,
-        StorageSection,
+        ReplicaSection, StorageSection,
     },
     http::AppState,
     security::{
@@ -55,6 +55,12 @@ pub struct CompleteSetupRequest {
     http_port: Option<u16>,
     #[serde(alias = "storageLocalPath")]
     internal_storage_path: Option<String>,
+    origin_base_url: Option<String>,
+    replica_id: Option<String>,
+    replica_token: Option<String>,
+    replica_public_endpoint: Option<String>,
+    sync_interval_seconds: Option<u64>,
+    health_interval_seconds: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -148,7 +154,7 @@ pub async fn complete(State(state): State<AppState>, headers: HeaderMap, body: B
 async fn complete_setup(
     state: &AppState,
     payload: CompleteSetupRequest,
-) -> anyhow::Result<crate::catalog::CreatedS3AccessKey> {
+) -> anyhow::Result<Option<crate::catalog::CreatedS3AccessKey>> {
     let instance_name = non_empty(payload.instance_name, "instanceName")?;
     let admin_username = non_empty(payload.admin_username, "adminUsername")?;
     let admin_password = non_empty(payload.admin_password, "adminPassword")?;
@@ -166,35 +172,57 @@ async fn complete_setup(
     let storage_path = resolve_setup_storage_path(state, payload.internal_storage_path)?;
     validate_storage_path(&storage_path)?;
 
+    let replica = match role {
+        InstanceRole::Origin => None,
+        InstanceRole::ReplicaEdge => Some(ReplicaSection {
+            origin_base_url: http_url(payload.origin_base_url, "originBaseUrl")?
+                .trim_end_matches('/')
+                .to_owned(),
+            replica_id: non_empty_option(payload.replica_id, "replicaId")?,
+            replica_token: non_empty_option(payload.replica_token, "replicaToken")?,
+            public_endpoint: http_url(payload.replica_public_endpoint, "replicaPublicEndpoint")?
+                .trim_end_matches('/')
+                .to_owned(),
+            sync_interval_seconds: payload.sync_interval_seconds,
+            health_interval_seconds: payload.health_interval_seconds,
+        }),
+    };
+
     let password_hash = hash_admin_password(&admin_password)?;
     let admin_user_id = state
         .catalog
         .create_initial_admin_user(&admin_username, &password_hash)
         .await?;
-    let secret_encryption_key = s3_secret_encryption_key(&state.paths)?;
-    let created_s3_key = state
-        .catalog
-        .create_s3_access_key(
-            &admin_user_id,
-            Some("default-admin-key"),
-            &secret_encryption_key,
-        )
-        .await?;
-    audit::event(
-        "s3_access_key_created",
-        Some(&admin_username),
-        "success",
-        &format!("access_key_id={}", created_s3_key.access_key_id),
-    );
-    state
-        .catalog
-        .record_audit_event(
+
+    let created_s3_key = if matches!(role, InstanceRole::Origin) {
+        let secret_encryption_key = s3_secret_encryption_key(&state.paths)?;
+        let created_s3_key = state
+            .catalog
+            .create_s3_access_key(
+                &admin_user_id,
+                Some("default-admin-key"),
+                &secret_encryption_key,
+            )
+            .await?;
+        audit::event(
             "s3_access_key_created",
             Some(&admin_username),
             "success",
             &format!("access_key_id={}", created_s3_key.access_key_id),
-        )
-        .await?;
+        );
+        state
+            .catalog
+            .record_audit_event(
+                "s3_access_key_created",
+                Some(&admin_username),
+                "success",
+                &format!("access_key_id={}", created_s3_key.access_key_id),
+            )
+            .await?;
+        Some(created_s3_key)
+    } else {
+        None
+    };
 
     let config = InstanceConfig {
         instance: InstanceSection {
@@ -208,6 +236,7 @@ async fn complete_setup(
         storage: StorageSection {
             local: LocalStorageSection { path: storage_path },
         },
+        replica,
     };
 
     let config_toml = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;
@@ -319,6 +348,21 @@ fn non_empty(value: String, field: &str) -> anyhow::Result<String> {
         bail!("{field} cannot be empty");
     }
     Ok(trimmed.to_owned())
+}
+
+fn non_empty_option(value: Option<String>, field: &str) -> anyhow::Result<String> {
+    non_empty(
+        value.ok_or_else(|| anyhow::anyhow!("{field} is required for replica-edge setup"))?,
+        field,
+    )
+}
+
+fn http_url(value: Option<String>, field: &str) -> anyhow::Result<String> {
+    let url = non_empty_option(value, field)?;
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        bail!("{field} must be an HTTP or HTTPS URL");
+    }
+    Ok(url)
 }
 
 fn read_setup_session(headers: &HeaderMap) -> Option<String> {

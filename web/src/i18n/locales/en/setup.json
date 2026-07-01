@@ -19,6 +19,14 @@
       "role": "Instance role",
       "origin": "Origin",
       "replicaEdge": "Replica/Edge",
+      "replica": {
+        "title": "Origin pairing",
+        "description": "Configure how this Replica/Edge instance connects to its Origin.",
+        "originBaseUrl": "Origin address",
+        "publicEndpoint": "Advertised Replica/Edge address",
+        "replicaId": "Replica ID",
+        "replicaToken": "Pairing credential"
+      },
       "adminUsername": "Initial admin username",
       "adminPassword": "Initial admin password",
       "httpPort": "HTTP port",
@@ -35,6 +43,8 @@
       "finish": "Finish setup",
       "finishing": "Finishing...",
       "setupFailed": "Setup failed.",
+      "replicaReadyTitle": "Replica/Edge configured",
+      "replicaReadyDescription": "This Ponte Mesh instance will operate with the Replica/Edge role using the persisted pairing configuration.",
       "s3InitialTitle": "Initial S3 access key",
       "s3InitialDescription": "Use this key with S3-compatible clients after login.",
       "s3InitialWarning": "Copy your initial S3 key now. The secret will not be shown again.",

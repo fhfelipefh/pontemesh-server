@@ -263,10 +263,23 @@ pub struct CreatedReplicaCredential {
 pub struct ReplicaSyncObject {
     pub bucket: String,
     pub key: String,
+    pub manifest_id: String,
     pub size_bytes: i64,
     pub content_type: String,
     pub sha256: String,
     pub state: String,
+    pub fragments: Vec<ReplicaSyncFragment>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaSyncFragment {
+    pub index: i64,
+    pub fragment_id: String,
+    pub byte_range_start: i64,
+    pub byte_range_end: i64,
+    pub size_bytes: i64,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1966,17 +1979,22 @@ impl Catalog {
         }
         let rows = query(
             r#"
-            SELECT b.name, o.object_key, v.size_bytes, v.content_type, v.object_hash, o.state
+            SELECT b.name, o.object_key, v.size_bytes, v.content_type, v.object_hash, o.state,
+                   m.id::text AS manifest_id,
+                   f.fragment_index, f.byte_range_start, f.byte_range_end,
+                   f.size_bytes AS fragment_size_bytes, f.fragment_hash
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.id = o.current_version_id
+            JOIN object_manifests m ON m.object_version_id = v.id
+            JOIN object_manifest_fragments f ON f.manifest_id = m.id
             JOIN bucket_policies p ON p.bucket_id = b.id
             WHERE b.name = ANY($1)
               AND b.deleted_at IS NULL
               AND o.deleted_at IS NULL
               AND o.state = 'AVAILABLE'
               AND p.allow_replica_edge = TRUE
-            ORDER BY v.created_at DESC, o.object_key ASC
+            ORDER BY v.created_at DESC, o.object_key ASC, f.fragment_index ASC
             "#,
         )
         .bind(allowed_buckets)
@@ -1984,17 +2002,41 @@ impl Catalog {
         .await
         .context("failed to list replica sync objects")?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| ReplicaSyncObject {
-                bucket: row.get("name"),
-                key: row.get("object_key"),
-                size_bytes: row.get("size_bytes"),
-                content_type: row.get("content_type"),
-                sha256: row.get("object_hash"),
-                state: row.get("state"),
-            })
-            .collect())
+        let mut objects = Vec::<ReplicaSyncObject>::new();
+        for row in rows {
+            let manifest_id: String = row.get("manifest_id");
+            let object = match objects
+                .iter_mut()
+                .find(|object| object.manifest_id == manifest_id)
+            {
+                Some(object) => object,
+                None => {
+                    objects.push(ReplicaSyncObject {
+                        bucket: row.get("name"),
+                        key: row.get("object_key"),
+                        manifest_id: manifest_id.clone(),
+                        size_bytes: row.get("size_bytes"),
+                        content_type: row.get("content_type"),
+                        sha256: row.get("object_hash"),
+                        state: row.get("state"),
+                        fragments: Vec::new(),
+                    });
+                    objects.last_mut().expect("object was just pushed")
+                }
+            };
+            let index = row.get("fragment_index");
+            let sha256 = row.get("fragment_hash");
+            object.fragments.push(ReplicaSyncFragment {
+                index,
+                fragment_id: format!("{manifest_id}:{index}:{sha256}"),
+                byte_range_start: row.get("byte_range_start"),
+                byte_range_end: row.get("byte_range_end"),
+                size_bytes: row.get("fragment_size_bytes"),
+                sha256,
+            });
+        }
+
+        Ok(objects)
     }
 
     pub async fn record_replica_object_availability(

@@ -9,6 +9,10 @@ export type CompleteSetupRequest = {
   adminPassword: string;
   httpPort: number;
   internalStoragePath?: string;
+  originBaseUrl?: string;
+  replicaId?: string;
+  replicaToken?: string;
+  replicaPublicEndpoint?: string;
 };
 
 export type SetupStatusResponse = {
@@ -25,7 +29,7 @@ export type InitialS3AccessKey = {
 
 export type CompleteSetupResponse = {
   ready: boolean;
-  initialS3AccessKey: InitialS3AccessKey;
+  initialS3AccessKey: InitialS3AccessKey | null;
 };
 
 export async function getSetupStatus(): Promise<SetupStatusResponse> {

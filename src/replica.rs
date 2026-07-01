@@ -14,6 +14,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -385,16 +386,28 @@ async fn sync_fragment_inner(
             fragment_id,
         )
         .await?;
-    let bytes = fs::read(&fragment.object.storage_path)
-        .map_err(|_| anyhow::anyhow!("object data is unavailable"))?;
-    let start = usize::try_from(fragment.byte_range_start)
-        .map_err(|_| anyhow::anyhow!("fragment range start is too large"))?;
-    let end = usize::try_from(fragment.byte_range_end)
-        .map_err(|_| anyhow::anyhow!("fragment range end is too large"))?;
-    if end >= bytes.len() || start > end {
+    if fragment.byte_range_start < 0
+        || fragment.byte_range_end < 0
+        || fragment.byte_range_start > fragment.byte_range_end
+        || fragment.byte_range_end >= fragment.object.size_bytes
+    {
         bail!("fragment range is invalid for object data");
     }
-    let body = bytes[start..=end].to_vec();
+    let fragment_size = fragment.byte_range_end - fragment.byte_range_start + 1;
+    let mut file = tokio::fs::File::open(&fragment.object.storage_path)
+        .await
+        .map_err(|_| anyhow::anyhow!("object data is unavailable"))?;
+    file.seek(std::io::SeekFrom::Start(
+        u64::try_from(fragment.byte_range_start)
+            .map_err(|_| anyhow::anyhow!("fragment range start is invalid"))?,
+    ))
+    .await?;
+    let mut body = vec![
+        0;
+        usize::try_from(fragment_size)
+            .map_err(|_| anyhow::anyhow!("fragment size is too large"))?
+    ];
+    file.read_exact(&mut body).await?;
     let range = ResolvedRange {
         start: u64::try_from(fragment.byte_range_start)
             .map_err(|_| anyhow::anyhow!("fragment range start is invalid"))?,
