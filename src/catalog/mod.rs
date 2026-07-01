@@ -165,6 +165,24 @@ pub struct ObjectManifestFragment {
     pub priority: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct MultipartUploadRecord {
+    pub upload_id: String,
+    pub bucket_name: String,
+    pub object_key: String,
+    pub content_type: String,
+    pub initiated_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MultipartPartRecord {
+    pub part_number: i32,
+    pub etag: String,
+    pub size_bytes: i64,
+    pub storage_path: String,
+    pub uploaded_at: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationCredentialSummary {
@@ -1372,6 +1390,226 @@ impl Catalog {
                 })
                 .collect(),
         }))
+    }
+
+    pub async fn create_multipart_upload(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        content_type: &str,
+        initiated_by: &str,
+    ) -> anyhow::Result<MultipartUploadRecord> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        if content_type.trim().is_empty() {
+            bail!("content type cannot be empty");
+        }
+        let row = query(
+            r#"
+            INSERT INTO s3_multipart_uploads (bucket_id, object_key, content_type, initiated_by)
+            SELECT id, $2, $3, $4
+            FROM buckets
+            WHERE name = $1 AND deleted_at IS NULL
+            RETURNING id::text AS upload_id, $1::text AS bucket_name, object_key,
+                content_type, initiated_at
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .bind(content_type)
+        .bind(initiated_by)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to create multipart upload")?;
+        let Some(row) = row else {
+            bail!("bucket not found: {bucket_name}");
+        };
+        Ok(multipart_upload_from_row(row))
+    }
+
+    pub async fn get_active_multipart_upload(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+    ) -> anyhow::Result<Option<MultipartUploadRecord>> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let row = query(
+            r#"
+            SELECT u.id::text AS upload_id, b.name AS bucket_name, u.object_key,
+                u.content_type, u.initiated_at
+            FROM s3_multipart_uploads u
+            JOIN buckets b ON b.id = u.bucket_id
+            WHERE u.id = $1::uuid
+              AND b.name = $2
+              AND u.object_key = $3
+              AND b.deleted_at IS NULL
+              AND u.completed_at IS NULL
+              AND u.aborted_at IS NULL
+            "#,
+        )
+        .bind(upload_id)
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load multipart upload")?;
+        Ok(row.map(multipart_upload_from_row))
+    }
+
+    pub async fn list_active_multipart_uploads(
+        &self,
+        bucket_name: &str,
+    ) -> anyhow::Result<Vec<MultipartUploadRecord>> {
+        validate_bucket_name(bucket_name)?;
+        let rows = query(
+            r#"
+            SELECT u.id::text AS upload_id, b.name AS bucket_name, u.object_key,
+                u.content_type, u.initiated_at
+            FROM s3_multipart_uploads u
+            JOIN buckets b ON b.id = u.bucket_id
+            WHERE b.name = $1
+              AND b.deleted_at IS NULL
+              AND u.completed_at IS NULL
+              AND u.aborted_at IS NULL
+            ORDER BY u.initiated_at DESC, u.object_key ASC
+            "#,
+        )
+        .bind(bucket_name)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list multipart uploads")?;
+        Ok(rows.into_iter().map(multipart_upload_from_row).collect())
+    }
+
+    pub async fn record_multipart_part(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+        part: MultipartPartRecord,
+    ) -> anyhow::Result<MultipartPartRecord> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        if !(1..=10_000).contains(&part.part_number) {
+            bail!("partNumber must be between 1 and 10000");
+        }
+        if part.size_bytes < 0 {
+            bail!("multipart part size cannot be negative");
+        }
+        let row = query(
+            r#"
+            WITH target AS (
+                SELECT u.id
+                FROM s3_multipart_uploads u
+                JOIN buckets b ON b.id = u.bucket_id
+                WHERE u.id = $1::uuid
+                  AND b.name = $2
+                  AND u.object_key = $3
+                  AND b.deleted_at IS NULL
+                  AND u.completed_at IS NULL
+                  AND u.aborted_at IS NULL
+            )
+            INSERT INTO s3_multipart_upload_parts (
+                upload_id, part_number, etag, size_bytes, storage_path
+            )
+            SELECT id, $4, $5, $6, $7
+            FROM target
+            ON CONFLICT (upload_id, part_number) DO UPDATE
+            SET etag = EXCLUDED.etag,
+                size_bytes = EXCLUDED.size_bytes,
+                storage_path = EXCLUDED.storage_path,
+                uploaded_at = now()
+            RETURNING part_number, etag, size_bytes, storage_path, uploaded_at
+            "#,
+        )
+        .bind(upload_id)
+        .bind(bucket_name)
+        .bind(object_key)
+        .bind(part.part_number)
+        .bind(&part.etag)
+        .bind(part.size_bytes)
+        .bind(&part.storage_path)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to record multipart part")?;
+        let Some(row) = row else {
+            bail!("multipart upload not found or no longer active");
+        };
+        Ok(multipart_part_from_row(row))
+    }
+
+    pub async fn list_multipart_parts(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        upload_id: &str,
+    ) -> anyhow::Result<Vec<MultipartPartRecord>> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let rows = query(
+            r#"
+            SELECT p.part_number, p.etag, p.size_bytes, p.storage_path, p.uploaded_at
+            FROM s3_multipart_upload_parts p
+            JOIN s3_multipart_uploads u ON u.id = p.upload_id
+            JOIN buckets b ON b.id = u.bucket_id
+            WHERE u.id = $1::uuid
+              AND b.name = $2
+              AND u.object_key = $3
+              AND b.deleted_at IS NULL
+              AND u.completed_at IS NULL
+              AND u.aborted_at IS NULL
+            ORDER BY p.part_number ASC
+            "#,
+        )
+        .bind(upload_id)
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list multipart parts")?;
+        Ok(rows.into_iter().map(multipart_part_from_row).collect())
+    }
+
+    pub async fn complete_multipart_upload(&self, upload_id: &str) -> anyhow::Result<()> {
+        let result = query(
+            r#"
+            UPDATE s3_multipart_uploads
+            SET completed_at = now()
+            WHERE id = $1::uuid
+              AND completed_at IS NULL
+              AND aborted_at IS NULL
+            "#,
+        )
+        .bind(upload_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to complete multipart upload")?;
+        if result.rows_affected() == 0 {
+            bail!("multipart upload not found or no longer active");
+        }
+        Ok(())
+    }
+
+    pub async fn abort_multipart_upload(&self, upload_id: &str) -> anyhow::Result<()> {
+        let result = query(
+            r#"
+            UPDATE s3_multipart_uploads
+            SET aborted_at = now()
+            WHERE id = $1::uuid
+              AND completed_at IS NULL
+              AND aborted_at IS NULL
+            "#,
+        )
+        .bind(upload_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to abort multipart upload")?;
+        if result.rows_affected() == 0 {
+            bail!("multipart upload not found or no longer active");
+        }
+        Ok(())
     }
 
     pub async fn delete_object(&self, bucket_name: &str, object_key: &str) -> anyhow::Result<()> {
@@ -3401,6 +3639,26 @@ fn object_record_from_row(row: PgRow) -> ObjectRecord {
         storage_path: row.get("storage_path"),
         created_at: format_datetime(row.get("created_at")),
         state: row.get("state"),
+    }
+}
+
+fn multipart_upload_from_row(row: PgRow) -> MultipartUploadRecord {
+    MultipartUploadRecord {
+        upload_id: row.get("upload_id"),
+        bucket_name: row.get("bucket_name"),
+        object_key: row.get("object_key"),
+        content_type: row.get("content_type"),
+        initiated_at: format_datetime(row.get("initiated_at")),
+    }
+}
+
+fn multipart_part_from_row(row: PgRow) -> MultipartPartRecord {
+    MultipartPartRecord {
+        part_number: row.get("part_number"),
+        etag: row.get("etag"),
+        size_bytes: row.get("size_bytes"),
+        storage_path: row.get("storage_path"),
+        uploaded_at: format_datetime(row.get("uploaded_at")),
     }
 }
 

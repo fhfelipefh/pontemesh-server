@@ -63,6 +63,7 @@ pub fn s3_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catalo
         .route(
             "/{bucket_name}/{*object_key}",
             put(origin::put_object)
+                .post(origin::post_object)
                 .head(origin::head_object)
                 .get(origin::get_object)
                 .delete(origin::delete_object),
@@ -1120,6 +1121,324 @@ mod tests {
             response_bytes(get_recreated).await,
             recreated_body.as_slice()
         );
+    }
+
+    #[tokio::test]
+    async fn s3_multipart_upload_lifecycle_persists_completed_object_and_cleans_abort() {
+        let Some(ctx) = TestContext::new("s3-multipart-lifecycle").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let s3_app = ctx.s3_app.clone();
+
+        let create_bucket = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/multipart-bucket")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid create bucket request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_bucket.status(), StatusCode::OK);
+
+        let initiate = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/multipart-bucket/large.bin?uploads")
+                        .header(header::CONTENT_TYPE, "application/octet-stream")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid initiate request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(initiate.status(), StatusCode::OK);
+        let initiate_body = response_text(initiate).await;
+        assert!(initiate_body.contains("<InitiateMultipartUploadResult"));
+        let upload_id = xml_value(&initiate_body, "UploadId");
+        assert!(!upload_id.is_empty());
+
+        let list_uploads = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/multipart-bucket?uploads")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid list multipart uploads request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list_uploads.status(), StatusCode::OK);
+        let list_uploads_body = response_text(list_uploads).await;
+        assert!(list_uploads_body.contains("<ListMultipartUploadsResult"));
+        assert!(list_uploads_body.contains("<Key>large.bin</Key>"));
+        assert!(list_uploads_body.contains(&format!("<UploadId>{upload_id}</UploadId>")));
+
+        let part_two = b"-part-two";
+        let upload_part_two = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri(format!(
+                            "/multipart-bucket/large.bin?partNumber=2&uploadId={upload_id}"
+                        ))
+                        .body(Body::from(part_two.as_slice())),
+                    part_two,
+                )
+                .expect("valid upload part 2 request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(upload_part_two.status(), StatusCode::OK);
+        let part_two_etag = header_value(&upload_part_two, "ETag")
+            .trim_matches('"')
+            .to_owned();
+        assert_eq!(part_two_etag, sha256_hex(part_two));
+
+        let stale_part_one = b"stale";
+        let upload_stale_part_one = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri(format!(
+                            "/multipart-bucket/large.bin?partNumber=1&uploadId={upload_id}"
+                        ))
+                        .body(Body::from(stale_part_one.as_slice())),
+                    stale_part_one,
+                )
+                .expect("valid upload stale part 1 request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(upload_stale_part_one.status(), StatusCode::OK);
+
+        let part_one = b"part-one";
+        let upload_part_one = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri(format!(
+                            "/multipart-bucket/large.bin?partNumber=1&uploadId={upload_id}"
+                        ))
+                        .body(Body::from(part_one.as_slice())),
+                    part_one,
+                )
+                .expect("valid replacement part 1 request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(upload_part_one.status(), StatusCode::OK);
+        let part_one_etag = header_value(&upload_part_one, "ETag")
+            .trim_matches('"')
+            .to_owned();
+        assert_eq!(part_one_etag, sha256_hex(part_one));
+
+        let list_parts = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri(format!("/multipart-bucket/large.bin?uploadId={upload_id}"))
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid list parts request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list_parts.status(), StatusCode::OK);
+        let list_parts_body = response_text(list_parts).await;
+        assert!(list_parts_body.contains("<ListPartsResult"));
+        assert!(list_parts_body.contains("<PartNumber>1</PartNumber>"));
+        assert!(list_parts_body.contains("<PartNumber>2</PartNumber>"));
+        assert!(list_parts_body.contains(&part_one_etag));
+        assert!(!list_parts_body.contains(&sha256_hex(stale_part_one)));
+
+        let invalid_complete_body = format!(
+            "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>0000</ETag></Part><Part><PartNumber>2</PartNumber><ETag>{part_two_etag}</ETag></Part></CompleteMultipartUpload>"
+        );
+        let invalid_complete = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(format!("/multipart-bucket/large.bin?uploadId={upload_id}"))
+                        .body(Body::from(invalid_complete_body.clone())),
+                    invalid_complete_body.as_bytes(),
+                )
+                .expect("valid invalid complete request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(invalid_complete.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            response_text(invalid_complete)
+                .await
+                .contains("<Code>InvalidRequest</Code>")
+        );
+
+        let complete_body = format!(
+            "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"{part_one_etag}\"</ETag></Part><Part><PartNumber>2</PartNumber><ETag>\"{part_two_etag}\"</ETag></Part></CompleteMultipartUpload>"
+        );
+        let complete = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(format!("/multipart-bucket/large.bin?uploadId={upload_id}"))
+                        .body(Body::from(complete_body.clone())),
+                    complete_body.as_bytes(),
+                )
+                .expect("valid complete request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(complete.status(), StatusCode::OK);
+        let complete_body_text = response_text(complete).await;
+        assert!(complete_body_text.contains("<CompleteMultipartUploadResult"));
+
+        let expected_body = [part_one.as_slice(), part_two.as_slice()].concat();
+        let get_completed = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/multipart-bucket/large.bin")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid get completed object request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_completed.status(), StatusCode::OK);
+        assert_eq!(response_bytes(get_completed).await, expected_body);
+
+        let manifest_count: i64 =
+            sqlx_core::query_scalar::query_scalar("SELECT COUNT(*)::bigint FROM object_manifests")
+                .fetch_one(ctx.catalog.pool())
+                .await
+                .expect("manifest count");
+        let active_uploads: i64 = sqlx_core::query_scalar::query_scalar(
+            "SELECT COUNT(*)::bigint FROM s3_multipart_uploads WHERE completed_at IS NULL AND aborted_at IS NULL",
+        )
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("active multipart upload count");
+        assert_eq!(manifest_count, 1);
+        assert_eq!(active_uploads, 0);
+
+        let list_parts_after_complete = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri(format!("/multipart-bucket/large.bin?uploadId={upload_id}"))
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid list parts after complete request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list_parts_after_complete.status(), StatusCode::OK);
+        let list_parts_after_complete_body = response_text(list_parts_after_complete).await;
+        assert!(!list_parts_after_complete_body.contains("<PartNumber>"));
+
+        let abort_initiate = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/multipart-bucket/abort.bin?uploads")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid abort initiate request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(abort_initiate.status(), StatusCode::OK);
+        let abort_upload_id = xml_value(&response_text(abort_initiate).await, "UploadId");
+        let abort_part = b"abort-me";
+        let uploaded_abort_part = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri(format!(
+                            "/multipart-bucket/abort.bin?partNumber=1&uploadId={abort_upload_id}"
+                        ))
+                        .body(Body::from(abort_part.as_slice())),
+                    abort_part,
+                )
+                .expect("valid abort part request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(uploaded_abort_part.status(), StatusCode::OK);
+
+        let abort = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::DELETE)
+                        .uri(format!(
+                            "/multipart-bucket/abort.bin?uploadId={abort_upload_id}"
+                        ))
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid abort request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(abort.status(), StatusCode::NO_CONTENT);
+
+        let complete_after_abort_body = format!(
+            "<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>{}</ETag></Part></CompleteMultipartUpload>",
+            sha256_hex(abort_part)
+        );
+        let complete_after_abort = s3_app
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(format!(
+                            "/multipart-bucket/abort.bin?uploadId={abort_upload_id}"
+                        ))
+                        .body(Body::from(complete_after_abort_body.clone())),
+                    complete_after_abort_body.as_bytes(),
+                )
+                .expect("valid complete after abort request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(complete_after_abort.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -3011,6 +3330,15 @@ mod tests {
 
     async fn json_body(response: axum::response::Response) -> serde_json::Value {
         serde_json::from_str(&response_text(response).await).expect("JSON response")
+    }
+
+    fn xml_value(xml: &str, tag: &str) -> String {
+        let open = format!("<{tag}>");
+        let close = format!("</{tag}>");
+        xml.split_once(&open)
+            .and_then(|(_, rest)| rest.split_once(&close).map(|(value, _)| value))
+            .unwrap_or_else(|| panic!("missing XML tag {tag}"))
+            .to_owned()
     }
 
     fn signed_s3_request(

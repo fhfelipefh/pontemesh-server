@@ -1,8 +1,8 @@
 use crate::{
     audit,
     catalog::{
-        self, BucketSummary, NewObject, NewObjectFragment, NewObjectManifest, ObjectRecord,
-        ObjectSummary,
+        self, BucketSummary, MultipartPartRecord, MultipartUploadRecord, NewObject,
+        NewObjectFragment, NewObjectManifest, ObjectRecord, ObjectSummary,
     },
     config,
     http::AppState,
@@ -20,7 +20,7 @@ use http_body_util::BodyExt;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{cmp, fs, path::PathBuf};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{info, warn};
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +28,16 @@ pub struct ListObjectsQuery {
     #[serde(rename = "list-type")]
     list_type: Option<String>,
     prefix: Option<String>,
+    uploads: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ObjectMultipartQuery {
+    #[serde(rename = "uploadId")]
+    upload_id: Option<String>,
+    #[serde(rename = "partNumber")]
+    part_number: Option<i32>,
+    uploads: Option<String>,
 }
 
 pub async fn list_buckets(
@@ -108,6 +118,20 @@ pub async fn list_objects(
     Path(bucket_name): Path<String>,
     Query(query): Query<ListObjectsQuery>,
 ) -> Response {
+    if query.uploads.is_some() {
+        return match state
+            .catalog
+            .list_active_multipart_uploads(&bucket_name)
+            .await
+        {
+            Ok(uploads) => s3_xml_response(
+                StatusCode::OK,
+                list_multipart_uploads_xml(&bucket_name, &uploads),
+            ),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
     if query.list_type.as_deref() != Some("2") {
         return s3_error(
             StatusCode::BAD_REQUEST,
@@ -132,8 +156,22 @@ pub async fn put_object(
     Extension(identity): Extension<S3Identity>,
     headers: HeaderMap,
     Path((bucket_name, object_key)): Path<(String, String)>,
+    Query(query): Query<ObjectMultipartQuery>,
     body: Body,
 ) -> Response {
+    if let (Some(upload_id), Some(part_number)) = (query.upload_id.as_deref(), query.part_number) {
+        return upload_multipart_part(
+            state,
+            identity,
+            bucket_name,
+            object_key,
+            upload_id,
+            part_number,
+            body,
+        )
+        .await;
+    }
+
     let request_id = request_id();
     info!(
         bucket = %bucket_name,
@@ -187,6 +225,39 @@ pub async fn put_object(
     }
 }
 
+pub async fn post_object(
+    State(state): State<AppState>,
+    Extension(identity): Extension<S3Identity>,
+    headers: HeaderMap,
+    Path((bucket_name, object_key)): Path<(String, String)>,
+    Query(query): Query<ObjectMultipartQuery>,
+    body: Body,
+) -> Response {
+    if let Some(upload_id) = query.upload_id.as_deref() {
+        return complete_multipart_upload(
+            state,
+            identity,
+            bucket_name,
+            object_key,
+            upload_id,
+            body,
+        )
+        .await;
+    }
+
+    if query.uploads.is_some() {
+        return initiate_multipart_upload(state, identity, headers, bucket_name, object_key).await;
+    }
+
+    s3_error(
+        StatusCode::BAD_REQUEST,
+        "InvalidArgument",
+        "POST Object supports only multipart upload initiation or completion",
+        Some(&bucket_name),
+        Some(&object_key),
+    )
+}
+
 pub async fn head_object(
     State(state): State<AppState>,
     Path((bucket_name, object_key)): Path<(String, String)>,
@@ -220,7 +291,22 @@ pub async fn get_object(
     Extension(identity): Extension<S3Identity>,
     headers: HeaderMap,
     Path((bucket_name, object_key)): Path<(String, String)>,
+    Query(query): Query<ObjectMultipartQuery>,
 ) -> Response {
+    if let Some(upload_id) = query.upload_id.as_deref() {
+        return match state
+            .catalog
+            .list_multipart_parts(&bucket_name, &object_key, upload_id)
+            .await
+        {
+            Ok(parts) => s3_xml_response(
+                StatusCode::OK,
+                list_parts_xml(&bucket_name, &object_key, upload_id, &parts),
+            ),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+        };
+    }
+
     match get_object_inner(&state, &bucket_name, &object_key, &headers).await {
         Ok(served) => {
             record_origin_audit(
@@ -258,8 +344,13 @@ pub async fn get_object(
 pub async fn delete_object(
     State(state): State<AppState>,
     Extension(identity): Extension<S3Identity>,
+    Query(query): Query<ObjectMultipartQuery>,
     Path((bucket_name, object_key)): Path<(String, String)>,
 ) -> Response {
+    if let Some(upload_id) = query.upload_id.as_deref() {
+        return abort_multipart_upload(state, identity, bucket_name, object_key, upload_id).await;
+    }
+
     match state.catalog.delete_object(&bucket_name, &object_key).await {
         Ok(()) => {
             audit::event(
@@ -308,6 +399,161 @@ pub async fn delete_bucket(
                 .expect("valid DeleteBucket response")
         }
         Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+    }
+}
+
+async fn initiate_multipart_upload(
+    state: AppState,
+    identity: S3Identity,
+    headers: HeaderMap,
+    bucket_name: String,
+    object_key: String,
+) -> Response {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("application/octet-stream");
+    match state
+        .catalog
+        .create_multipart_upload(
+            &bucket_name,
+            &object_key,
+            content_type,
+            &identity.access_key_id,
+        )
+        .await
+    {
+        Ok(upload) => {
+            record_origin_audit(
+                &state,
+                "s3_multipart_upload_initiated",
+                &identity.access_key_id,
+                "success",
+                &format!(
+                    "bucket={bucket_name}; key={object_key}; upload_id={}",
+                    upload.upload_id
+                ),
+            )
+            .await;
+            s3_xml_response(StatusCode::OK, initiate_multipart_upload_xml(&upload))
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn upload_multipart_part(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    object_key: String,
+    upload_id: &str,
+    part_number: i32,
+    body: Body,
+) -> Response {
+    match upload_multipart_part_inner(
+        &state,
+        &bucket_name,
+        &object_key,
+        upload_id,
+        part_number,
+        body,
+    )
+    .await
+    {
+        Ok(part) => {
+            record_origin_audit(
+                &state,
+                "s3_multipart_part_uploaded",
+                &identity.access_key_id,
+                "success",
+                &format!(
+                    "bucket={bucket_name}; key={object_key}; upload_id={upload_id}; part_number={}",
+                    part.part_number
+                ),
+            )
+            .await;
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("ETag", format!("\"{}\"", part.etag))
+                .header("x-amz-request-id", request_id())
+                .header(header::CONTENT_LENGTH, "0")
+                .body(Body::empty())
+                .expect("valid UploadPart response")
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn complete_multipart_upload(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    object_key: String,
+    upload_id: &str,
+    body: Body,
+) -> Response {
+    match complete_multipart_upload_inner(
+        &state,
+        &identity.access_key_id,
+        &bucket_name,
+        &object_key,
+        upload_id,
+        body,
+    )
+    .await
+    {
+        Ok(object) => {
+            record_origin_audit(
+                &state,
+                "s3_multipart_upload_completed",
+                &identity.access_key_id,
+                "success",
+                &format!(
+                    "bucket={bucket_name}; key={}; upload_id={upload_id}",
+                    object.key
+                ),
+            )
+            .await;
+            s3_xml_response(
+                StatusCode::OK,
+                complete_multipart_upload_xml(&bucket_name, &object.key, &object.sha256),
+            )
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn abort_multipart_upload(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    object_key: String,
+    upload_id: &str,
+) -> Response {
+    let parts = state
+        .catalog
+        .list_multipart_parts(&bucket_name, &object_key, upload_id)
+        .await
+        .unwrap_or_default();
+    match state.catalog.abort_multipart_upload(upload_id).await {
+        Ok(()) => {
+            remove_multipart_part_files(&parts);
+            record_origin_audit(
+                &state,
+                "s3_multipart_upload_aborted",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}; upload_id={upload_id}"),
+            )
+            .await;
+            Response::builder()
+                .status(StatusCode::NO_CONTENT)
+                .header("x-amz-request-id", request_id())
+                .body(Body::empty())
+                .expect("valid AbortMultipartUpload response")
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
     }
 }
 
@@ -419,10 +665,145 @@ async fn put_object_inner(
     Ok(object)
 }
 
+async fn upload_multipart_part_inner(
+    state: &AppState,
+    bucket_name: &str,
+    object_key: &str,
+    upload_id: &str,
+    part_number: i32,
+    body: Body,
+) -> anyhow::Result<MultipartPartRecord> {
+    if !(1..=10_000).contains(&part_number) {
+        bail!("partNumber must be between 1 and 10000");
+    }
+    let upload = state
+        .catalog
+        .get_active_multipart_upload(bucket_name, object_key, upload_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("multipart upload not found or no longer active"))?;
+    let multipart_dir = multipart_upload_dir(state, &upload.upload_id)?;
+    fs::create_dir_all(&multipart_dir).with_context(|| {
+        format!(
+            "failed to create multipart directory {}",
+            multipart_dir.display()
+        )
+    })?;
+    let part_path = multipart_dir.join(format!("part-{part_number:05}"));
+    let written = write_body_to_multipart_part(body, &part_path).await?;
+    let old_parts = state
+        .catalog
+        .list_multipart_parts(bucket_name, object_key, upload_id)
+        .await?;
+    let old_path = old_parts
+        .iter()
+        .find(|part| part.part_number == part_number)
+        .map(|part| part.storage_path.clone());
+    let part = state
+        .catalog
+        .record_multipart_part(
+            bucket_name,
+            object_key,
+            upload_id,
+            MultipartPartRecord {
+                part_number,
+                etag: written.sha256,
+                size_bytes: written.size_bytes,
+                storage_path: part_path.display().to_string(),
+                uploaded_at: String::new(),
+            },
+        )
+        .await?;
+    if let Some(old_path) = old_path.filter(|old_path| old_path != &part.storage_path) {
+        let _ = fs::remove_file(old_path);
+    }
+    Ok(part)
+}
+
+async fn complete_multipart_upload_inner(
+    state: &AppState,
+    principal: &str,
+    bucket_name: &str,
+    object_key: &str,
+    upload_id: &str,
+    body: Body,
+) -> anyhow::Result<ObjectSummary> {
+    let upload = state
+        .catalog
+        .get_active_multipart_upload(bucket_name, object_key, upload_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("multipart upload not found or no longer active"))?;
+    let requested_parts = parse_complete_multipart_upload(body).await?;
+    let stored_parts = state
+        .catalog
+        .list_multipart_parts(bucket_name, object_key, upload_id)
+        .await?;
+    let selected_parts = resolve_completed_parts(&requested_parts, &stored_parts)?;
+    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
+    let storage_path = config::configured_storage_dir(&state.paths)?;
+    let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
+    let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/uploads");
+    fs::create_dir_all(&temp_dir).with_context(|| {
+        format!(
+            "failed to create temporary upload directory {}",
+            temp_dir.display()
+        )
+    })?;
+    fs::create_dir_all(&bucket_dir).with_context(|| {
+        format!(
+            "failed to create bucket storage directory {}",
+            bucket_dir.display()
+        )
+    })?;
+    let temp_path = temp_dir.join(format!("{upload_id}-complete.tmp"));
+    let assembled =
+        assemble_multipart_object(&selected_parts, &temp_path, policy.fragment_size_bytes).await?;
+    let object_path = bucket_dir.join(format!("{}-{}", upload_id, assembled.sha256));
+    if let Err(error) = fs::rename(&temp_path, &object_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error)
+            .with_context(|| format!("failed to move object data {}", object_path.display()));
+    }
+    let detail = format!("bucket={bucket_name}; key={object_key}; upload_id={upload_id}");
+    let object = match state
+        .catalog
+        .put_object_with_audit(
+            NewObject {
+                bucket_name: bucket_name.to_owned(),
+                key: object_key.trim_start_matches('/').to_owned(),
+                size_bytes: assembled.size_bytes,
+                content_type: upload.content_type,
+                sha256: assembled.sha256,
+                storage_path: object_path.display().to_string(),
+                manifest: assembled.manifest,
+            },
+            principal,
+            &detail,
+        )
+        .await
+    {
+        Ok(object) => object,
+        Err(error) => {
+            let _ = fs::remove_file(&object_path);
+            return Err(error);
+        }
+    };
+    if let Err(error) = state.catalog.complete_multipart_upload(upload_id).await {
+        let _ = fs::remove_file(&object_path);
+        return Err(error);
+    }
+    remove_multipart_part_files(&stored_parts);
+    Ok(object)
+}
+
 struct StreamedObject {
     size_bytes: i64,
     sha256: String,
     manifest: NewObjectManifest,
+}
+
+struct WrittenPart {
+    size_bytes: i64,
+    sha256: String,
 }
 
 async fn write_body_to_temp_object(
@@ -515,6 +896,124 @@ async fn write_body_to_temp_object(
     })
 }
 
+async fn write_body_to_multipart_part(
+    mut body: Body,
+    part_path: &PathBuf,
+) -> anyhow::Result<WrittenPart> {
+    let mut file = tokio::fs::File::create(part_path)
+        .await
+        .with_context(|| format!("failed to create multipart part {}", part_path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut size_bytes = 0i64;
+    while let Some(frame) = body.frame().await {
+        let frame = frame.context("failed to read multipart part body")?;
+        let Some(chunk) = frame.data_ref() else {
+            continue;
+        };
+        if chunk.is_empty() {
+            continue;
+        }
+        file.write_all(chunk)
+            .await
+            .with_context(|| format!("failed to write multipart part {}", part_path.display()))?;
+        hasher.update(chunk);
+        size_bytes = size_bytes
+            .checked_add(i64::try_from(chunk.len()).context("multipart part is too large")?)
+            .context("multipart part is too large")?;
+    }
+    file.flush()
+        .await
+        .with_context(|| format!("failed to flush multipart part {}", part_path.display()))?;
+    Ok(WrittenPart {
+        size_bytes,
+        sha256: format!("{:x}", hasher.finalize()),
+    })
+}
+
+async fn assemble_multipart_object(
+    parts: &[MultipartPartRecord],
+    temp_path: &PathBuf,
+    fragment_size_bytes: i64,
+) -> anyhow::Result<StreamedObject> {
+    if fragment_size_bytes <= 0 {
+        bail!("fragmentSizeBytes must be positive");
+    }
+    let fragment_size =
+        usize::try_from(fragment_size_bytes).context("fragment size is too large")?;
+    let mut output = tokio::fs::File::create(temp_path)
+        .await
+        .with_context(|| format!("failed to create completed upload {}", temp_path.display()))?;
+    let mut object_hasher = Sha256::new();
+    let mut fragment_hasher = Sha256::new();
+    let mut fragments = Vec::new();
+    let mut fragment_len = 0usize;
+    let mut fragment_start = 0i64;
+    let mut size_bytes = 0i64;
+    let mut buffer = vec![0u8; 1024 * 1024];
+
+    for part in parts {
+        let mut file = tokio::fs::File::open(&part.storage_path)
+            .await
+            .with_context(|| format!("failed to open multipart part {}", part.storage_path))?;
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .await
+                .with_context(|| format!("failed to read multipart part {}", part.storage_path))?;
+            if read == 0 {
+                break;
+            }
+            let chunk = &buffer[..read];
+            output.write_all(chunk).await.with_context(|| {
+                format!("failed to write completed upload {}", temp_path.display())
+            })?;
+            object_hasher.update(chunk);
+
+            let mut remaining = chunk;
+            while !remaining.is_empty() {
+                let capacity = fragment_size - fragment_len;
+                let take = cmp::min(capacity, remaining.len());
+                fragment_hasher.update(&remaining[..take]);
+                fragment_len += take;
+                size_bytes = size_bytes
+                    .checked_add(i64::try_from(take).context("completed object is too large")?)
+                    .context("completed object is too large")?;
+                remaining = &remaining[take..];
+                if fragment_len == fragment_size {
+                    push_streamed_fragment(
+                        &mut fragments,
+                        &mut fragment_hasher,
+                        &mut fragment_start,
+                        &mut fragment_len,
+                    )?;
+                }
+            }
+        }
+    }
+
+    if fragment_len > 0 {
+        push_streamed_fragment(
+            &mut fragments,
+            &mut fragment_hasher,
+            &mut fragment_start,
+            &mut fragment_len,
+        )?;
+    }
+
+    output
+        .flush()
+        .await
+        .with_context(|| format!("failed to flush completed upload {}", temp_path.display()))?;
+    Ok(StreamedObject {
+        size_bytes,
+        sha256: format!("{:x}", object_hasher.finalize()),
+        manifest: NewObjectManifest {
+            fragment_size_bytes,
+            fragments,
+        },
+    })
+}
+
 fn push_streamed_fragment(
     fragments: &mut Vec<NewObjectFragment>,
     fragment_hasher: &mut Sha256,
@@ -548,6 +1047,72 @@ fn push_streamed_fragment(
         .context("fragment byte range is too large")?;
     *fragment_len = 0;
     Ok(())
+}
+
+#[derive(Debug)]
+struct CompletedPartRequest {
+    part_number: i32,
+    etag: String,
+}
+
+async fn parse_complete_multipart_upload(body: Body) -> anyhow::Result<Vec<CompletedPartRequest>> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read CompleteMultipartUpload body")?
+        .to_bytes();
+    let xml = std::str::from_utf8(&bytes).context("CompleteMultipartUpload body is not UTF-8")?;
+    let mut parts = Vec::new();
+    for part_block in xml.split("<Part>").skip(1) {
+        let part_block = part_block
+            .split_once("</Part>")
+            .map(|(part, _)| part)
+            .ok_or_else(|| anyhow::anyhow!("invalid CompleteMultipartUpload XML"))?;
+        let part_number = xml_tag_value(part_block, "PartNumber")?
+            .parse::<i32>()
+            .context("PartNumber is invalid")?;
+        let etag = xml_tag_value(part_block, "ETag")?
+            .trim_matches('"')
+            .to_owned();
+        parts.push(CompletedPartRequest { part_number, etag });
+    }
+    if parts.is_empty() {
+        bail!("CompleteMultipartUpload must include at least one Part");
+    }
+    Ok(parts)
+}
+
+fn xml_tag_value<'a>(xml: &'a str, tag: &str) -> anyhow::Result<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let value = xml
+        .split_once(&open)
+        .and_then(|(_, rest)| rest.split_once(&close).map(|(value, _)| value))
+        .ok_or_else(|| anyhow::anyhow!("missing XML tag {tag}"))?;
+    Ok(value.trim())
+}
+
+fn resolve_completed_parts(
+    requested: &[CompletedPartRequest],
+    stored: &[MultipartPartRecord],
+) -> anyhow::Result<Vec<MultipartPartRecord>> {
+    let mut selected = Vec::with_capacity(requested.len());
+    let mut last_part_number = 0;
+    for request in requested {
+        if request.part_number <= last_part_number {
+            bail!("multipart parts must be completed in ascending partNumber order");
+        }
+        last_part_number = request.part_number;
+        let part = stored
+            .iter()
+            .find(|part| part.part_number == request.part_number)
+            .ok_or_else(|| anyhow::anyhow!("multipart part is missing"))?;
+        if part.etag != request.etag {
+            bail!("multipart part ETag does not match uploaded part");
+        }
+        selected.push(part.clone());
+    }
+    Ok(selected)
 }
 
 async fn get_object_inner(
@@ -851,6 +1416,104 @@ fn list_objects_v2_xml(
         filtered.len(),
         contents
     )
+}
+
+fn initiate_multipart_upload_xml(upload: &MultipartUploadRecord) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<InitiateMultipartUploadResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+<Bucket>{}</Bucket><Key>{}</Key><UploadId>{}</UploadId></InitiateMultipartUploadResult>",
+        xml_escape(&upload.bucket_name),
+        xml_escape(&upload.object_key),
+        xml_escape(&upload.upload_id)
+    )
+}
+
+fn list_multipart_uploads_xml(bucket_name: &str, uploads: &[MultipartUploadRecord]) -> String {
+    let uploads_xml = uploads
+        .iter()
+        .map(|upload| {
+            format!(
+                "<Upload><Key>{}</Key><UploadId>{}</UploadId>\
+<Initiator><ID>{}</ID><DisplayName>{}</DisplayName></Initiator>\
+<Owner><ID>pontemesh</ID><DisplayName>Ponte Mesh</DisplayName></Owner>\
+<StorageClass>STANDARD</StorageClass><Initiated>{}</Initiated></Upload>",
+                xml_escape(&upload.object_key),
+                xml_escape(&upload.upload_id),
+                xml_escape("s3"),
+                xml_escape("s3"),
+                xml_escape(&upload.initiated_at)
+            )
+        })
+        .collect::<String>();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<ListMultipartUploadsResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+<Bucket>{}</Bucket><KeyMarker></KeyMarker><UploadIdMarker></UploadIdMarker>\
+<NextKeyMarker></NextKeyMarker><NextUploadIdMarker></NextUploadIdMarker>\
+<MaxUploads>1000</MaxUploads><IsTruncated>false</IsTruncated>{}</ListMultipartUploadsResult>",
+        xml_escape(bucket_name),
+        uploads_xml
+    )
+}
+
+fn list_parts_xml(
+    bucket_name: &str,
+    object_key: &str,
+    upload_id: &str,
+    parts: &[MultipartPartRecord],
+) -> String {
+    let parts_xml = parts
+        .iter()
+        .map(|part| {
+            format!(
+                "<Part><PartNumber>{}</PartNumber><LastModified>{}</LastModified>\
+<ETag>&quot;{}&quot;</ETag><Size>{}</Size></Part>",
+                part.part_number,
+                xml_escape(&part.uploaded_at),
+                xml_escape(&part.etag),
+                part.size_bytes
+            )
+        })
+        .collect::<String>();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<ListPartsResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+<Bucket>{}</Bucket><Key>{}</Key><UploadId>{}</UploadId>\
+<StorageClass>STANDARD</StorageClass><PartNumberMarker>0</PartNumberMarker>\
+<NextPartNumberMarker>0</NextPartNumberMarker><MaxParts>1000</MaxParts>\
+<IsTruncated>false</IsTruncated>{}</ListPartsResult>",
+        xml_escape(bucket_name),
+        xml_escape(object_key),
+        xml_escape(upload_id),
+        parts_xml
+    )
+}
+
+fn complete_multipart_upload_xml(bucket_name: &str, object_key: &str, etag: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<CompleteMultipartUploadResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+<Location>/{}/{}</Location><Bucket>{}</Bucket><Key>{}</Key><ETag>&quot;{}&quot;</ETag>\
+</CompleteMultipartUploadResult>",
+        xml_escape(bucket_name),
+        xml_escape(object_key),
+        xml_escape(bucket_name),
+        xml_escape(object_key),
+        xml_escape(etag)
+    )
+}
+
+fn multipart_upload_dir(state: &AppState, upload_id: &str) -> anyhow::Result<PathBuf> {
+    Ok(config::configured_storage_dir(&state.paths)?
+        .join("multipart")
+        .join(upload_id))
+}
+
+fn remove_multipart_part_files(parts: &[MultipartPartRecord]) {
+    for part in parts {
+        let _ = fs::remove_file(&part.storage_path);
+    }
 }
 
 fn request_id() -> String {

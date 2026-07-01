@@ -37,6 +37,7 @@ O subconjunto S3-like deve contemplar, no mínimo:
 * HEAD Object;
 * GET Object;
 * GET Object com `Range`;
+* Multipart Upload;
 * DELETE Object como deleção lógica;
 * URL temporária ou mecanismo equivalente.
 
@@ -54,6 +55,12 @@ PUT /{bucket}/{objectKey}
 HEAD /{bucket}/{objectKey}
 GET /{bucket}/{objectKey}
 DELETE /{bucket}/{objectKey}
+POST /{bucket}/{objectKey}?uploads
+PUT /{bucket}/{objectKey}?partNumber={partNumber}&uploadId={uploadId}
+GET /{bucket}/{objectKey}?uploadId={uploadId}
+POST /{bucket}/{objectKey}?uploadId={uploadId}
+DELETE /{bucket}/{objectKey}?uploadId={uploadId}
+GET /{bucket}?uploads
 ```
 
 Todas exigem credenciais S3 próprias e AWS Signature Version 4.
@@ -61,6 +68,11 @@ Todas exigem credenciais S3 próprias e AWS Signature Version 4.
 O endpoint S3-compatible também aceita URLs pré-assinadas SigV4 por query
 string (`X-Amz-*`) para acesso temporário. A validação continua usando a chave
 S3 gerenciada no catálogo, respeita revogação da chave e rejeita URLs expiradas.
+
+O fluxo Multipart Upload é persistido em PostgreSQL e em arquivos de partes no
+storage configurado. O objeto só entra no catálogo e só recebe manifesto após
+`CompleteMultipartUpload`; `AbortMultipartUpload` marca o upload como abortado e
+remove os arquivos de partes conhecidos.
 
 Essas operações representam o núcleo de armazenamento e recuperação de objetos.
 
