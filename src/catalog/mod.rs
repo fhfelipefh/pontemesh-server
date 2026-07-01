@@ -4,6 +4,7 @@ use crate::{
 };
 use anyhow::{Context, bail};
 use serde::Serialize;
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, PgPoolOptions, PgRow, Postgres};
 use sqlx_core::{query::query, query_scalar::query_scalar, row::Row, transaction::Transaction};
@@ -3174,6 +3175,7 @@ fn validate_health_status(status: &str) -> anyhow::Result<String> {
     }
 }
 
+#[cfg(test)]
 pub fn build_object_manifest(
     bytes: &[u8],
     fragment_size_bytes: i64,

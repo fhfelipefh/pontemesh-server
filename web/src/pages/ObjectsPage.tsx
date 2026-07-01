@@ -89,74 +89,78 @@ export function ObjectsPage() {
   }
 
   const hasBuckets = buckets.length > 0;
+  const selectedBucketObjectLabel = selectedBucket?.objectCount === 1
+    ? t("setup.objects.objectSingular")
+    : t("setup.objects.objectPlural");
 
   return (
     <div className="objects-page">
-      <section className="admin-panel buckets-card objects-card">
-        <div className="buckets-card__header">
-          <div>
-            <h1>{t("setup.objects.title")}</h1>
-          </div>
-          <Button
-            className="buckets-create-button"
-            type="button"
-            icon={<RefreshCw size={17} aria-hidden="true" />}
-            onClick={() => {
-              setRefreshNonce((nonce) => nonce + 1);
-              void refreshBuckets();
-            }}
-          >
-            {t("setup.objects.refresh")}
-          </Button>
-        </div>
+      <div className="objects-page-header">
+        <h1>{t("setup.objects.title")}</h1>
+        <Button
+          className="refresh-button"
+          type="button"
+          icon={<RefreshCw size={17} aria-hidden="true" />}
+          onClick={() => {
+            setRefreshNonce((nonce) => nonce + 1);
+            void refreshBuckets();
+          }}
+        >
+          {t("setup.objects.refresh")}
+        </Button>
+      </div>
 
-        <ErrorMessage message={bucketError} />
+      <ErrorMessage message={bucketError} />
 
-        {loadingBuckets ? (
-          <div className="admin-loading">{t("setup.buckets.loading")}</div>
-        ) : !hasBuckets ? (
-          <EmptyState
-            title={t("setup.objects.noBucketsTitle")}
-            description={t("setup.objects.noBucketsDescription")}
-          />
-        ) : (
-          <>
-            <div className="objects-bucket-bar">
-              <label className="objects-bucket-select">
-                <span>{t("setup.objects.bucket")}</span>
-                <select
-                  data-testid="objects-bucket-select"
-                  value={selectedBucketName}
-                  onChange={(event) => handleBucketChange(event.target.value)}
-                >
-                  {buckets.map((bucket) => (
-                    <option value={bucket.name} key={bucket.name}>
-                      {bucket.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {selectedBucket ? (
-                <div className="objects-bucket-summary" data-testid="objects-bucket-summary">
-                  <Database size={17} aria-hidden="true" />
-                  <span>{selectedBucket.objectCount} {t("setup.objects.count")}</span>
-                  <span>{formatBytes(selectedBucket.totalBytes)}</span>
-                </div>
-              ) : null}
-            </div>
-
-            {selectedBucketName ? (
-              <ObjectManager
-                bucketName={selectedBucketName}
-                refreshNonce={refreshNonce}
-                externalError={objectActionError}
-                onChanged={refreshBuckets}
-                onConfirmDeleteObject={(objectKey) => setConfirmation({ bucket: selectedBucketName, objectKey })}
-              />
+      {loadingBuckets ? (
+        <div className="admin-loading">{t("setup.buckets.loading")}</div>
+      ) : !hasBuckets ? (
+        <EmptyState
+          title={t("setup.objects.noBucketsTitle")}
+          description={t("setup.objects.noBucketsDescription")}
+        />
+      ) : (
+        <>
+          <section className="objects-summary-card">
+            <label className="bucket-context-row">
+              <span>{t("setup.objects.bucket")}</span>
+              <select
+                data-testid="objects-bucket-select"
+                value={selectedBucketName}
+                onChange={(event) => handleBucketChange(event.target.value)}
+              >
+                {buckets.map((bucket) => (
+                  <option value={bucket.name} key={bucket.name}>
+                    {bucket.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedBucket ? (
+              <div className="objects-bucket-summary" data-testid="objects-bucket-summary">
+                <Database size={17} aria-hidden="true" />
+                <span>
+                  {t("setup.objects.bucketSummary", {
+                    count: selectedBucket.objectCount,
+                    label: selectedBucketObjectLabel,
+                    bytes: formatBytes(selectedBucket.totalBytes)
+                  })}
+                </span>
+              </div>
             ) : null}
-          </>
-        )}
-      </section>
+          </section>
+
+          {selectedBucketName ? (
+            <ObjectManager
+              bucketName={selectedBucketName}
+              refreshNonce={refreshNonce}
+              externalError={objectActionError}
+              onChanged={refreshBuckets}
+              onConfirmDeleteObject={(objectKey) => setConfirmation({ bucket: selectedBucketName, objectKey })}
+            />
+          ) : null}
+        </>
+      )}
 
       {confirmation ? (
         <ConfirmDialog

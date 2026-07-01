@@ -11,7 +11,7 @@ test.describe("Objects page", () => {
     await installAdminApiFixtures(page);
   });
 
-  test("sidebar navigation, bucket selection, search, upload reset, and delete modal should work", async ({ page }) => {
+  test("sidebar navigation, bucket selection, search, upload modal, and delete modal should work", async ({ page }) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
@@ -28,17 +28,25 @@ test.describe("Objects page", () => {
     await expect(page).toHaveURL(/\/objects\?bucket=documents$/);
 
     await page.getByTestId("object-search-input").fill("readme");
-    await page.getByRole("button", { name: /search|buscar/i }).click();
+    await page.getByTestId("object-search-input").press("Enter");
     await expect(page.getByText("docs/readme.txt")).toBeVisible();
 
-    await page.locator("input[type='file']").setInputFiles({
+    await expect(page.getByTestId("object-key-input")).toHaveCount(0);
+    await expect(page.getByText(/no file chosen|nenhum arquivo escolhido/i)).toHaveCount(0);
+
+    await page.getByTestId("open-upload-object-button").click();
+    await expect(page.getByTestId("upload-object-dialog")).toBeVisible();
+    await expect(page.getByTestId("object-key-input")).toBeVisible();
+    await expect(page.getByText(/choose file|escolher arquivo/i)).toBeVisible();
+
+    await page.getByTestId("object-file-input").setInputFiles({
       name: "objects-page-upload.txt",
       mimeType: "text/plain",
       buffer: Buffer.from("pontemesh objects page upload")
     });
     await expect(page.getByTestId("upload-object-button")).toBeEnabled();
     await page.getByTestId("upload-object-button").click();
-    await expect.poll(async () => page.locator("input[type='file']").evaluate((input) => (input as HTMLInputElement).files?.length ?? 0)).toBe(0);
+    await expect(page.getByTestId("upload-object-dialog")).toBeHidden();
     await expect(page.getByRole("complementary", { name: /uploads/i })).toBeVisible();
     await page.getByRole("button", { name: /close upload|fechar upload/i }).click();
     await expect(page.getByRole("complementary", { name: /uploads/i })).toBeHidden();
@@ -67,6 +75,8 @@ test.describe("Objects page", () => {
     });
     await page.goto("/objects?bucket=assets");
     await expect(page.getByText(/does not have objects yet|ainda não possui objetos/i)).toBeVisible();
+    await page.getByTestId("open-upload-object-button").click();
+    await expect(page.getByTestId("upload-object-dialog")).toBeVisible();
   });
 
   test("sidebar collapsed and expanded states should keep the Objects item usable", async ({ page }) => {
@@ -87,5 +97,37 @@ test.describe("Objects page", () => {
     await page.getByRole("menuitemradio", { name: /pt-br|português/i }).click();
     await expect(page.getByRole("heading", { name: "Objetos" })).toBeVisible();
     await expect(page.getByText("Enviar objeto")).toBeVisible();
+  });
+
+  test("main object controls should stay proportional and aligned", async ({ page }) => {
+    await page.goto("/objects");
+    await expect(page.getByTestId("object-search-input")).toBeVisible();
+
+    const searchBox = await page.getByTestId("object-search-control").boundingBox();
+    const refreshButton = await page.getByRole("button", { name: /refresh|atualizar/i }).boundingBox();
+    const uploadButton = await page.getByTestId("open-upload-object-button").boundingBox();
+    const tableCard = await page.getByTestId("objects-table-card").boundingBox();
+    const pagination = await page.locator(".objects-table-card .buckets-pagination").boundingBox();
+
+    expect(searchBox, "search input should be measurable").not.toBeNull();
+    expect(refreshButton, "refresh button should be measurable").not.toBeNull();
+    expect(uploadButton, "upload button should be measurable").not.toBeNull();
+    expect(tableCard, "table card should be measurable").not.toBeNull();
+    expect(pagination, "pagination should be measurable").not.toBeNull();
+
+    expect(searchBox!.width).toBeGreaterThanOrEqual(280);
+    expect(refreshButton!.width).toBeLessThanOrEqual(180);
+    expect(uploadButton!.width).toBeLessThanOrEqual(220);
+    expect(pagination!.y + pagination!.height).toBeLessThanOrEqual(tableCard!.y + tableCard!.height + 1);
+
+    for (const button of await page.locator(".objects-table-actions .table-action-button").all()) {
+      const box = await button.boundingBox();
+      expect(box, "table action button should be measurable").not.toBeNull();
+      expect(box!.width).toBeLessThanOrEqual(140);
+      expect(box!.height).toBeGreaterThanOrEqual(32);
+      expect(box!.height).toBeLessThanOrEqual(44);
+    }
+
+    await expectNoHorizontalOverflow(page);
   });
 });

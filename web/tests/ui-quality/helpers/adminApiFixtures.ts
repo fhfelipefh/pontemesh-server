@@ -120,6 +120,10 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
       return json(route, dashboardSummary);
     }
 
+    if (path === "/api/admin/logs/application") {
+      return json(route, []);
+    }
+
     if (path === "/api/admin/buckets") {
       if (request.method() === "POST") {
         return json(route, fixtureBuckets[0]);

@@ -10,16 +10,16 @@ use crate::{
 use anyhow::Context;
 use axum::{
     Extension, Json,
-    body::{Body, Bytes},
-    extract::{Multipart, Path, Query, State},
+    body::Body,
+    extract::{Multipart, Path, Query, State, multipart::Field},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
+use tokio::io::AsyncWriteExt;
 
-const ADMIN_UPLOAD_BODY_LIMIT_BYTES: usize = 512 * 1024 * 1024;
 const DEFAULT_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 10;
 const MAX_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 100;
 const DEFAULT_STORAGE_PAGE_SIZE: u32 = 20;
@@ -470,7 +470,7 @@ pub async fn upload_object(
                 &format!("bucket={bucket_name}; error={error:#}"),
             )
             .await;
-            bad_request(upload_error_for_response(error))
+            bad_request(anyhow::anyhow!(format!("{error:#}")))
         }
     }
 }
@@ -924,9 +924,16 @@ async fn upload_object_inner(
     catalog::validate_bucket_name(bucket_name)?;
 
     let mut requested_key: Option<String> = None;
-    let mut file_name: Option<String> = None;
-    let mut content_type: Option<String> = None;
-    let mut file_bytes: Option<Bytes> = None;
+    let mut uploaded_file: Option<UploadedObjectFile> = None;
+    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
+    let storage_path = config::configured_storage_dir(&state.paths)?;
+    let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
+    fs::create_dir_all(&bucket_dir).with_context(|| {
+        format!(
+            "failed to create bucket storage directory {}",
+            bucket_dir.display()
+        )
+    })?;
 
     while let Some(field) = multipart
         .next_field()
@@ -939,88 +946,173 @@ async fn upload_object_inner(
                 requested_key = Some(field.text().await.context("failed to read object key")?);
             }
             "file" => {
-                file_name = field.file_name().map(ToOwned::to_owned);
-                content_type = field.content_type().map(ToOwned::to_owned);
-                file_bytes = Some(field.bytes().await.with_context(|| {
-                    format!(
-                        "failed to read uploaded file; administrative uploads are limited to {}",
-                        format_size(ADMIN_UPLOAD_BODY_LIMIT_BYTES)
-                    )
-                })?);
+                uploaded_file = Some(
+                    persist_uploaded_file(field, &bucket_dir, policy.fragment_size_bytes).await?,
+                );
             }
             _ => {}
         }
     }
 
+    let uploaded_file = uploaded_file.ok_or_else(|| anyhow::anyhow!("upload must include a file"))?;
     let key = requested_key
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-        .or(file_name)
+        .or(uploaded_file.file_name)
         .ok_or_else(|| anyhow::anyhow!("upload must include a file or object key"))?;
     catalog::validate_object_key(&key)?;
 
-    let bytes = file_bytes.ok_or_else(|| anyhow::anyhow!("upload must include a file"))?;
-    let content_type = content_type.unwrap_or_else(|| "application/octet-stream".to_owned());
-    let sha256 = format!("{:x}", Sha256::digest(&bytes));
-    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
-    let manifest = catalog::build_object_manifest(&bytes, policy.fragment_size_bytes)?;
-
-    let storage_path = config::configured_storage_dir(&state.paths)?;
-    let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
-    fs::create_dir_all(&bucket_dir).with_context(|| {
-        format!(
-            "failed to create bucket storage directory {}",
-            bucket_dir.display()
-        )
-    })?;
-    let object_path = bucket_dir.join(format!("{}-{}", uuid::Uuid::new_v4(), sha256));
-    fs::write(&object_path, &bytes)
-        .with_context(|| format!("failed to write object data {}", object_path.display()))?;
+    let object_path = bucket_dir.join(format!("{}-{}", uuid::Uuid::new_v4(), uploaded_file.sha256));
+    tokio::fs::rename(&uploaded_file.path, &object_path)
+        .await
+        .with_context(|| format!("failed to finalize object data {}", object_path.display()))?;
 
     state
         .catalog
         .insert_object(NewObject {
             bucket_name: bucket_name.to_owned(),
             key,
-            size_bytes: i64::try_from(bytes.len()).context("uploaded object is too large")?,
-            content_type,
-            sha256,
+            size_bytes: uploaded_file.size_bytes,
+            content_type: uploaded_file.content_type,
+            sha256: uploaded_file.sha256,
             storage_path: object_path.display().to_string(),
-            manifest,
+            manifest: uploaded_file.manifest,
         })
         .await
 }
 
+struct UploadedObjectFile {
+    file_name: Option<String>,
+    content_type: String,
+    path: PathBuf,
+    size_bytes: i64,
+    sha256: String,
+    manifest: catalog::NewObjectManifest,
+}
+
+async fn persist_uploaded_file(
+    mut field: Field<'_>,
+    bucket_dir: &std::path::Path,
+    fragment_size_bytes: i64,
+) -> anyhow::Result<UploadedObjectFile> {
+    let file_name = field.file_name().map(ToOwned::to_owned);
+    let content_type = field
+        .content_type()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "application/octet-stream".to_owned());
+    let temp_path = bucket_dir.join(format!(".upload-{}.part", uuid::Uuid::new_v4()));
+    let mut output = tokio::fs::File::create(&temp_path)
+        .await
+        .with_context(|| format!("failed to create upload file {}", temp_path.display()))?;
+    let mut object_hasher = Sha256::new();
+    let mut fragment_hasher = Sha256::new();
+    let mut fragments = Vec::new();
+    let fragment_size = usize::try_from(fragment_size_bytes).context("fragment size is too large")?;
+    if fragment_size == 0 {
+        anyhow::bail!("fragmentSizeBytes must be positive");
+    }
+    let mut current_fragment_size: usize = 0;
+    let mut current_fragment_start: i64 = 0;
+    let mut total_size: i64 = 0;
+
+    while let Some(chunk) = field
+        .chunk()
+        .await
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&temp_path);
+        })
+        .context("failed to read uploaded file")?
+    {
+        output
+            .write_all(&chunk)
+            .await
+            .inspect_err(|_| {
+                let _ = std::fs::remove_file(&temp_path);
+            })
+            .with_context(|| format!("failed to write uploaded file {}", temp_path.display()))?;
+        object_hasher.update(&chunk);
+
+        let mut offset = 0;
+        while offset < chunk.len() {
+            let remaining_fragment = fragment_size - current_fragment_size;
+            let take = remaining_fragment.min(chunk.len() - offset);
+            fragment_hasher.update(&chunk[offset..offset + take]);
+            current_fragment_size += take;
+            offset += take;
+            total_size = total_size
+                .checked_add(i64::try_from(take).context("uploaded object is too large")?)
+                .ok_or_else(|| anyhow::anyhow!("uploaded object is too large"))?;
+
+            if current_fragment_size == fragment_size {
+                push_fragment(
+                    &mut fragments,
+                    &mut fragment_hasher,
+                    current_fragment_start,
+                    current_fragment_size,
+                )?;
+                current_fragment_start = total_size;
+                current_fragment_size = 0;
+            }
+        }
+    }
+
+    if current_fragment_size > 0 {
+        push_fragment(
+            &mut fragments,
+            &mut fragment_hasher,
+            current_fragment_start,
+            current_fragment_size,
+        )?;
+    }
+
+    output
+        .flush()
+        .await
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&temp_path);
+        })
+        .with_context(|| format!("failed to flush uploaded file {}", temp_path.display()))?;
+
+    Ok(UploadedObjectFile {
+        file_name,
+        content_type,
+        path: temp_path,
+        size_bytes: total_size,
+        sha256: format!("{:x}", object_hasher.finalize()),
+        manifest: catalog::NewObjectManifest {
+            fragment_size_bytes,
+            fragments,
+        },
+    })
+}
+
+fn push_fragment(
+    fragments: &mut Vec<catalog::NewObjectFragment>,
+    fragment_hasher: &mut Sha256,
+    start: i64,
+    size: usize,
+) -> anyhow::Result<()> {
+    let size_bytes = i64::try_from(size).context("fragment size cannot fit in i64")?;
+    let sha256 = format!("{:x}", std::mem::take(fragment_hasher).finalize());
+    fragments.push(catalog::NewObjectFragment {
+        index: i64::try_from(fragments.len()).context("fragment index cannot fit in i64")?,
+        byte_range_start: start,
+        byte_range_end: start + size_bytes.saturating_sub(1),
+        size_bytes,
+        sha256,
+        priority: if fragments.is_empty() {
+            "INITIAL".to_owned()
+        } else {
+            "NORMAL".to_owned()
+        },
+    });
+    Ok(())
+}
+
 fn bucket_storage_dir(storage_path: PathBuf, bucket_name: &str) -> PathBuf {
     storage_path.join("buckets").join(bucket_name)
-}
-
-pub fn admin_upload_body_limit_bytes() -> usize {
-    ADMIN_UPLOAD_BODY_LIMIT_BYTES
-}
-
-fn upload_error_for_response(error: anyhow::Error) -> anyhow::Error {
-    let detail = format!("{error:#}");
-    let detail_lower = detail.to_ascii_lowercase();
-    if detail_lower.contains("length limit") || detail_lower.contains("body limit") {
-        anyhow::anyhow!(
-            "uploaded file exceeds the administrative upload limit of {}",
-            format_size(ADMIN_UPLOAD_BODY_LIMIT_BYTES)
-        )
-    } else {
-        anyhow::anyhow!(detail)
-    }
-}
-
-fn format_size(bytes: usize) -> String {
-    const MIB: usize = 1024 * 1024;
-    if bytes % MIB == 0 {
-        format!("{} MiB", bytes / MIB)
-    } else {
-        format!("{bytes} bytes")
-    }
 }
 
 fn download_filename(object_key: &str) -> String {

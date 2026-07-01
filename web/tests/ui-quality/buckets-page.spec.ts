@@ -62,7 +62,9 @@ test.describe("Buckets page layout quality", () => {
     await openBucketsPage(page);
     await page.getByTestId("bucket-row").first().getByRole("button", { name: /open|abrir/i }).click();
 
-    await page.locator("input[type='file']").setInputFiles({
+    await page.getByTestId("open-upload-object-button").click();
+    await expect(page.getByTestId("upload-object-dialog")).toBeVisible();
+    await page.getByTestId("object-file-input").setInputFiles({
       name: "upload-check.txt",
       mimeType: "text/plain",
       buffer: Buffer.from("pontemesh upload check")
@@ -71,7 +73,7 @@ test.describe("Buckets page layout quality", () => {
     await expect(page.getByTestId("upload-object-button")).toBeEnabled();
     await page.getByTestId("upload-object-button").click();
 
-    await expect.poll(async () => page.locator("input[type='file']").evaluate((input) => (input as HTMLInputElement).files?.length ?? 0)).toBe(0);
+    await expect(page.getByTestId("upload-object-dialog")).toBeHidden();
     expect(pageErrors).toEqual([]);
   });
 });

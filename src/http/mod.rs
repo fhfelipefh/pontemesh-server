@@ -119,9 +119,7 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         .route(
             "/api/admin/buckets/{bucket_name}/objects",
             get(admin::list_objects).post(
-                admin::upload_object.layer(DefaultBodyLimit::max(
-                    admin::admin_upload_body_limit_bytes(),
-                )),
+                admin::upload_object.layer(DefaultBodyLimit::disable()),
             ),
         )
         .route(
