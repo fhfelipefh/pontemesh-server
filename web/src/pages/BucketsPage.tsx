@@ -393,7 +393,14 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
         sourceSelectionStrategy: nextPolicy.sourceSelectionStrategy,
         fragmentPriorityStrategy: nextPolicy.fragmentPriorityStrategy,
         failureThreshold: nextPolicy.failureThreshold,
-        fallbackMode: nextPolicy.fallbackMode
+        fallbackMode: nextPolicy.fallbackMode,
+        s3ListDefaultMaxKeys: nextPolicy.s3ListDefaultMaxKeys,
+        s3ListMaxKeysLimit: nextPolicy.s3ListMaxKeysLimit,
+        s3ListAllowDelimiter: nextPolicy.s3ListAllowDelimiter,
+        s3VersioningEnabled: nextPolicy.s3VersioningEnabled,
+        s3ObjectTaggingEnabled: nextPolicy.s3ObjectTaggingEnabled,
+        s3ChecksumAlgorithm: nextPolicy.s3ChecksumAlgorithm,
+        s3MultipartAbortDays: nextPolicy.s3MultipartAbortDays
       });
       setPolicy(saved);
     } catch (saveError) {
@@ -521,6 +528,71 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
                   onChange={(event) => setPolicy({ ...policy, allowPeerSharing: event.target.checked })}
                 />
                 <span>{t("setup.buckets.allowPeerSharing")}</span>
+              </label>
+              <label>
+                <span>{t("setup.buckets.s3ListDefaultMaxKeys")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={policy.s3ListDefaultMaxKeys}
+                  onChange={(event) => setPolicy({ ...policy, s3ListDefaultMaxKeys: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>{t("setup.buckets.s3ListMaxKeysLimit")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={100000}
+                  value={policy.s3ListMaxKeysLimit}
+                  onChange={(event) => setPolicy({ ...policy, s3ListMaxKeysLimit: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>{t("setup.buckets.s3ChecksumAlgorithm")}</span>
+                <select
+                  value={policy.s3ChecksumAlgorithm}
+                  onChange={(event) => setPolicy({ ...policy, s3ChecksumAlgorithm: event.target.value })}
+                >
+                  <option value="SHA256">SHA256</option>
+                  <option value="ETAG_MD5_COMPATIBLE">ETag MD5</option>
+                  <option value="NONE">{t("setup.common.disabled")}</option>
+                </select>
+              </label>
+              <label>
+                <span>{t("setup.buckets.s3MultipartAbortDays")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={policy.s3MultipartAbortDays}
+                  onChange={(event) => setPolicy({ ...policy, s3MultipartAbortDays: Number(event.target.value) })}
+                />
+              </label>
+              <label className="bucket-policy-toggle">
+                <input
+                  type="checkbox"
+                  checked={policy.s3ListAllowDelimiter}
+                  onChange={(event) => setPolicy({ ...policy, s3ListAllowDelimiter: event.target.checked })}
+                />
+                <span>{t("setup.buckets.s3ListAllowDelimiter")}</span>
+              </label>
+              <label className="bucket-policy-toggle">
+                <input
+                  type="checkbox"
+                  checked={policy.s3VersioningEnabled}
+                  onChange={(event) => setPolicy({ ...policy, s3VersioningEnabled: event.target.checked })}
+                />
+                <span>{t("setup.buckets.s3VersioningEnabled")}</span>
+              </label>
+              <label className="bucket-policy-toggle">
+                <input
+                  type="checkbox"
+                  checked={policy.s3ObjectTaggingEnabled}
+                  onChange={(event) => setPolicy({ ...policy, s3ObjectTaggingEnabled: event.target.checked })}
+                />
+                <span>{t("setup.buckets.s3ObjectTaggingEnabled")}</span>
               </label>
             </div>
           ) : null}

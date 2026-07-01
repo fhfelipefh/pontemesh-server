@@ -97,6 +97,13 @@ pub struct UpdateBucketPolicyRequest {
     fragment_priority_strategy: Option<String>,
     failure_threshold: Option<i64>,
     fallback_mode: Option<String>,
+    s3_list_default_max_keys: Option<i64>,
+    s3_list_max_keys_limit: Option<i64>,
+    s3_list_allow_delimiter: Option<bool>,
+    s3_versioning_enabled: Option<bool>,
+    s3_object_tagging_enabled: Option<bool>,
+    s3_checksum_algorithm: Option<String>,
+    s3_multipart_abort_days: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +147,37 @@ pub struct AuditEventsQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ApplicationLogsQuery {
     limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigurationBackup {
+    pub schema_version: u32,
+    pub exported_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub mcp_settings: Option<ConfigurationMcpSettings>,
+    pub bucket_policies: Vec<catalog::BucketPolicy>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigurationMcpSettings {
+    pub enabled: bool,
+    pub endpoint_path: String,
+    pub bind_host: Option<String>,
+    pub require_auth: bool,
+    pub read_tools_enabled: bool,
+    pub write_tools_enabled: bool,
+    pub expose_resources: bool,
+    pub expose_prompts: bool,
+    pub allow_localhost_only: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigurationImportResult {
+    applied_mcp_settings: bool,
+    applied_bucket_policies: usize,
+    skipped_bucket_policies: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -229,6 +267,120 @@ pub async fn application_logs(Query(query): Query<ApplicationLogsQuery>) -> Resp
         .unwrap_or(DEFAULT_APPLICATION_LOGS_LIMIT)
         .clamp(1, MAX_APPLICATION_LOGS_LIMIT);
     Json(application_logs::recent(limit)).into_response()
+}
+
+pub async fn export_configuration(State(state): State<AppState>) -> Response {
+    let mcp_settings = match state.catalog.get_mcp_settings().await {
+        Ok(settings) => Some(ConfigurationMcpSettings {
+            enabled: settings.enabled,
+            endpoint_path: settings.endpoint_path,
+            bind_host: settings.bind_host,
+            require_auth: settings.require_auth,
+            read_tools_enabled: settings.read_tools_enabled,
+            write_tools_enabled: settings.write_tools_enabled,
+            expose_resources: settings.expose_resources,
+            expose_prompts: settings.expose_prompts,
+            allow_localhost_only: settings.allow_localhost_only,
+        }),
+        Err(error) => return internal_error(error),
+    };
+    let bucket_policies = match state.catalog.list_bucket_policies().await {
+        Ok(policies) => policies,
+        Err(error) => return internal_error(error),
+    };
+    Json(ConfigurationBackup {
+        schema_version: 1,
+        exported_at: Some(chrono::Utc::now()),
+        mcp_settings,
+        bucket_policies,
+    })
+    .into_response()
+}
+
+pub async fn import_configuration(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<ConfigurationBackup>,
+) -> Response {
+    if payload.schema_version != 1 {
+        return bad_request(anyhow::anyhow!("unsupported configuration schemaVersion"));
+    }
+
+    let mut applied_mcp_settings = false;
+    if let Some(settings) = payload.mcp_settings {
+        let update = catalog::McpSettingsUpdate {
+            enabled: settings.enabled,
+            endpoint_path: settings.endpoint_path,
+            bind_host: settings.bind_host,
+            require_auth: settings.require_auth,
+            read_tools_enabled: settings.read_tools_enabled,
+            write_tools_enabled: settings.write_tools_enabled,
+            expose_resources: settings.expose_resources,
+            expose_prompts: settings.expose_prompts,
+            allow_localhost_only: settings.allow_localhost_only,
+        };
+        if let Err(error) = state.catalog.update_mcp_settings(update).await {
+            return bad_request(error);
+        }
+        applied_mcp_settings = true;
+    }
+
+    let mut applied_bucket_policies = 0_usize;
+    let mut skipped_bucket_policies = Vec::new();
+    for policy in payload.bucket_policies {
+        match state.catalog.get_bucket(&policy.bucket_name).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                skipped_bucket_policies.push(policy.bucket_name);
+                continue;
+            }
+            Err(error) => return bad_request(error),
+        }
+        let update = BucketPolicyUpdate {
+            access_package_ttl_seconds: policy.access_package_ttl_seconds,
+            fragment_size_bytes: policy.fragment_size_bytes,
+            allow_replica_edge: policy.allow_replica_edge,
+            allow_peer_sharing: policy.allow_peer_sharing,
+            source_selection_strategy: policy.source_selection_strategy,
+            fragment_priority_strategy: policy.fragment_priority_strategy,
+            failure_threshold: policy.failure_threshold,
+            fallback_mode: policy.fallback_mode,
+            s3_list_default_max_keys: policy.s3_list_default_max_keys,
+            s3_list_max_keys_limit: policy.s3_list_max_keys_limit,
+            s3_list_allow_delimiter: policy.s3_list_allow_delimiter,
+            s3_versioning_enabled: policy.s3_versioning_enabled,
+            s3_object_tagging_enabled: policy.s3_object_tagging_enabled,
+            s3_checksum_algorithm: policy.s3_checksum_algorithm,
+            s3_multipart_abort_days: policy.s3_multipart_abort_days,
+        };
+        if let Err(error) = state
+            .catalog
+            .update_bucket_policy(&policy.bucket_name, update)
+            .await
+        {
+            return bad_request(error);
+        }
+        applied_bucket_policies += 1;
+    }
+
+    record_admin_audit(
+        &state,
+        "configuration_imported",
+        &session.username,
+        "success",
+        &format!(
+            "mcp={applied_mcp_settings}; bucket_policies={applied_bucket_policies}; skipped={}",
+            skipped_bucket_policies.len()
+        ),
+    )
+    .await;
+
+    Json(ConfigurationImportResult {
+        applied_mcp_settings,
+        applied_bucket_policies,
+        skipped_bucket_policies,
+    })
+    .into_response()
 }
 
 pub async fn get_mcp_settings(State(state): State<AppState>) -> Response {
@@ -475,6 +627,15 @@ pub async fn update_bucket_policy(
         fallback_mode: payload
             .fallback_mode
             .unwrap_or_else(|| "ORIGIN_RANGE".to_owned()),
+        s3_list_default_max_keys: payload.s3_list_default_max_keys.unwrap_or(1000),
+        s3_list_max_keys_limit: payload.s3_list_max_keys_limit.unwrap_or(10_000),
+        s3_list_allow_delimiter: payload.s3_list_allow_delimiter.unwrap_or(true),
+        s3_versioning_enabled: payload.s3_versioning_enabled.unwrap_or(false),
+        s3_object_tagging_enabled: payload.s3_object_tagging_enabled.unwrap_or(true),
+        s3_checksum_algorithm: payload
+            .s3_checksum_algorithm
+            .unwrap_or_else(|| "SHA256".to_owned()),
+        s3_multipart_abort_days: payload.s3_multipart_abort_days.unwrap_or(7),
     };
     match state
         .catalog
@@ -490,7 +651,14 @@ pub async fn update_bucket_policy(
                 "sourceSelectionStrategy": policy.source_selection_strategy,
                 "fragmentPriorityStrategy": policy.fragment_priority_strategy,
                 "failureThreshold": policy.failure_threshold,
-                "fallbackMode": policy.fallback_mode
+                "fallbackMode": policy.fallback_mode,
+                "s3ListDefaultMaxKeys": policy.s3_list_default_max_keys,
+                "s3ListMaxKeysLimit": policy.s3_list_max_keys_limit,
+                "s3ListAllowDelimiter": policy.s3_list_allow_delimiter,
+                "s3VersioningEnabled": policy.s3_versioning_enabled,
+                "s3ObjectTaggingEnabled": policy.s3_object_tagging_enabled,
+                "s3ChecksumAlgorithm": policy.s3_checksum_algorithm,
+                "s3MultipartAbortDays": policy.s3_multipart_abort_days
             });
             if let Err(error) = state
                 .catalog

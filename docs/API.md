@@ -187,6 +187,15 @@ Na implementação atual, o plano administrativo já expõe contratos para:
 
 ```http
 GET /api/admin/audit-events
+GET /api/admin/configuration
+POST /api/admin/configuration
+GET /api/admin/mcp/settings
+PUT /api/admin/mcp/settings
+GET /api/admin/mcp/status
+GET /api/admin/mcp/tokens
+POST /api/admin/mcp/tokens
+DELETE /api/admin/mcp/tokens/{id}
+GET /api/admin/mcp/activity
 GET /api/admin/metrics/origin-traffic
 GET /api/admin/metrics/replica-traffic
 GET /api/admin/metrics/buckets
@@ -205,6 +214,13 @@ POST /api/admin/buckets/{bucket}/object-revocations/{objectKey}
 ```
 
 Essas rotas exigem sessão administrativa do painel.
+
+`GET /api/admin/configuration` exporta configurações operacionais sem segredos,
+incluindo settings MCP e políticas de buckets. `POST /api/admin/configuration`
+importa o mesmo formato e aplica apenas políticas de buckets existentes.
+
+MCP também está disponível como interface administrativa do plano de controle em
+`POST /mcp`. O contrato detalhado está em `docs/api/mcp.md`.
 
 ## Síntese
 

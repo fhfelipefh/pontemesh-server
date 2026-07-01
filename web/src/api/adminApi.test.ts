@@ -151,6 +151,13 @@ describe("admin API clients", () => {
       fragmentPriorityStrategy: "MANIFEST_ORDER",
       failureThreshold: 3,
       fallbackMode: "ORIGIN_RANGE",
+      s3ListDefaultMaxKeys: 1000,
+      s3ListMaxKeysLimit: 10000,
+      s3ListAllowDelimiter: true,
+      s3VersioningEnabled: false,
+      s3ObjectTaggingEnabled: true,
+      s3ChecksumAlgorithm: "SHA256",
+      s3MultipartAbortDays: 7,
       updatedAt: "2026-07-01T12:00:00Z"
     };
     const fetchMock = vi.spyOn(globalThis, "fetch")
@@ -166,7 +173,14 @@ describe("admin API clients", () => {
       sourceSelectionStrategy: "PEER_FIRST",
       fragmentPriorityStrategy: "MANIFEST_ORDER",
       failureThreshold: 3,
-      fallbackMode: "ORIGIN_RANGE"
+      fallbackMode: "ORIGIN_RANGE",
+      s3ListDefaultMaxKeys: 1000,
+      s3ListMaxKeysLimit: 10000,
+      s3ListAllowDelimiter: true,
+      s3VersioningEnabled: false,
+      s3ObjectTaggingEnabled: true,
+      s3ChecksumAlgorithm: "SHA256",
+      s3MultipartAbortDays: 7
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/buckets/media/policy", {
@@ -185,7 +199,14 @@ describe("admin API clients", () => {
         sourceSelectionStrategy: "PEER_FIRST",
         fragmentPriorityStrategy: "MANIFEST_ORDER",
         failureThreshold: 3,
-        fallbackMode: "ORIGIN_RANGE"
+        fallbackMode: "ORIGIN_RANGE",
+        s3ListDefaultMaxKeys: 1000,
+        s3ListMaxKeysLimit: 10000,
+        s3ListAllowDelimiter: true,
+        s3VersioningEnabled: false,
+        s3ObjectTaggingEnabled: true,
+        s3ChecksumAlgorithm: "SHA256",
+        s3MultipartAbortDays: 7
       })
     });
   });

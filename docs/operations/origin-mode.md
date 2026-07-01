@@ -64,7 +64,7 @@ Isso inclui:
 * métricas;
 * auditoria;
 * coordenação de Replica/Edge;
-* integração administrativa via API, painel futuro e MCP, quando existir.
+* integração administrativa via API, painel e MCP.
 
 O plano de controle deve permanecer centralizado no Origin.
 
@@ -303,7 +303,7 @@ Eventos recomendados:
 * emissão de plano de sincronização;
 * anúncio de disponibilidade de réplica;
 * operação administrativa sensível;
-* evento MCP, quando existir.
+* evento MCP.
 
 A auditoria deve registrar quem executou a ação, quando ocorreu, qual recurso foi afetado, qual política foi aplicada e qual foi o resultado.
 

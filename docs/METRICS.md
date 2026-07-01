@@ -323,8 +323,8 @@ Eventos recomendados:
 * falha de autenticação;
 * falha de autorização;
 * operação administrativa sensível;
-* eventos MCP, quando existir;
-* eventos de dashboard administrativo, quando existir.
+* eventos MCP;
+* eventos de dashboard administrativo.
 
 A auditoria deve registrar quem executou a ação, quando ocorreu, qual recurso foi afetado e qual foi o resultado da operação.
 

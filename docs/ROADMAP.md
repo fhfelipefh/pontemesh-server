@@ -273,7 +273,7 @@ Entregas esperadas:
 * métricas por objeto;
 * métricas por bucket;
 * eventos administrativos sensíveis;
-* eventos MCP, quando existir;
+* eventos MCP;
 * exportação futura para ferramentas de observabilidade.
 
 Métrica principal:
@@ -343,7 +343,7 @@ Entregas esperadas:
 * APIs para configuração de estratégias de fallback;
 * APIs para configuração de priorização de fragmentos;
 * contratos para dashboard;
-* integração MCP futura, quando aplicável.
+* operação MCP administrativa com ferramentas de leitura, backup e escrita controlada.
 
 Critérios de conclusão:
 

@@ -230,7 +230,7 @@ async fn handle_json_rpc(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            Ok(Some(tools::call_tool(state, name, arguments).await?))
+            Ok(Some(tools::call_tool(state, name, arguments, settings.write_tools_enabled).await?))
         }
         "resources/list" => {
             if !settings.expose_resources {

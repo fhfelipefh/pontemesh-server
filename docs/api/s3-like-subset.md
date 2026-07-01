@@ -44,6 +44,12 @@ O subconjunto S3-like deve contemplar, no mínimo:
 * DELETE Object como deleção lógica;
 * URL temporária ou mecanismo equivalente.
 
+O objetivo do projeto é evoluir para uma compatibilidade S3 ampla, mantendo a
+separação entre a interface S3-compatible e os contratos próprios do Ponte Mesh.
+Recursos S3 que forem adicionados devem preservar comportamento familiar para
+clientes S3 existentes e, quando necessário, expor configuração operacional por
+política de bucket, API administrativa e MCP.
+
 Na implementação atual, o painel web/admin e a API S3-compatible usam endpoints
 separados. O painel usa `http://localhost:8080`; o endpoint S3-compatible usa
 `http://localhost:9000`:
@@ -53,6 +59,8 @@ GET /
 PUT /{bucket}
 GET /{bucket}?list-type=2
 GET /{bucket}?location
+GET /{bucket}?versioning
+PUT /{bucket}?versioning
 HEAD /{bucket}
 POST /{bucket}?delete
 DELETE /{bucket}
@@ -60,6 +68,9 @@ PUT /{bucket}/{objectKey}
 HEAD /{bucket}/{objectKey}
 GET /{bucket}/{objectKey}
 DELETE /{bucket}/{objectKey}
+GET /{bucket}/{objectKey}?tagging
+PUT /{bucket}/{objectKey}?tagging
+DELETE /{bucket}/{objectKey}?tagging
 POST /{bucket}/{objectKey}?uploads
 PUT /{bucket}/{objectKey}?partNumber={partNumber}&uploadId={uploadId}
 GET /{bucket}/{objectKey}?uploadId={uploadId}
@@ -73,6 +84,12 @@ Todas exigem credenciais S3 próprias e AWS Signature Version 4.
 O endpoint S3-compatible também aceita URLs pré-assinadas SigV4 por query
 string (`X-Amz-*`) para acesso temporário. A validação continua usando a chave
 S3 gerenciada no catálogo, respeita revogação da chave e rejeita URLs expiradas.
+
+`ListObjectsV2` usa os parâmetros `prefix`, `delimiter`, `max-keys`,
+`continuation-token` e `start-after`. O limite padrão e o limite máximo aceito
+vêm da política do bucket, não de valores fixos no handler. A resposta inclui
+`KeyCount`, `MaxKeys`, `IsTruncated`, `NextContinuationToken`, `StartAfter` e
+`CommonPrefixes` quando aplicável.
 
 O fluxo Multipart Upload é persistido em PostgreSQL e em arquivos de partes no
 storage configurado. O objeto só entra no catálogo e só recebe manifesto após
@@ -257,6 +274,29 @@ A compatibilidade deve ser entendida como um subconjunto prático e documentado.
 Aplicações já baseadas em clientes S3 devem conseguir trocar principalmente o endpoint quando utilizarem apenas as operações suportadas.
 
 Recursos avançados podem ser documentados conforme entrarem no escopo.
+
+## Configuração S3-compatible por bucket
+
+A política de bucket inclui parâmetros S3-compatible:
+
+* `s3ListDefaultMaxKeys`;
+* `s3ListMaxKeysLimit`;
+* `s3ListAllowDelimiter`;
+* `s3VersioningEnabled`;
+* `s3ObjectTaggingEnabled`;
+* `s3ChecksumAlgorithm`;
+* `s3MultipartAbortDays`.
+
+Esses campos são administrados pelo painel, API administrativa e MCP. Eles não
+incluem segredos e podem participar de exportação/importação de configuração.
+
+`GET/PUT ?versioning` usa `s3VersioningEnabled` na política do bucket. O
+versionamento físico completo de múltiplas versões S3 ainda é evolução futura,
+mas a configuração já é compatível com clientes que consultam ou ajustam o estado
+do recurso.
+
+`GET/PUT/DELETE ?tagging` persiste até 10 tags por objeto ativo quando
+`s3ObjectTaggingEnabled` está habilitado para o bucket.
 
 ## Diferença interna
 

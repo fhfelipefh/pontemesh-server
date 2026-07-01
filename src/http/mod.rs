@@ -61,7 +61,7 @@ pub fn s3_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catalo
         .route("/", get(origin::list_buckets))
         .route(
             "/{bucket_name}",
-            put(origin::create_bucket)
+            put(origin::put_bucket)
                 .post(origin::post_bucket)
                 .get(origin::list_objects)
                 .head(origin::head_bucket)
@@ -98,6 +98,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         .route("/api/admin/storage/status", get(admin::storage_status))
         .route("/api/admin/audit-events", get(admin::list_audit_events))
         .route("/api/admin/logs/application", get(admin::application_logs))
+        .route(
+            "/api/admin/configuration",
+            get(admin::export_configuration).post(admin::import_configuration),
+        )
         .route(
             "/api/admin/mcp/settings",
             get(admin::get_mcp_settings).put(admin::update_mcp_settings),

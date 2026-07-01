@@ -17,6 +17,13 @@ export type BucketPolicy = {
   fragmentPriorityStrategy: "MANIFEST_ORDER" | "INITIAL_FIRST" | "RAREST_FIRST" | string;
   failureThreshold: number;
   fallbackMode: "ORIGIN_RANGE" | "ORIGIN_FULL_OBJECT" | "DISABLED" | string;
+  s3ListDefaultMaxKeys: number;
+  s3ListMaxKeysLimit: number;
+  s3ListAllowDelimiter: boolean;
+  s3VersioningEnabled: boolean;
+  s3ObjectTaggingEnabled: boolean;
+  s3ChecksumAlgorithm: "SHA256" | "ETAG_MD5_COMPATIBLE" | "NONE" | string;
+  s3MultipartAbortDays: number;
   updatedAt: string;
 };
 
@@ -29,6 +36,13 @@ export type UpdateBucketPolicyInput = {
   fragmentPriorityStrategy: string;
   failureThreshold: number;
   fallbackMode: string;
+  s3ListDefaultMaxKeys: number;
+  s3ListMaxKeysLimit: number;
+  s3ListAllowDelimiter: boolean;
+  s3VersioningEnabled: boolean;
+  s3ObjectTaggingEnabled: boolean;
+  s3ChecksumAlgorithm: string;
+  s3MultipartAbortDays: number;
 };
 
 export type ObjectSummary = {

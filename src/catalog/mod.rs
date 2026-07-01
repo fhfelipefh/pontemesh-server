@@ -56,6 +56,26 @@ pub struct PaginatedObjects {
     pub total_pages: u32,
 }
 
+#[derive(Debug, Clone)]
+pub struct ListObjectsV2Options {
+    pub prefix: Option<String>,
+    pub delimiter: Option<String>,
+    pub max_keys: i64,
+    pub continuation_token: Option<String>,
+    pub start_after: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct S3ListObjectsPage {
+    pub items: Vec<ObjectSummary>,
+    pub common_prefixes: Vec<String>,
+    pub key_count: usize,
+    pub max_keys: i64,
+    pub is_truncated: bool,
+    pub next_continuation_token: Option<String>,
+    pub start_after: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectRecord {
@@ -68,6 +88,13 @@ pub struct ObjectRecord {
     pub state: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S3ObjectTag {
+    pub key: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectTotals {
@@ -76,7 +103,7 @@ pub struct ObjectTotals {
     pub total_object_bytes: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BucketPolicy {
     pub bucket_name: String,
@@ -88,10 +115,18 @@ pub struct BucketPolicy {
     pub fragment_priority_strategy: String,
     pub failure_threshold: i64,
     pub fallback_mode: String,
+    pub s3_list_default_max_keys: i64,
+    pub s3_list_max_keys_limit: i64,
+    pub s3_list_allow_delimiter: bool,
+    pub s3_versioning_enabled: bool,
+    pub s3_object_tagging_enabled: bool,
+    pub s3_checksum_algorithm: String,
+    pub s3_multipart_abort_days: i64,
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BucketPolicyUpdate {
     pub access_package_ttl_seconds: i64,
     pub fragment_size_bytes: i64,
@@ -101,6 +136,13 @@ pub struct BucketPolicyUpdate {
     pub fragment_priority_strategy: String,
     pub failure_threshold: i64,
     pub fallback_mode: String,
+    pub s3_list_default_max_keys: i64,
+    pub s3_list_max_keys_limit: i64,
+    pub s3_list_allow_delimiter: bool,
+    pub s3_versioning_enabled: bool,
+    pub s3_object_tagging_enabled: bool,
+    pub s3_checksum_algorithm: String,
+    pub s3_multipart_abort_days: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -1030,6 +1072,13 @@ impl Catalog {
                 p.fragment_priority_strategy,
                 p.failure_threshold,
                 p.fallback_mode,
+                p.s3_list_default_max_keys,
+                p.s3_list_max_keys_limit,
+                p.s3_list_allow_delimiter,
+                p.s3_versioning_enabled,
+                p.s3_object_tagging_enabled,
+                p.s3_checksum_algorithm,
+                p.s3_multipart_abort_days,
                 p.updated_at
             FROM bucket_policies p
             JOIN buckets b ON b.id = p.bucket_id
@@ -1045,6 +1094,39 @@ impl Catalog {
             Some(row) => Ok(bucket_policy_from_row(row)),
             None => bail!("bucket not found: {bucket_name}"),
         }
+    }
+
+    pub async fn list_bucket_policies(&self) -> anyhow::Result<Vec<BucketPolicy>> {
+        let rows = query(
+            r#"
+            SELECT
+                b.name,
+                p.access_package_ttl_seconds,
+                p.fragment_size_bytes,
+                p.allow_replica_edge,
+                p.allow_peer_sharing,
+                p.source_selection_strategy,
+                p.fragment_priority_strategy,
+                p.failure_threshold,
+                p.fallback_mode,
+                p.s3_list_default_max_keys,
+                p.s3_list_max_keys_limit,
+                p.s3_list_allow_delimiter,
+                p.s3_versioning_enabled,
+                p.s3_object_tagging_enabled,
+                p.s3_checksum_algorithm,
+                p.s3_multipart_abort_days,
+                p.updated_at
+            FROM bucket_policies p
+            JOIN buckets b ON b.id = p.bucket_id
+            WHERE b.deleted_at IS NULL
+            ORDER BY b.name ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list bucket policies")?;
+        Ok(rows.into_iter().map(bucket_policy_from_row).collect())
     }
 
     pub async fn update_bucket_policy(
@@ -1066,9 +1148,13 @@ impl Catalog {
                 bucket_id, access_package_ttl_seconds, fragment_size_bytes,
                 allow_replica_edge, allow_peer_sharing,
                 source_selection_strategy, fragment_priority_strategy,
-                failure_threshold, fallback_mode, updated_at
+                failure_threshold, fallback_mode,
+                s3_list_default_max_keys, s3_list_max_keys_limit,
+                s3_list_allow_delimiter, s3_versioning_enabled,
+                s3_object_tagging_enabled, s3_checksum_algorithm,
+                s3_multipart_abort_days, updated_at
             )
-            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, now())
+            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
             ON CONFLICT (bucket_id) DO UPDATE SET
                 access_package_ttl_seconds = EXCLUDED.access_package_ttl_seconds,
                 fragment_size_bytes = EXCLUDED.fragment_size_bytes,
@@ -1078,11 +1164,22 @@ impl Catalog {
                 fragment_priority_strategy = EXCLUDED.fragment_priority_strategy,
                 failure_threshold = EXCLUDED.failure_threshold,
                 fallback_mode = EXCLUDED.fallback_mode,
+                s3_list_default_max_keys = EXCLUDED.s3_list_default_max_keys,
+                s3_list_max_keys_limit = EXCLUDED.s3_list_max_keys_limit,
+                s3_list_allow_delimiter = EXCLUDED.s3_list_allow_delimiter,
+                s3_versioning_enabled = EXCLUDED.s3_versioning_enabled,
+                s3_object_tagging_enabled = EXCLUDED.s3_object_tagging_enabled,
+                s3_checksum_algorithm = EXCLUDED.s3_checksum_algorithm,
+                s3_multipart_abort_days = EXCLUDED.s3_multipart_abort_days,
                 updated_at = now()
             RETURNING access_package_ttl_seconds, fragment_size_bytes,
                 allow_replica_edge, allow_peer_sharing,
                 source_selection_strategy, fragment_priority_strategy,
-                failure_threshold, fallback_mode, updated_at
+                failure_threshold, fallback_mode,
+                s3_list_default_max_keys, s3_list_max_keys_limit,
+                s3_list_allow_delimiter, s3_versioning_enabled,
+                s3_object_tagging_enabled, s3_checksum_algorithm,
+                s3_multipart_abort_days, updated_at
             "#,
         )
         .bind(bucket_id)
@@ -1094,6 +1191,13 @@ impl Catalog {
         .bind(&update.fragment_priority_strategy)
         .bind(update.failure_threshold)
         .bind(&update.fallback_mode)
+        .bind(update.s3_list_default_max_keys)
+        .bind(update.s3_list_max_keys_limit)
+        .bind(update.s3_list_allow_delimiter)
+        .bind(update.s3_versioning_enabled)
+        .bind(update.s3_object_tagging_enabled)
+        .bind(&update.s3_checksum_algorithm)
+        .bind(update.s3_multipart_abort_days)
         .fetch_one(&mut *tx)
         .await
         .context("failed to update bucket policy")?;
@@ -1111,12 +1215,25 @@ impl Catalog {
             fragment_priority_strategy: row.get("fragment_priority_strategy"),
             failure_threshold: row.get("failure_threshold"),
             fallback_mode: row.get("fallback_mode"),
+            s3_list_default_max_keys: row.get("s3_list_default_max_keys"),
+            s3_list_max_keys_limit: row.get("s3_list_max_keys_limit"),
+            s3_list_allow_delimiter: row.get("s3_list_allow_delimiter"),
+            s3_versioning_enabled: row.get("s3_versioning_enabled"),
+            s3_object_tagging_enabled: row.get("s3_object_tagging_enabled"),
+            s3_checksum_algorithm: row.get("s3_checksum_algorithm"),
+            s3_multipart_abort_days: row.get("s3_multipart_abort_days"),
             updated_at: format_datetime(row.get("updated_at")),
         })
     }
 
-    pub async fn list_objects(&self, bucket_name: &str) -> anyhow::Result<Vec<ObjectSummary>> {
+    pub async fn list_objects_v2(
+        &self,
+        bucket_name: &str,
+        options: ListObjectsV2Options,
+    ) -> anyhow::Result<S3ListObjectsPage> {
         validate_bucket_name(bucket_name)?;
+        let marker = options.continuation_token.or(options.start_after.clone());
+        let prefix = options.prefix.unwrap_or_default();
         let rows = query(
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
@@ -1124,16 +1241,71 @@ impl Catalog {
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.id = o.current_version_id
-            WHERE b.name = $1 AND b.deleted_at IS NULL AND o.deleted_at IS NULL
-            ORDER BY v.created_at DESC, o.object_key ASC
+            WHERE b.name = $1
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+              AND o.object_key LIKE $2 || '%'
+              AND ($3::text IS NULL OR o.object_key > $3)
+            ORDER BY o.object_key ASC
             "#,
         )
         .bind(bucket_name)
+        .bind(&prefix)
+        .bind(marker.as_deref())
         .fetch_all(&self.pool)
         .await
         .context("failed to list objects")?;
 
-        Ok(rows.into_iter().map(object_summary_from_row).collect())
+        let max_keys = options.max_keys.max(1);
+        let delimiter = options.delimiter.filter(|value| !value.is_empty());
+        let mut items = Vec::new();
+        let mut common_prefixes = Vec::<String>::new();
+        let mut emitted = 0_i64;
+        let mut last_emitted_key: Option<String> = marker;
+        let mut is_truncated = false;
+
+        for row in rows {
+            let object = object_summary_from_row(row);
+            let candidate_prefix = delimiter
+                .as_deref()
+                .and_then(|delimiter| common_prefix_for_key(&prefix, delimiter, &object.key));
+            let will_emit = match candidate_prefix {
+                Some(common_prefix) => {
+                    if common_prefixes.iter().any(|value| value == &common_prefix) {
+                        false
+                    } else {
+                        if emitted >= max_keys {
+                            is_truncated = true;
+                            break;
+                        }
+                        common_prefixes.push(common_prefix);
+                        true
+                    }
+                }
+                None => {
+                    if emitted >= max_keys {
+                        is_truncated = true;
+                        break;
+                    }
+                    items.push(object.clone());
+                    true
+                }
+            };
+            if will_emit {
+                emitted += 1;
+                last_emitted_key = Some(object.key);
+            }
+        }
+
+        Ok(S3ListObjectsPage {
+            items,
+            common_prefixes,
+            key_count: usize::try_from(emitted).unwrap_or(usize::MAX),
+            max_keys,
+            is_truncated,
+            next_continuation_token: is_truncated.then_some(last_emitted_key).flatten(),
+            start_after: options.start_after,
+        })
     }
 
     pub async fn list_objects_page(
@@ -1382,6 +1554,109 @@ impl Catalog {
         .context("failed to load object")?;
 
         Ok(row.map(object_record_from_row))
+    }
+
+    pub async fn list_object_tags(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<Vec<S3ObjectTag>> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let rows = query(
+            r#"
+            SELECT t.tag_key, t.tag_value
+            FROM s3_object_tags t
+            JOIN objects o ON o.id = t.object_id
+            JOIN buckets b ON b.id = o.bucket_id
+            WHERE b.name = $1
+              AND b.deleted_at IS NULL
+              AND o.object_key = $2
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+            ORDER BY t.tag_key ASC
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list object tags")?;
+        Ok(rows
+            .into_iter()
+            .map(|row| S3ObjectTag {
+                key: row.get("tag_key"),
+                value: row.get("tag_value"),
+            })
+            .collect())
+    }
+
+    pub async fn replace_object_tags(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        tags: Vec<S3ObjectTag>,
+    ) -> anyhow::Result<Vec<S3ObjectTag>> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        validate_s3_object_tags(&tags)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin object tag transaction")?;
+        let object_id: Option<String> = query_scalar(
+            r#"
+            SELECT o.id::text
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            WHERE b.name = $1
+              AND b.deleted_at IS NULL
+              AND o.object_key = $2
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_optional(&mut *tx)
+        .await
+        .context("failed to load object for tagging")?;
+        let object_id = object_id.ok_or_else(|| anyhow::anyhow!("object not found"))?;
+
+        query("DELETE FROM s3_object_tags WHERE object_id = $1::uuid")
+            .bind(&object_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed to clear object tags")?;
+        for tag in &tags {
+            query(
+                r#"
+                INSERT INTO s3_object_tags (object_id, tag_key, tag_value)
+                VALUES ($1::uuid, $2, $3)
+                "#,
+            )
+            .bind(&object_id)
+            .bind(&tag.key)
+            .bind(&tag.value)
+            .execute(&mut *tx)
+            .await
+            .context("failed to store object tag")?;
+        }
+        tx.commit()
+            .await
+            .context("failed to commit object tags")?;
+        Ok(tags)
+    }
+
+    pub async fn delete_object_tags(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<()> {
+        self.replace_object_tags(bucket_name, object_key, Vec::new())
+            .await?;
+        Ok(())
     }
 
     pub async fn get_object_manifest(
@@ -4053,6 +4328,13 @@ fn bucket_policy_from_row(row: PgRow) -> BucketPolicy {
         fragment_priority_strategy: row.get("fragment_priority_strategy"),
         failure_threshold: row.get("failure_threshold"),
         fallback_mode: row.get("fallback_mode"),
+        s3_list_default_max_keys: row.get("s3_list_default_max_keys"),
+        s3_list_max_keys_limit: row.get("s3_list_max_keys_limit"),
+        s3_list_allow_delimiter: row.get("s3_list_allow_delimiter"),
+        s3_versioning_enabled: row.get("s3_versioning_enabled"),
+        s3_object_tagging_enabled: row.get("s3_object_tagging_enabled"),
+        s3_checksum_algorithm: row.get("s3_checksum_algorithm"),
+        s3_multipart_abort_days: row.get("s3_multipart_abort_days"),
         updated_at: format_datetime(row.get("updated_at")),
     }
 }
@@ -4269,6 +4551,42 @@ fn validate_bucket_policy(update: &BucketPolicyUpdate) -> anyhow::Result<()> {
         &update.fallback_mode,
         &["ORIGIN_RANGE", "ORIGIN_FULL_OBJECT", "DISABLED"],
     )?;
+    if !(1..=10_000).contains(&update.s3_list_default_max_keys) {
+        bail!("s3ListDefaultMaxKeys must be between 1 and 10000");
+    }
+    if !(1..=100_000).contains(&update.s3_list_max_keys_limit) {
+        bail!("s3ListMaxKeysLimit must be between 1 and 100000");
+    }
+    if update.s3_list_default_max_keys > update.s3_list_max_keys_limit {
+        bail!("s3ListDefaultMaxKeys cannot be greater than s3ListMaxKeysLimit");
+    }
+    validate_policy_enum(
+        "s3ChecksumAlgorithm",
+        &update.s3_checksum_algorithm,
+        &["SHA256", "ETAG_MD5_COMPATIBLE", "NONE"],
+    )?;
+    if !(1..=365).contains(&update.s3_multipart_abort_days) {
+        bail!("s3MultipartAbortDays must be between 1 and 365");
+    }
+    Ok(())
+}
+
+fn validate_s3_object_tags(tags: &[S3ObjectTag]) -> anyhow::Result<()> {
+    if tags.len() > 10 {
+        bail!("S3 object tagging supports at most 10 tags");
+    }
+    let mut keys = std::collections::HashSet::new();
+    for tag in tags {
+        if tag.key.trim().is_empty() || tag.key.len() > 128 {
+            bail!("tag key must be between 1 and 128 bytes");
+        }
+        if tag.value.len() > 256 {
+            bail!("tag value must be at most 256 bytes");
+        }
+        if !keys.insert(tag.key.clone()) {
+            bail!("tag keys must be unique");
+        }
+    }
     Ok(())
 }
 
@@ -4308,6 +4626,17 @@ fn validate_policy_enum(field: &str, value: &str, allowed: &[&str]) -> anyhow::R
         return Ok(());
     }
     bail!("{field} is not supported");
+}
+
+fn common_prefix_for_key(prefix: &str, delimiter: &str, key: &str) -> Option<String> {
+    let rest = key.strip_prefix(prefix)?;
+    let delimiter_index = rest.find(delimiter)?;
+    Some(format!(
+        "{}{}{}",
+        prefix,
+        &rest[..delimiter_index],
+        delimiter
+    ))
 }
 
 pub fn validate_bucket_name(name: &str) -> anyhow::Result<()> {

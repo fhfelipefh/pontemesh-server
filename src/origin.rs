@@ -1,8 +1,9 @@
 use crate::{
     audit,
     catalog::{
-        self, BucketSummary, MultipartPartRecord, MultipartUploadRecord, NewObject,
-        NewObjectFragment, NewObjectManifest, ObjectRecord, ObjectSummary,
+        self, BucketSummary, ListObjectsV2Options, MultipartPartRecord, MultipartUploadRecord,
+        NewObject, NewObjectFragment, NewObjectManifest, ObjectRecord, ObjectSummary,
+        S3ListObjectsPage, S3ObjectTag,
     },
     config,
     http::AppState,
@@ -28,9 +29,17 @@ pub struct ListObjectsQuery {
     #[serde(rename = "list-type")]
     list_type: Option<String>,
     prefix: Option<String>,
+    delimiter: Option<String>,
+    #[serde(rename = "max-keys")]
+    max_keys: Option<i64>,
+    #[serde(rename = "continuation-token")]
+    continuation_token: Option<String>,
+    #[serde(rename = "start-after")]
+    start_after: Option<String>,
     uploads: Option<String>,
     location: Option<String>,
     delete: Option<String>,
+    versioning: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +49,7 @@ pub struct ObjectMultipartQuery {
     #[serde(rename = "partNumber")]
     part_number: Option<i32>,
     uploads: Option<String>,
+    tagging: Option<String>,
 }
 
 pub async fn list_buckets(
@@ -62,10 +72,10 @@ pub async fn list_buckets(
     }
 }
 
-pub async fn create_bucket(
-    State(state): State<AppState>,
-    Extension(identity): Extension<S3Identity>,
-    Path(bucket_name): Path<String>,
+async fn create_bucket_inner_response(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
 ) -> Response {
     match create_bucket_inner(&state, &bucket_name).await {
         Ok(bucket) => {
@@ -134,6 +144,16 @@ pub async fn list_objects(
         };
     }
 
+    if query.versioning.is_some() {
+        return match state.catalog.get_bucket_policy(&bucket_name).await {
+            Ok(policy) => s3_xml_response(
+                StatusCode::OK,
+                bucket_versioning_xml(policy.s3_versioning_enabled),
+            ),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
     if query.uploads.is_some() {
         return match state
             .catalog
@@ -158,11 +178,28 @@ pub async fn list_objects(
         );
     }
 
-    match state.catalog.list_objects(&bucket_name).await {
-        Ok(objects) => s3_xml_response(
-            StatusCode::OK,
-            list_objects_v2_xml(&bucket_name, query.prefix.as_deref(), &objects),
-        ),
+    let policy = match state.catalog.get_bucket_policy(&bucket_name).await {
+        Ok(policy) => policy,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), None),
+    };
+    let max_keys = query
+        .max_keys
+        .unwrap_or(policy.s3_list_default_max_keys)
+        .clamp(1, policy.s3_list_max_keys_limit);
+    let delimiter = query
+        .delimiter
+        .clone()
+        .filter(|value| policy.s3_list_allow_delimiter && value == "/");
+    let options = ListObjectsV2Options {
+        prefix: query.prefix.clone(),
+        delimiter,
+        max_keys,
+        continuation_token: query.continuation_token.clone(),
+        start_after: query.start_after.clone(),
+    };
+
+    match state.catalog.list_objects_v2(&bucket_name, options).await {
+        Ok(page) => s3_xml_response(StatusCode::OK, list_objects_v2_xml(&bucket_name, &query, &page)),
         Err(error) => s3_bad_request(error, Some(&bucket_name), None),
     }
 }
@@ -187,6 +224,20 @@ pub async fn post_bucket(
     )
 }
 
+pub async fn put_bucket(
+    State(state): State<AppState>,
+    Extension(identity): Extension<S3Identity>,
+    Path(bucket_name): Path<String>,
+    Query(query): Query<ListObjectsQuery>,
+    body: Body,
+) -> Response {
+    if query.versioning.is_some() {
+        return put_bucket_versioning(state, identity, bucket_name, body).await;
+    }
+
+    create_bucket_inner_response(state, identity, bucket_name).await
+}
+
 pub async fn put_object(
     State(state): State<AppState>,
     Extension(identity): Extension<S3Identity>,
@@ -195,6 +246,10 @@ pub async fn put_object(
     Query(query): Query<ObjectMultipartQuery>,
     body: Body,
 ) -> Response {
+    if query.tagging.is_some() {
+        return put_object_tagging(state, identity, bucket_name, object_key, body).await;
+    }
+
     if let (Some(upload_id), Some(part_number)) = (query.upload_id.as_deref(), query.part_number) {
         return upload_multipart_part(
             state,
@@ -333,6 +388,10 @@ pub async fn get_object(
     Path((bucket_name, object_key)): Path<(String, String)>,
     Query(query): Query<ObjectMultipartQuery>,
 ) -> Response {
+    if query.tagging.is_some() {
+        return get_object_tagging(state, identity, bucket_name, object_key).await;
+    }
+
     if let Some(upload_id) = query.upload_id.as_deref() {
         return match state
             .catalog
@@ -387,6 +446,10 @@ pub async fn delete_object(
     Query(query): Query<ObjectMultipartQuery>,
     Path((bucket_name, object_key)): Path<(String, String)>,
 ) -> Response {
+    if query.tagging.is_some() {
+        return delete_object_tagging(state, identity, bucket_name, object_key).await;
+    }
+
     if let Some(upload_id) = query.upload_id.as_deref() {
         return abort_multipart_upload(state, identity, bucket_name, object_key, upload_id).await;
     }
@@ -477,6 +540,157 @@ async fn initiate_multipart_upload(
             )
             .await;
             s3_xml_response(StatusCode::OK, initiate_multipart_upload_xml(&upload))
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn put_bucket_versioning(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    body: Body,
+) -> Response {
+    let enabled = match parse_bucket_versioning(body).await {
+        Ok(enabled) => enabled,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), None),
+    };
+    let current = match state.catalog.get_bucket_policy(&bucket_name).await {
+        Ok(policy) => policy,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), None),
+    };
+    let update = catalog::BucketPolicyUpdate {
+        access_package_ttl_seconds: current.access_package_ttl_seconds,
+        fragment_size_bytes: current.fragment_size_bytes,
+        allow_replica_edge: current.allow_replica_edge,
+        allow_peer_sharing: current.allow_peer_sharing,
+        source_selection_strategy: current.source_selection_strategy,
+        fragment_priority_strategy: current.fragment_priority_strategy,
+        failure_threshold: current.failure_threshold,
+        fallback_mode: current.fallback_mode,
+        s3_list_default_max_keys: current.s3_list_default_max_keys,
+        s3_list_max_keys_limit: current.s3_list_max_keys_limit,
+        s3_list_allow_delimiter: current.s3_list_allow_delimiter,
+        s3_versioning_enabled: enabled,
+        s3_object_tagging_enabled: current.s3_object_tagging_enabled,
+        s3_checksum_algorithm: current.s3_checksum_algorithm,
+        s3_multipart_abort_days: current.s3_multipart_abort_days,
+    };
+    match state.catalog.update_bucket_policy(&bucket_name, update).await {
+        Ok(_) => {
+            record_origin_audit(
+                &state,
+                "s3_bucket_versioning_updated",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; enabled={enabled}"),
+            )
+            .await;
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("x-amz-request-id", request_id())
+                .header(header::CONTENT_LENGTH, "0")
+                .body(Body::empty())
+                .expect("valid PutBucketVersioning response")
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+    }
+}
+
+async fn get_object_tagging(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    object_key: String,
+) -> Response {
+    match object_tagging_enabled(&state, &bucket_name).await {
+        Ok(true) => {}
+        Ok(false) => return tagging_disabled_response(&bucket_name, &object_key),
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+    match state.catalog.list_object_tags(&bucket_name, &object_key).await {
+        Ok(tags) => {
+            record_origin_audit(
+                &state,
+                "s3_object_tags_read",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}"),
+            )
+            .await;
+            s3_xml_response(StatusCode::OK, object_tagging_xml(&tags))
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn put_object_tagging(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    object_key: String,
+    body: Body,
+) -> Response {
+    match object_tagging_enabled(&state, &bucket_name).await {
+        Ok(true) => {}
+        Ok(false) => return tagging_disabled_response(&bucket_name, &object_key),
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+    let tags = match parse_object_tagging(body).await {
+        Ok(tags) => tags,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    };
+    match state
+        .catalog
+        .replace_object_tags(&bucket_name, &object_key, tags)
+        .await
+    {
+        Ok(_) => {
+            record_origin_audit(
+                &state,
+                "s3_object_tags_updated",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}"),
+            )
+            .await;
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("x-amz-request-id", request_id())
+                .header(header::CONTENT_LENGTH, "0")
+                .body(Body::empty())
+                .expect("valid PutObjectTagging response")
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn delete_object_tagging(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    object_key: String,
+) -> Response {
+    match object_tagging_enabled(&state, &bucket_name).await {
+        Ok(true) => {}
+        Ok(false) => return tagging_disabled_response(&bucket_name, &object_key),
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+    match state.catalog.delete_object_tags(&bucket_name, &object_key).await {
+        Ok(()) => {
+            record_origin_audit(
+                &state,
+                "s3_object_tags_deleted",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}"),
+            )
+            .await;
+            Response::builder()
+                .status(StatusCode::NO_CONTENT)
+                .header("x-amz-request-id", request_id())
+                .body(Body::empty())
+                .expect("valid DeleteObjectTagging response")
         }
         Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
     }
@@ -1395,6 +1609,38 @@ async fn parse_complete_multipart_upload(body: Body) -> anyhow::Result<Vec<Compl
     Ok(parts)
 }
 
+async fn parse_bucket_versioning(body: Body) -> anyhow::Result<bool> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read PutBucketVersioning body")?
+        .to_bytes();
+    let xml = std::str::from_utf8(&bytes).context("PutBucketVersioning body is not UTF-8")?;
+    let status = extract_xml_tag(xml, "Status").unwrap_or_default();
+    match status.as_str() {
+        "Enabled" => Ok(true),
+        "Suspended" | "" => Ok(false),
+        _ => bail!("Bucket versioning Status must be Enabled or Suspended"),
+    }
+}
+
+async fn parse_object_tagging(body: Body) -> anyhow::Result<Vec<S3ObjectTag>> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read PutObjectTagging body")?
+        .to_bytes();
+    let xml = std::str::from_utf8(&bytes).context("PutObjectTagging body is not UTF-8")?;
+    let mut tags = Vec::new();
+    for tag_xml in extract_xml_blocks(xml, "Tag") {
+        let key = extract_xml_tag(&tag_xml, "Key")
+            .ok_or_else(|| anyhow::anyhow!("Tag must include Key"))?;
+        let value = extract_xml_tag(&tag_xml, "Value").unwrap_or_default();
+        tags.push(S3ObjectTag { key, value });
+    }
+    Ok(tags)
+}
+
 async fn parse_delete_objects(body: Body) -> anyhow::Result<Vec<String>> {
     let bytes = body
         .collect()
@@ -1728,17 +1974,10 @@ fn list_buckets_xml(buckets: &[BucketSummary]) -> String {
     )
 }
 
-fn list_objects_v2_xml(
-    bucket_name: &str,
-    prefix: Option<&str>,
-    objects: &[ObjectSummary],
-) -> String {
-    let prefix = prefix.unwrap_or("");
-    let filtered: Vec<&ObjectSummary> = objects
-        .iter()
-        .filter(|object| object.key.starts_with(prefix))
-        .collect();
-    let contents = filtered
+fn list_objects_v2_xml(bucket_name: &str, query: &ListObjectsQuery, page: &S3ListObjectsPage) -> String {
+    let prefix = query.prefix.as_deref().unwrap_or("");
+    let contents = page
+        .items
         .iter()
         .map(|object| {
             format!(
@@ -1751,15 +1990,47 @@ fn list_objects_v2_xml(
             )
         })
         .collect::<String>();
+    let common_prefixes = page
+        .common_prefixes
+        .iter()
+        .map(|prefix| format!("<CommonPrefixes><Prefix>{}</Prefix></CommonPrefixes>", xml_escape(prefix)))
+        .collect::<String>();
+    let delimiter = query
+        .delimiter
+        .as_deref()
+        .map(|value| format!("<Delimiter>{}</Delimiter>", xml_escape(value)))
+        .unwrap_or_default();
+    let continuation_token = query
+        .continuation_token
+        .as_deref()
+        .map(|value| format!("<ContinuationToken>{}</ContinuationToken>", xml_escape(value)))
+        .unwrap_or_default();
+    let next_continuation_token = page
+        .next_continuation_token
+        .as_deref()
+        .map(|value| format!("<NextContinuationToken>{}</NextContinuationToken>", xml_escape(value)))
+        .unwrap_or_default();
+    let start_after = page
+        .start_after
+        .as_deref()
+        .map(|value| format!("<StartAfter>{}</StartAfter>", xml_escape(value)))
+        .unwrap_or_default();
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
-<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
-<Name>{}</Name><Prefix>{}</Prefix><KeyCount>{}</KeyCount><MaxKeys>1000</MaxKeys>\
-<IsTruncated>false</IsTruncated>{}</ListBucketResult>",
+        <ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+        <Name>{}</Name><Prefix>{}</Prefix>{}<KeyCount>{}</KeyCount><MaxKeys>{}</MaxKeys>\
+        <IsTruncated>{}</IsTruncated>{}{}{}{}{}</ListBucketResult>",
         xml_escape(bucket_name),
         xml_escape(prefix),
-        filtered.len(),
-        contents
+        delimiter,
+        page.key_count,
+        page.max_keys,
+        if page.is_truncated { "true" } else { "false" },
+        continuation_token,
+        next_continuation_token,
+        start_after,
+        contents,
+        common_prefixes
     )
 }
 
@@ -1890,6 +2161,35 @@ fn complete_multipart_upload_xml(bucket_name: &str, object_key: &str, etag: &str
     )
 }
 
+fn bucket_versioning_xml(enabled: bool) -> String {
+    let status = if enabled {
+        "<Status>Enabled</Status>"
+    } else {
+        "<Status>Suspended</Status>"
+    };
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+        <VersioningConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">{status}</VersioningConfiguration>"
+    )
+}
+
+fn object_tagging_xml(tags: &[S3ObjectTag]) -> String {
+    let tags_xml = tags
+        .iter()
+        .map(|tag| {
+            format!(
+                "<Tag><Key>{}</Key><Value>{}</Value></Tag>",
+                xml_escape(&tag.key),
+                xml_escape(&tag.value)
+            )
+        })
+        .collect::<String>();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+        <Tagging xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><TagSet>{tags_xml}</TagSet></Tagging>"
+    )
+}
+
 fn multipart_upload_dir(state: &AppState, upload_id: &str) -> anyhow::Result<PathBuf> {
     Ok(config::configured_storage_dir(&state.paths)?
         .join("multipart")
@@ -1904,6 +2204,49 @@ fn remove_multipart_part_files(parts: &[MultipartPartRecord]) {
 
 fn request_id() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+async fn object_tagging_enabled(state: &AppState, bucket_name: &str) -> anyhow::Result<bool> {
+    Ok(state
+        .catalog
+        .get_bucket_policy(bucket_name)
+        .await?
+        .s3_object_tagging_enabled)
+}
+
+fn tagging_disabled_response(bucket_name: &str, object_key: &str) -> Response {
+    s3_error(
+        StatusCode::BAD_REQUEST,
+        "NotImplemented",
+        "Object tagging is disabled for this bucket",
+        Some(bucket_name),
+        Some(object_key),
+    )
+}
+
+fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = xml.find(&open)? + open.len();
+    let end = xml[start..].find(&close)? + start;
+    Some(xml[start..end].trim().to_owned())
+}
+
+fn extract_xml_blocks(xml: &str, tag: &str) -> Vec<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let mut rest = xml;
+    let mut blocks = Vec::new();
+    while let Some(open_index) = rest.find(&open) {
+        let content_start = open_index + open.len();
+        let Some(close_index) = rest[content_start..].find(&close) else {
+            break;
+        };
+        let content_end = content_start + close_index;
+        blocks.push(rest[content_start..content_end].to_owned());
+        rest = &rest[(content_end + close.len())..];
+    }
+    blocks
 }
 
 fn xml_escape(raw: &str) -> String {
@@ -1991,29 +2334,39 @@ mod tests {
 
     #[test]
     fn list_objects_v2_xml_filters_by_prefix_and_uses_s3_fields() {
+        let query = ListObjectsQuery {
+            list_type: Some("2".to_owned()),
+            prefix: Some("photos/".to_owned()),
+            delimiter: Some("/".to_owned()),
+            max_keys: Some(1),
+            continuation_token: None,
+            start_after: Some("photos/a.jpg".to_owned()),
+            uploads: None,
+            location: None,
+            delete: None,
+            versioning: None,
+        };
+        let page = S3ListObjectsPage {
+            items: vec![ObjectSummary {
+                key: "photos/cat & dog.jpg".to_owned(),
+                size_bytes: 123,
+                content_type: "image/jpeg".to_owned(),
+                sha256: "abc123".to_owned(),
+                created_at: "2026-06-29T12:00:00Z".to_owned(),
+                updated_at: "2026-06-29T12:00:00Z".to_owned(),
+                state: "AVAILABLE".to_owned(),
+            }],
+            common_prefixes: vec!["photos/nested/".to_owned()],
+            key_count: 2,
+            max_keys: 2,
+            is_truncated: true,
+            next_continuation_token: Some("photos/nested/file.txt".to_owned()),
+            start_after: Some("photos/a.jpg".to_owned()),
+        };
         let xml = list_objects_v2_xml(
             "media-bucket",
-            Some("photos/"),
-            &[
-                ObjectSummary {
-                    key: "photos/cat & dog.jpg".to_owned(),
-                    size_bytes: 123,
-                    content_type: "image/jpeg".to_owned(),
-                    sha256: "abc123".to_owned(),
-                    created_at: "2026-06-29T12:00:00Z".to_owned(),
-                    updated_at: "2026-06-29T12:00:00Z".to_owned(),
-                    state: "AVAILABLE".to_owned(),
-                },
-                ObjectSummary {
-                    key: "videos/clip.mp4".to_owned(),
-                    size_bytes: 456,
-                    content_type: "video/mp4".to_owned(),
-                    sha256: "def456".to_owned(),
-                    created_at: "2026-06-29T12:02:00Z".to_owned(),
-                    updated_at: "2026-06-29T12:02:00Z".to_owned(),
-                    state: "AVAILABLE".to_owned(),
-                },
-            ],
+            &query,
+            &page,
         );
 
         assert!(
@@ -2021,13 +2374,38 @@ mod tests {
         );
         assert!(xml.contains("<Name>media-bucket</Name>"));
         assert!(xml.contains("<Prefix>photos/</Prefix>"));
-        assert!(xml.contains("<KeyCount>1</KeyCount>"));
-        assert!(xml.contains("<IsTruncated>false</IsTruncated>"));
+        assert!(xml.contains("<Delimiter>/</Delimiter>"));
+        assert!(xml.contains("<KeyCount>2</KeyCount>"));
+        assert!(xml.contains("<MaxKeys>2</MaxKeys>"));
+        assert!(xml.contains("<IsTruncated>true</IsTruncated>"));
+        assert!(xml.contains("<NextContinuationToken>photos/nested/file.txt</NextContinuationToken>"));
+        assert!(xml.contains("<StartAfter>photos/a.jpg</StartAfter>"));
         assert!(xml.contains("<Key>photos/cat &amp; dog.jpg</Key>"));
+        assert!(xml.contains("<CommonPrefixes><Prefix>photos/nested/</Prefix></CommonPrefixes>"));
         assert!(xml.contains("<ETag>&quot;abc123&quot;</ETag>"));
         assert!(xml.contains("<Size>123</Size>"));
         assert!(xml.contains("<StorageClass>STANDARD</StorageClass>"));
-        assert!(!xml.contains("videos/clip.mp4"));
+    }
+
+    #[test]
+    fn bucket_versioning_and_object_tagging_xml_use_s3_shapes() {
+        let enabled = bucket_versioning_xml(true);
+        assert!(enabled.contains("<VersioningConfiguration"));
+        assert!(enabled.contains("<Status>Enabled</Status>"));
+
+        let tags = object_tagging_xml(&[
+            S3ObjectTag {
+                key: "project".to_owned(),
+                value: "ponte&mesh".to_owned(),
+            },
+            S3ObjectTag {
+                key: "env".to_owned(),
+                value: "dev".to_owned(),
+            },
+        ]);
+        assert!(tags.contains("<Tagging"));
+        assert!(tags.contains("<Key>project</Key><Value>ponte&amp;mesh</Value>"));
+        assert!(tags.contains("<Key>env</Key><Value>dev</Value>"));
     }
 
     #[tokio::test]

@@ -99,6 +99,7 @@
       "save": "Salvar",
       "close": "Fechar",
       "search": "Buscar",
+      "disabled": "Desabilitado",
       "previous": "Anterior",
       "next": "Próxima",
       "itemsPerPage": "Itens por página",
@@ -209,6 +210,13 @@
       "fallbackDisabled": "Desabilitado",
       "allowReplicaEdge": "Permitir Replica/Edge",
       "allowPeerSharing": "Permitir peers autorizados",
+      "s3ListDefaultMaxKeys": "Máximo padrão S3",
+      "s3ListMaxKeysLimit": "Limite máximo S3",
+      "s3ListAllowDelimiter": "Permitir delimiter S3",
+      "s3VersioningEnabled": "Versionamento S3",
+      "s3ObjectTaggingEnabled": "Tags de objeto S3",
+      "s3ChecksumAlgorithm": "Checksum S3",
+      "s3MultipartAbortDays": "Dias para abortar multipart",
       "emptyTitle": "Nenhum bucket criado ainda.",
       "emptyDescription": "Crie seu primeiro bucket para começar a armazenar objetos.",
       "noResultsTitle": "Nenhum bucket encontrado.",
@@ -296,6 +304,14 @@
     },
     "settings": {
       "title": "Configurações",
+      "configuration": {
+        "title": "Backup de configurações",
+        "export": "Exportar JSON",
+        "import": "Importar JSON",
+        "imported": "{{count}} políticas de bucket importadas. {{skipped}} ignoradas.",
+        "exportFailed": "Falha ao exportar configuração.",
+        "importFailed": "Falha ao importar configuração."
+      },
       "applications": {
         "title": "Credenciais de aplicação",
         "name": "Nome",

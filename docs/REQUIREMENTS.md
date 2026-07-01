@@ -135,8 +135,8 @@ O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a
 * **RF95:** O sistema deve registrar fragmentos invalidados por hash.
 * **RF96:** O sistema deve registrar eventos de autenticação, autorização, emissão de pacote de acesso, revogação, replicação, fallback e falhas.
 * **RF97:** O sistema deve auditar operações administrativas sensíveis.
-* **RF98:** O sistema deve permitir integração administrativa por painel, API e futuramente MCP.
-* **RF99:** Eventos MCP, quando existirem, devem ser registrados para auditoria.
+* **RF98:** O sistema deve permitir integração administrativa por painel, API e MCP.
+* **RF99:** Eventos MCP devem ser registrados para auditoria.
 
 ## Requisitos não funcionais
 
@@ -189,7 +189,7 @@ O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a
 * **RNF30:** A arquitetura deve manter separação clara entre plano de controle e plano de dados.
 * **RNF31:** O código deve preservar separação entre domínio S3-like e domínio Ponte Mesh.
 * **RNF32:** O projeto deve favorecer evolução futura de dashboard administrativo.
-* **RNF33:** O projeto deve permitir futura integração via MCP.
+* **RNF33:** O projeto deve manter MCP como interface administrativa do plano de controle, sem participar do plano de dados.
 * **RNF34:** O projeto deve permitir evolução futura do SDK sem quebrar contratos essenciais.
 * **RNF35:** O projeto deve evitar acoplamento entre regras internas do Origin e detalhes específicos de um único ambiente de cliente.
 

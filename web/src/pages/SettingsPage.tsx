@@ -1,6 +1,6 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Ban, Copy, KeyRound, Network, Plus, ShieldCheck, Wrench } from "lucide-react";
+import { Activity, Ban, Copy, Download, KeyRound, Network, Plus, ShieldCheck, Upload, Wrench } from "lucide-react";
 import {
   ApplicationCredentialSummary,
   CreatedApplicationCredential,
@@ -29,6 +29,7 @@ import {
   revokeMcpToken,
   updateMcpSettings
 } from "../api/mcpApi";
+import { ConfigurationImportResult, exportConfiguration, importConfiguration } from "../api/configurationApi";
 import { S3CredentialsCard } from "../components/settings/S3CredentialsCard";
 
 const S3_KEYS_PAGE_SIZE = 10;
@@ -63,6 +64,9 @@ export function SettingsPage() {
   const [creatingMcpToken, setCreatingMcpToken] = useState(false);
   const [revokingMcpToken, setRevokingMcpToken] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState("");
+  const [configurationImporting, setConfigurationImporting] = useState(false);
+  const [configurationResult, setConfigurationResult] = useState<ConfigurationImportResult | null>(null);
+  const [configurationError, setConfigurationError] = useState("");
 
   const refreshKeys = useCallback(async (page: number) => {
     setLoading(true);
@@ -238,6 +242,39 @@ export function SettingsPage() {
     }
   }
 
+  async function handleExportConfiguration() {
+    setConfigurationError("");
+    try {
+      const blob = await exportConfiguration();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `pontemesh-configuration-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (exportError) {
+      setConfigurationError(exportError instanceof Error ? exportError.message : t("setup.settings.configuration.exportFailed"));
+    }
+  }
+
+  async function handleImportConfiguration(file: File | null) {
+    if (!file) {
+      return;
+    }
+    setConfigurationImporting(true);
+    setConfigurationError("");
+    setConfigurationResult(null);
+    try {
+      const result = await importConfiguration(file);
+      setConfigurationResult(result);
+      await Promise.all([refreshMcp(), refreshKeys(currentPage)]);
+    } catch (importError) {
+      setConfigurationError(importError instanceof Error ? importError.message : t("setup.settings.configuration.importFailed"));
+    } finally {
+      setConfigurationImporting(false);
+    }
+  }
+
   return (
     <div className="settings-page">
       <header className="settings-page__header">
@@ -247,6 +284,13 @@ export function SettingsPage() {
       </header>
 
       <div className="settings-page__grid">
+        <ConfigurationBackupCard
+          importing={configurationImporting}
+          result={configurationResult}
+          error={configurationError}
+          onExport={() => void handleExportConfiguration()}
+          onImport={(file) => void handleImportConfiguration(file)}
+        />
         <McpSettingsCard
           settings={mcpSettings}
           status={mcpStatus}
@@ -298,6 +342,63 @@ export function SettingsPage() {
         />
       </div>
     </div>
+  );
+}
+
+type ConfigurationBackupCardProps = {
+  importing: boolean;
+  result: ConfigurationImportResult | null;
+  error: string;
+  onExport: () => void;
+  onImport: (file: File | null) => void;
+};
+
+function ConfigurationBackupCard({ importing, result, error, onExport, onImport }: ConfigurationBackupCardProps) {
+  const { t } = useTranslation();
+
+  return (
+    <section className="settings-card settings-card--wide">
+      <div className="settings-card__header">
+        <div className="settings-card__title-group">
+          <div className="settings-card__title-icon">
+            <Download size={20} aria-hidden="true" />
+          </div>
+          <div>
+            <h2>{t("setup.settings.configuration.title")}</h2>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-actions-row">
+        <button className="settings-create-key-button" type="button" onClick={onExport}>
+          <Download size={17} aria-hidden="true" />
+          {t("setup.settings.configuration.export")}
+        </button>
+        <label className="settings-file-button">
+          <Upload size={17} aria-hidden="true" />
+          <span>{importing ? t("setup.common.loading") : t("setup.settings.configuration.import")}</span>
+          <input
+            type="file"
+            accept="application/json,.json"
+            disabled={importing}
+            onChange={(event) => {
+              onImport(event.currentTarget.files?.[0] ?? null);
+              event.currentTarget.value = "";
+            }}
+          />
+        </label>
+      </div>
+
+      {error ? <p className="error-message">{error}</p> : null}
+      {result ? (
+        <p className="settings-inline-status">
+          {t("setup.settings.configuration.imported", {
+            count: result.appliedBucketPolicies,
+            skipped: result.skippedBucketPolicies.length
+          })}
+        </p>
+      ) : null}
+    </section>
   );
 }
 
@@ -365,6 +466,10 @@ function McpSettingsCard({
 
       {loading || !settings || !status ? (
         <div className="settings-loading">{t("setup.common.loading")}</div>
+      ) : !settings.enabled ? (
+        <div className="mcp-settings-grid mcp-settings-grid--single">
+          <ToggleRow label={t("setup.settings.mcp.enable")} checked={settings.enabled} disabled={saving} onChange={(checked) => update({ enabled: checked })} />
+        </div>
       ) : (
         <>
           <div className="mcp-summary-grid">

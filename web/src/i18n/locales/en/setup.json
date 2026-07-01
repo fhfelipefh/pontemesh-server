@@ -99,6 +99,7 @@
       "save": "Save",
       "close": "Close",
       "search": "Search",
+      "disabled": "Disabled",
       "previous": "Previous",
       "next": "Next",
       "itemsPerPage": "Items per page",
@@ -209,6 +210,13 @@
       "fallbackDisabled": "Disabled",
       "allowReplicaEdge": "Allow Replica/Edge",
       "allowPeerSharing": "Allow authorized peers",
+      "s3ListDefaultMaxKeys": "S3 default max keys",
+      "s3ListMaxKeysLimit": "S3 max keys limit",
+      "s3ListAllowDelimiter": "Allow S3 delimiter",
+      "s3VersioningEnabled": "S3 versioning",
+      "s3ObjectTaggingEnabled": "S3 object tagging",
+      "s3ChecksumAlgorithm": "S3 checksum",
+      "s3MultipartAbortDays": "Multipart abort days",
       "emptyTitle": "No buckets have been created yet.",
       "emptyDescription": "Create your first bucket to start storing objects.",
       "noResultsTitle": "No buckets found.",
@@ -296,6 +304,14 @@
     },
     "settings": {
       "title": "Settings",
+      "configuration": {
+        "title": "Configuration backup",
+        "export": "Export JSON",
+        "import": "Import JSON",
+        "imported": "Imported {{count}} bucket policies. Skipped {{skipped}}.",
+        "exportFailed": "Failed to export configuration.",
+        "importFailed": "Failed to import configuration."
+      },
       "applications": {
         "title": "Application credentials",
         "name": "Name",

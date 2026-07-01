@@ -648,6 +648,11 @@
   margin-bottom: 18px;
 }
 
+.mcp-settings-grid--single {
+  grid-template-columns: minmax(260px, 420px);
+  margin-bottom: 0;
+}
+
 .mcp-summary-item,
 .settings-toggle-row {
   min-width: 0;
@@ -779,6 +784,44 @@
   min-height: 44px;
   padding: 0 20px;
   flex: 0 0 auto;
+}
+
+.settings-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.settings-file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: auto;
+  min-width: 148px;
+  min-height: 44px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 0 20px;
+  color: var(--pm-deep-navy);
+  background: var(--pm-surface);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.settings-file-button input {
+  position: absolute;
+  inline-size: 0;
+  block-size: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-inline-status {
+  margin: 14px 0 0;
+  color: var(--pm-muted);
+  font-weight: 800;
 }
 
 .inline-form .button,

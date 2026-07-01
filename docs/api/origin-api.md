@@ -555,7 +555,7 @@ Eventos auditáveis incluem:
 * falha de autenticação;
 * falha de autorização;
 * operação administrativa sensível;
-* eventos MCP, quando existir.
+* eventos MCP.
 
 A consulta de auditoria deve ser protegida por autenticação, autorização e escopo administrativo.
 
@@ -576,7 +576,7 @@ Responsabilidades possíveis:
 * configurar priorização de fragmentos;
 * configurar limites operacionais;
 * configurar comportamento de buckets e objetos;
-* preparar integração futura com MCP.
+* manter integração MCP administrativa do plano de controle.
 
 Toda operação administrativa deve ser autenticada, autorizada e auditada.
 
