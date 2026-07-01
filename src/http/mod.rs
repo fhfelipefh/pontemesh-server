@@ -950,6 +950,135 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn s3_put_overwrites_active_object_and_recreates_deleted_key() {
+        let Some(ctx) = TestContext::new("s3-put-overwrite-and-recreate").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let s3_app = ctx.s3_app.clone();
+
+        let create_bucket = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/s3-reupload")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_bucket.status(), StatusCode::OK);
+
+        let first_body = b"primeiro";
+        let first_put = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/s3-reupload/hello.txt")
+                        .body(Body::from(first_body.as_slice())),
+                    first_body,
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(first_put.status(), StatusCode::OK);
+
+        let overwrite_body = b"sobrescrito";
+        let overwrite_put = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/s3-reupload/hello.txt")
+                        .body(Body::from(overwrite_body.as_slice())),
+                    overwrite_body,
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(overwrite_put.status(), StatusCode::OK);
+
+        let get_overwritten = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/s3-reupload/hello.txt")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_overwritten.status(), StatusCode::OK);
+        assert_eq!(
+            response_bytes(get_overwritten).await,
+            overwrite_body.as_slice()
+        );
+
+        let delete = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::DELETE)
+                        .uri("/s3-reupload/hello.txt")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+
+        let recreated_body = b"segundo";
+        let recreated_put = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/s3-reupload/hello.txt")
+                        .body(Body::from(recreated_body.as_slice())),
+                    recreated_body,
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(recreated_put.status(), StatusCode::OK);
+
+        let get_recreated = s3_app
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/s3-reupload/hello.txt")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_recreated.status(), StatusCode::OK);
+        assert_eq!(
+            response_bytes(get_recreated).await,
+            recreated_body.as_slice()
+        );
+    }
+
+    #[tokio::test]
     async fn admin_can_create_list_and_revoke_s3_access_keys() {
         let Some(ctx) = TestContext::new("s3-access-key-admin").await else {
             return;
@@ -1253,6 +1382,30 @@ mod tests {
         let upload_body = response_text(upload).await;
         assert!(upload_body.contains("folder/hello world.txt"));
 
+        let duplicate_multipart = multipart_body(boundary, "folder/hello world.txt", b"duplicate");
+        let duplicate_upload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/buckets/admin-objects/objects")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(duplicate_multipart))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(duplicate_upload.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            response_text(duplicate_upload)
+                .await
+                .contains("active object already exists in bucket")
+        );
+
         let list = app
             .clone()
             .oneshot(
@@ -1298,6 +1451,96 @@ mod tests {
             .expect("router response");
         assert_eq!(delete.status(), StatusCode::OK);
 
+        let list_after_delete = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/admin-objects/objects?query=hello&page=1&pageSize=10")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list_after_delete.status(), StatusCode::OK);
+        let list_after_delete_body = response_text(list_after_delete).await;
+        assert!(list_after_delete_body.contains(r#""items":[]"#));
+        assert!(list_after_delete_body.contains(r#""totalItems":0"#));
+
+        let replacement_body = b"hello admin object routes replacement";
+        let replacement_multipart =
+            multipart_body(boundary, "folder/hello world.txt", replacement_body);
+        let replacement_upload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/buckets/admin-objects/objects")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(replacement_multipart))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replacement_upload.status(), StatusCode::CREATED);
+
+        let list_after_reupload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/admin-objects/objects?query=hello&page=1&pageSize=10")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list_after_reupload.status(), StatusCode::OK);
+        let list_after_reupload_body = response_text(list_after_reupload).await;
+        assert!(list_after_reupload_body.contains("folder/hello world.txt"));
+        assert!(list_after_reupload_body.contains(r#""totalItems":1"#));
+
+        let replacement_download = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/admin-objects/objects/folder/hello%20world.txt")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replacement_download.status(), StatusCode::OK);
+        assert_eq!(
+            response_bytes(replacement_download).await.as_ref(),
+            replacement_body
+        );
+
+        let bucket_summary = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/admin-objects")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(bucket_summary.status(), StatusCode::OK);
+        let bucket_summary_body: serde_json::Value =
+            serde_json::from_str(&response_text(bucket_summary).await).expect("bucket JSON");
+        assert_eq!(bucket_summary_body["objectCount"], 1);
+        assert_eq!(
+            bucket_summary_body["totalBytes"],
+            replacement_body.len() as i64
+        );
+
         let audit_counts: (i64, i64) = sqlx_core::query_as::query_as(
             r#"
             SELECT
@@ -1309,7 +1552,7 @@ mod tests {
         .fetch_one(ctx.catalog.pool())
         .await
         .expect("audit counts");
-        assert_eq!(audit_counts, (1, 1));
+        assert_eq!(audit_counts, (2, 1));
     }
 
     #[tokio::test]

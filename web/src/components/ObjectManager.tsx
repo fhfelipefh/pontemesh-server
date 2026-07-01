@@ -308,5 +308,8 @@ function translatedUploadError(
   if (message.toLowerCase().includes("failed to read uploaded file")) {
     return t("setup.objects.readUploadedFileFailed");
   }
+  if (message.toLowerCase().includes("active object already exists in bucket")) {
+    return t("setup.objects.activeObjectExists");
+  }
   return message || t("setup.objects.uploadFailed");
 }

@@ -211,6 +211,7 @@
       "loadFailed": "Falha ao carregar objetos.",
       "uploadFailed": "Falha ao enviar objeto.",
       "readUploadedFileFailed": "Falha ao ler o arquivo enviado.",
+      "activeObjectExists": "Já existe um objeto ativo com essa chave neste bucket.",
       "deleteFailed": "Falha ao excluir objeto.",
       "uploadBucket": "Bucket: {{bucket}}",
       "noBucketsTitle": "Nenhum bucket disponível.",

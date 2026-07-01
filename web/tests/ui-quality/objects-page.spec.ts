@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, Locator, test } from "@playwright/test";
 import { installAdminApiFixtures } from "./helpers/adminApiFixtures";
 import {
   expectButtonsHaveUsableSize,
@@ -103,17 +103,11 @@ test.describe("Objects page", () => {
     await page.goto("/objects");
     await expect(page.getByTestId("object-search-input")).toBeVisible();
 
-    const searchBox = await page.getByTestId("object-search-input").boundingBox();
-    const refreshButton = await page.getByRole("button", { name: /refresh|atualizar/i }).boundingBox();
-    const uploadButton = await page.getByTestId("open-upload-object-button").boundingBox();
-    const tableCard = await page.getByTestId("objects-table-card").boundingBox();
-    const pagination = await page.locator(".objects-table-card .buckets-pagination").boundingBox();
-
-    expect(searchBox, "search input should be measurable").not.toBeNull();
-    expect(refreshButton, "refresh button should be measurable").not.toBeNull();
-    expect(uploadButton, "upload button should be measurable").not.toBeNull();
-    expect(tableCard, "table card should be measurable").not.toBeNull();
-    expect(pagination, "pagination should be measurable").not.toBeNull();
+    const searchBox = await measurableBox(page.getByTestId("object-search-input"), "search input");
+    const refreshButton = await measurableBox(page.getByRole("button", { name: /refresh|atualizar/i }), "refresh button");
+    const uploadButton = await measurableBox(page.getByTestId("open-upload-object-button"), "upload button");
+    const tableCard = await measurableBox(page.getByTestId("objects-table-card"), "table card");
+    const pagination = await measurableBox(page.locator(".objects-table-card .buckets-pagination"), "pagination");
 
     expect(searchBox!.width).toBeGreaterThanOrEqual(280);
     expect(refreshButton!.width).toBeLessThanOrEqual(180);
@@ -131,3 +125,14 @@ test.describe("Objects page", () => {
     await expectNoHorizontalOverflow(page);
   });
 });
+
+async function measurableBox(locator: Locator, label: string) {
+  let box = await locator.boundingBox();
+  await expect.poll(async () => {
+    box = await locator.boundingBox();
+    return box !== null;
+  }, {
+    message: `${label} should be measurable`
+  }).toBe(true);
+  return box!;
+}

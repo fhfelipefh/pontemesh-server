@@ -2874,6 +2874,50 @@ async fn insert_object_shell_in_tx(
     bucket_id: &str,
     object_key: &str,
 ) -> anyhow::Result<String> {
+    let existing = query(
+        r#"
+        SELECT id::text, deleted_at IS NULL AS active
+        FROM objects
+        WHERE bucket_id = $1::uuid AND object_key = $2
+        FOR UPDATE
+        "#,
+    )
+    .bind(bucket_id)
+    .bind(object_key)
+    .fetch_optional(&mut **tx)
+    .await
+    .context("failed to load existing object")?;
+
+    if let Some(row) = existing {
+        let object_id = row.get::<String, _>("id");
+        if row.get::<bool, _>("active") {
+            tracing::info!(
+                object_id = %object_id,
+                object_key = %object_key,
+                "object_put_existing_active_found"
+            );
+            bail!("active object already exists in bucket");
+        }
+
+        tracing::info!(
+            object_id = %object_id,
+            object_key = %object_key,
+            "object_put_deleted_key_reused"
+        );
+        query(
+            r#"
+            UPDATE objects
+            SET state = 'AVAILABLE', deleted_at = NULL, updated_at = now()
+            WHERE id = $1::uuid
+            "#,
+        )
+        .bind(&object_id)
+        .execute(&mut **tx)
+        .await
+        .context("failed to reactivate deleted object")?;
+        return Ok(object_id);
+    }
+
     let row = query(
         r#"
         INSERT INTO objects (bucket_id, object_key)

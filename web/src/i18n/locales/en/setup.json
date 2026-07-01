@@ -211,6 +211,7 @@
       "loadFailed": "Failed to load objects.",
       "uploadFailed": "Failed to upload object.",
       "readUploadedFileFailed": "Failed to read uploaded file.",
+      "activeObjectExists": "An active object with this key already exists in this bucket.",
       "deleteFailed": "Failed to delete object.",
       "uploadBucket": "Bucket: {{bucket}}",
       "noBucketsTitle": "No buckets are available.",
