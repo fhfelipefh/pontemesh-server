@@ -381,6 +381,176 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_contract_admin_routes_require_auth_and_return_stable_json_shapes() {
+        let Some(ctx) = TestContext::new("api-contract-admin-routes").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+
+        let unauthenticated = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/dashboard/summary")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+        assert_json_content_type(&unauthenticated);
+        let unauthenticated_body = json_body(unauthenticated).await;
+        assert_eq!(unauthenticated_body["error"], "authentication required");
+
+        let cookie = login_cookie(app.clone()).await;
+
+        let dashboard = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/dashboard/summary")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(dashboard.status(), StatusCode::OK);
+        assert_json_content_type(&dashboard);
+        let dashboard_body = json_body(dashboard).await;
+        assert_json_object_keys(
+            &dashboard_body,
+            &["health", "instance", "objects", "resources", "storage"],
+        );
+        assert_json_object_keys(
+            &dashboard_body["instance"],
+            &["environment", "name", "role", "uptimeSeconds", "version"],
+        );
+        assert_eq!(dashboard_body["instance"]["role"], "origin");
+        assert_json_object_keys(
+            &dashboard_body["objects"],
+            &["totalBuckets", "totalObjectBytes", "totalObjects"],
+        );
+        assert_json_object_keys(
+            &dashboard_body["health"],
+            &[
+                "authenticated",
+                "databaseConnected",
+                "lastCheckedAt",
+                "setupCompleted",
+                "storageWritable",
+            ],
+        );
+        assert_eq!(dashboard_body["health"]["authenticated"], true);
+
+        let buckets_before = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets?page=1&pageSize=20")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(buckets_before.status(), StatusCode::OK);
+        let buckets_before_body = json_body(buckets_before).await;
+        assert_paginated_contract(&buckets_before_body);
+        assert_eq!(buckets_before_body["items"], serde_json::json!([]));
+
+        let create_bucket = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/buckets")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"contract-bucket"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_bucket.status(), StatusCode::CREATED);
+        assert_json_content_type(&create_bucket);
+        let created_bucket_body = json_body(create_bucket).await;
+        assert_json_object_keys(
+            &created_bucket_body,
+            &["createdAt", "name", "objectCount", "totalBytes"],
+        );
+        assert_eq!(created_bucket_body["name"], "contract-bucket");
+        assert_eq!(created_bucket_body["objectCount"], 0);
+        assert_eq!(created_bucket_body["totalBytes"], 0);
+
+        let objects = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/contract-bucket/objects?page=1&pageSize=20")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(objects.status(), StatusCode::OK);
+        let objects_body = json_body(objects).await;
+        assert_paginated_contract(&objects_body);
+        assert_eq!(objects_body["items"], serde_json::json!([]));
+
+        let origin_metrics = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/origin-traffic")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(origin_metrics.status(), StatusCode::OK);
+        let origin_metrics_body = json_body(origin_metrics).await;
+        assert_json_object_keys(
+            &origin_metrics_body,
+            &[
+                "fullObjectRequests",
+                "rangeRequests",
+                "totalBytesServed",
+                "totalRequests",
+            ],
+        );
+
+        let replica_metrics = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/replica-traffic")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(replica_metrics.status(), StatusCode::OK);
+        let replica_metrics_body = json_body(replica_metrics).await;
+        assert_json_object_keys(
+            &replica_metrics_body,
+            &[
+                "activeReplicas",
+                "authFailures",
+                "syncFailures",
+                "totalBytesServed",
+                "totalBytesSynced",
+                "totalFragmentsServed",
+                "totalFragmentsSynced",
+                "totalReplicas",
+            ],
+        );
+    }
+
+    #[tokio::test]
     async fn s3_compatible_contract_covers_core_bucket_and_object_operations() {
         let Some(ctx) = TestContext::new("s3-compatible-contract").await else {
             return;
@@ -2178,6 +2348,40 @@ mod tests {
         assert!(response.headers().contains_key("x-amz-request-id"));
     }
 
+    fn assert_json_content_type(response: &axum::response::Response) {
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .expect("JSON content type")
+            .to_str()
+            .expect("content type text");
+        assert!(
+            content_type.starts_with("application/json"),
+            "expected JSON content type, got {content_type}"
+        );
+    }
+
+    fn assert_json_object_keys(value: &serde_json::Value, expected_keys: &[&str]) {
+        let object = value.as_object().expect("JSON object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        let mut expected = expected_keys.to_vec();
+        expected.sort_unstable();
+        assert_eq!(keys, expected);
+    }
+
+    fn assert_paginated_contract(value: &serde_json::Value) {
+        assert_json_object_keys(
+            value,
+            &["items", "page", "pageSize", "totalItems", "totalPages"],
+        );
+        assert!(value["items"].is_array());
+        assert!(value["page"].is_number());
+        assert!(value["pageSize"].is_number());
+        assert!(value["totalItems"].is_number());
+        assert!(value["totalPages"].is_number());
+    }
+
     fn header_value<K>(response: &axum::response::Response, name: K) -> &str
     where
         K: axum::http::header::AsHeaderName,
@@ -2188,6 +2392,10 @@ mod tests {
             .expect("header present")
             .to_str()
             .expect("header text")
+    }
+
+    async fn json_body(response: axum::response::Response) -> serde_json::Value {
+        serde_json::from_str(&response_text(response).await).expect("JSON response")
     }
 
     fn signed_s3_request(
