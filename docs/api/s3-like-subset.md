@@ -58,6 +58,10 @@ DELETE /{bucket}/{objectKey}
 
 Todas exigem credenciais S3 próprias e AWS Signature Version 4.
 
+O endpoint S3-compatible também aceita URLs pré-assinadas SigV4 por query
+string (`X-Amz-*`) para acesso temporário. A validação continua usando a chave
+S3 gerenciada no catálogo, respeita revogação da chave e rejeita URLs expiradas.
+
 Essas operações representam o núcleo de armazenamento e recuperação de objetos.
 
 ## Create Bucket

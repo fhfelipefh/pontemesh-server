@@ -214,6 +214,14 @@ fn pontemesh_routes(state: AppState) -> Router<AppState> {
             "/objects/{bucket_name}/sources/{*object_key}",
             get(mesh::get_sources),
         )
+        .route(
+            "/objects/{bucket_name}/availability/{*object_key}",
+            get(mesh::get_availability),
+        )
+        .route(
+            "/objects/{bucket_name}/policies/{*object_key}",
+            get(mesh::get_object_policy),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_application_credential,
@@ -832,6 +840,34 @@ mod tests {
             .expect("router response");
         assert_eq!(get_object.status(), StatusCode::OK);
         assert_eq!(response_bytes(get_object).await, object_body.as_slice());
+
+        let presigned_get = s3_app
+            .clone()
+            .oneshot(
+                presigned_s3_request("/compat-bucket/prefix/hello.txt", 120)
+                    .body(Body::empty())
+                    .expect("valid presigned request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(presigned_get.status(), StatusCode::OK);
+        assert_eq!(response_bytes(presigned_get).await, object_body.as_slice());
+
+        let expired_presigned_get = s3_app
+            .clone()
+            .oneshot(
+                expired_presigned_s3_request("/compat-bucket/prefix/hello.txt")
+                    .body(Body::empty())
+                    .expect("valid expired presigned request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(expired_presigned_get.status(), StatusCode::FORBIDDEN);
+        assert!(
+            response_text(expired_presigned_get)
+                .await
+                .contains("presigned URL has expired")
+        );
 
         let range_get = s3_app
             .clone()
@@ -2140,6 +2176,65 @@ mod tests {
         assert_eq!(authorized_sources[1]["sourceType"], "REPLICA_EDGE");
         assert_eq!(authorized_sources[1]["id"].as_str(), Some(replica_id));
 
+        let availability = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/pontemesh/objects/test-bucket/availability/folder/hello.txt")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(availability.status(), StatusCode::OK);
+        let availability_body: serde_json::Value =
+            serde_json::from_str(&response_text(availability).await).expect("availability JSON");
+        assert_eq!(
+            availability_body["manifestId"].as_str(),
+            Some(manifest_id.as_str())
+        );
+        assert_eq!(availability_body["objectState"], "AVAILABLE");
+        assert_eq!(availability_body["originAvailable"], true);
+        assert_eq!(availability_body["replicaSources"], 1);
+        assert_eq!(availability_body["peerSources"], 0);
+        assert_eq!(
+            availability_body["fragments"][0]["replicaSourceIds"][0].as_str(),
+            Some(replica_id)
+        );
+        assert!(
+            availability_body["fragments"][0]["availableSourceTypes"]
+                .as_array()
+                .expect("available source types")
+                .iter()
+                .any(|source_type| source_type == "REPLICA_EDGE")
+        );
+
+        let object_policy = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/pontemesh/objects/test-bucket/policies/folder/hello.txt")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(object_policy.status(), StatusCode::OK);
+        let object_policy_body: serde_json::Value =
+            serde_json::from_str(&response_text(object_policy).await).expect("policy JSON");
+        assert_eq!(
+            object_policy_body["manifestId"].as_str(),
+            Some(manifest_id.as_str())
+        );
+        assert_eq!(object_policy_body["objectState"], "AVAILABLE");
+        assert_eq!(object_policy_body["fragmentSizeBytes"], 1024);
+        assert_eq!(object_policy_body["allowReplicaEdge"], true);
+        assert_eq!(object_policy_body["fallbackMode"], "ORIGIN_RANGE");
+        assert_eq!(object_policy_body["fallbackSupportsRange"], true);
+        assert_eq!(object_policy_body["preserveValidatedFragments"], true);
+
         let package_with_replica = app
             .clone()
             .oneshot(
@@ -2249,6 +2344,34 @@ mod tests {
         assert_eq!(
             sources_with_peer_body["sourceSelection"]["strategy"],
             "PEER_FIRST"
+        );
+
+        let availability_with_peer = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/pontemesh/objects/test-bucket/availability/folder/hello.txt")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(availability_with_peer.status(), StatusCode::OK);
+        let availability_with_peer_body: serde_json::Value =
+            serde_json::from_str(&response_text(availability_with_peer).await)
+                .expect("availability with peer JSON");
+        assert_eq!(availability_with_peer_body["peerSources"], 1);
+        assert_eq!(
+            availability_with_peer_body["fragments"][0]["peerSourceIds"][0].as_str(),
+            Some(peer_availability_id)
+        );
+        assert!(
+            availability_with_peer_body["fragments"][0]["availableSourceTypes"]
+                .as_array()
+                .expect("available source types with peer")
+                .iter()
+                .any(|source_type| source_type == "PEER")
         );
 
         let valid_fragment_hash = manifest_body["fragments"][0]["sha256"]
@@ -2784,6 +2907,8 @@ mod tests {
                     "origin:objects:read".to_owned(),
                     "origin:objects:write".to_owned(),
                     "pontemesh:manifest:read".to_owned(),
+                    "pontemesh:availability:read".to_owned(),
+                    "pontemesh:policies:read".to_owned(),
                     "pontemesh:sources:read".to_owned(),
                     "pontemesh:access-package:create".to_owned(),
                 ],
@@ -2955,6 +3080,47 @@ mod tests {
             authorization.parse().expect("authorization header"),
         );
         Ok(request)
+    }
+
+    fn presigned_s3_request(path: &str, expires_seconds: i64) -> axum::http::request::Builder {
+        let now = chrono::Utc::now();
+        presigned_s3_request_with_time(path, expires_seconds, now)
+    }
+
+    fn expired_presigned_s3_request(path: &str) -> axum::http::request::Builder {
+        presigned_s3_request_with_time(path, 60, chrono::Utc::now() - chrono::Duration::hours(1))
+    }
+
+    fn presigned_s3_request_with_time(
+        path: &str,
+        expires_seconds: i64,
+        signing_time: chrono::DateTime<chrono::Utc>,
+    ) -> axum::http::request::Builder {
+        let amz_date = signing_time.format("%Y%m%dT%H%M%SZ").to_string();
+        let date = signing_time.format("%Y%m%d").to_string();
+        let credential_scope = format!("{date}/{TEST_REGION}/s3/aws4_request");
+        let credential = format!(
+            "{}%2F{}",
+            TEST_S3_ACCESS_KEY,
+            credential_scope.replace('/', "%2F")
+        );
+        let signed_headers = "host";
+        let canonical_query = format!(
+            "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential={credential}&X-Amz-Date={amz_date}&X-Amz-Expires={expires_seconds}&X-Amz-SignedHeaders={signed_headers}"
+        );
+        let uri = format!("{path}?{canonical_query}");
+        let canonical_request = format!(
+            "GET\n{path}\n{canonical_query}\nhost:localhost:9000\n\n{signed_headers}\nUNSIGNED-PAYLOAD"
+        );
+        let canonical_hash = sha256_hex(canonical_request.as_bytes());
+        let string_to_sign =
+            format!("AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{canonical_hash}");
+        let signing_key = test_signing_key(TEST_S3_SECRET_KEY, &date, TEST_REGION);
+        let signature = to_hex(&hmac_bytes(&signing_key, string_to_sign.as_bytes()));
+        Request::builder()
+            .method(Method::GET)
+            .uri(format!("{uri}&X-Amz-Signature={signature}"))
+            .header(header::HOST, "localhost:9000")
     }
 
     fn signed_replica_request(

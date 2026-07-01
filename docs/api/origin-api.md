@@ -248,6 +248,17 @@ GET /pontemesh/objects/{objectId}/availability
 
 Consulta o estado de disponibilidade de um objeto ou de seus fragmentos.
 
+Na implementação atual, o contrato SDK-facing usa bucket e chave para manter o
+mesmo padrão das rotas de manifesto e fontes:
+
+```http
+GET /pontemesh/objects/{bucket}/availability/{objectKey}
+```
+
+A chamada exige credencial de aplicação com escopo
+`pontemesh:availability:read` e retorna a disponibilidade do Origin, de
+Replica/Edge e de peers autorizados por fragmento.
+
 Estados conceituais possíveis:
 
 * `AVAILABLE`;
@@ -279,6 +290,16 @@ GET /pontemesh/objects/{objectId}/policies
 ```
 
 Retorna políticas aplicáveis ao objeto, bucket, aplicação ou contexto de obtenção.
+
+Na implementação atual, o contrato SDK-facing usa bucket e chave:
+
+```http
+GET /pontemesh/objects/{bucket}/policies/{objectKey}
+```
+
+A chamada exige credencial de aplicação com escopo `pontemesh:policies:read` e
+retorna a política efetiva necessária para seleção de fontes, fragmentação,
+fallback e revalidação.
 
 As políticas podem incluir:
 

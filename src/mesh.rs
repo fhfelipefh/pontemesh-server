@@ -57,6 +57,54 @@ pub struct SourcesResponse {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AvailabilityResponse {
+    bucket: String,
+    key: String,
+    manifest_id: String,
+    object_state: String,
+    origin_available: bool,
+    replica_sources: usize,
+    peer_sources: usize,
+    fragments: Vec<FragmentAvailability>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectPolicyResponse {
+    bucket: String,
+    key: String,
+    manifest_id: String,
+    object_state: String,
+    access_package_ttl_seconds: i64,
+    fragment_size_bytes: i64,
+    allow_replica_edge: bool,
+    allow_peer_sharing: bool,
+    source_selection_strategy: String,
+    fragment_priority_strategy: String,
+    failure_threshold: i64,
+    fallback_mode: String,
+    fallback_supports_range: bool,
+    preserve_validated_fragments: bool,
+    updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FragmentAvailability {
+    index: usize,
+    fragment_id: String,
+    byte_range_start: u64,
+    byte_range_end: u64,
+    size_bytes: usize,
+    sha256: String,
+    origin_available: bool,
+    replica_source_ids: Vec<String>,
+    peer_source_ids: Vec<String>,
+    available_source_types: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RevalidateAccessPackageResponse {
     package_id: String,
     bucket: String,
@@ -242,6 +290,56 @@ pub async fn get_sources(
             )
             .await;
             Json(sources).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn get_availability(
+    State(state): State<AppState>,
+    Extension(application): Extension<ApplicationIdentity>,
+    Path((bucket_name, object_key)): Path<(String, String)>,
+) -> Response {
+    if !has_scope(&application, "pontemesh:availability:read") {
+        return forbidden("missing scope: pontemesh:availability:read");
+    }
+
+    match get_availability_inner(&state, &bucket_name, object_key.trim_start_matches('/')).await {
+        Ok(availability) => {
+            record_mesh_audit(
+                &state,
+                "availability_issued",
+                &application.name,
+                "success",
+                &format!("bucket={bucket_name}; key={}", availability.key),
+            )
+            .await;
+            Json(availability).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn get_object_policy(
+    State(state): State<AppState>,
+    Extension(application): Extension<ApplicationIdentity>,
+    Path((bucket_name, object_key)): Path<(String, String)>,
+) -> Response {
+    if !has_scope(&application, "pontemesh:policies:read") {
+        return forbidden("missing scope: pontemesh:policies:read");
+    }
+
+    match get_object_policy_inner(&state, &bucket_name, object_key.trim_start_matches('/')).await {
+        Ok(policy) => {
+            record_mesh_audit(
+                &state,
+                "policy_issued",
+                &application.name,
+                "success",
+                &format!("bucket={bucket_name}; key={}", policy.key),
+            )
+            .await;
+            Json(policy).into_response()
         }
         Err(error) => bad_request(error),
     }
@@ -522,6 +620,108 @@ async fn get_sources_inner(
         authorized_sources,
         source_selection: source_selection_contract(&policy),
         fallback: fallback_contract(&object_endpoint, &policy, None),
+    })
+}
+
+async fn get_availability_inner(
+    state: &AppState,
+    bucket_name: &str,
+    object_key: &str,
+) -> anyhow::Result<AvailabilityResponse> {
+    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
+    let manifest = load_manifest_with_policy(state, bucket_name, object_key, &policy).await?;
+    let replica_sources = if policy.source_selection_strategy == "ORIGIN_ONLY" {
+        Vec::new()
+    } else {
+        state
+            .catalog
+            .list_authorized_replica_sources(bucket_name, object_key)
+            .await?
+    };
+    let peer_sources =
+        if policy.allow_peer_sharing && policy.source_selection_strategy != "ORIGIN_ONLY" {
+            state
+                .catalog
+                .list_authorized_peer_sources(bucket_name, object_key)
+                .await?
+        } else {
+            Vec::new()
+        };
+
+    let fragments = manifest
+        .fragments
+        .iter()
+        .map(|fragment| {
+            let fragment_index = i64::try_from(fragment.index)
+                .map_err(|_| anyhow::anyhow!("fragment index is too large"))?;
+            let replica_source_ids = replica_sources
+                .iter()
+                .filter(|source| source.available_fragments.contains(&fragment_index))
+                .map(|source| source.replica_id.clone())
+                .collect::<Vec<_>>();
+            let peer_source_ids = peer_sources
+                .iter()
+                .filter(|source| source.available_fragments.contains(&fragment_index))
+                .map(|source| source.id.clone())
+                .collect::<Vec<_>>();
+            let mut available_source_types = vec!["ORIGIN".to_owned()];
+            if !replica_source_ids.is_empty() {
+                available_source_types.push("REPLICA_EDGE".to_owned());
+            }
+            if !peer_source_ids.is_empty() {
+                available_source_types.push("PEER".to_owned());
+            }
+
+            Ok(FragmentAvailability {
+                index: fragment.index,
+                fragment_id: fragment.fragment_id.clone(),
+                byte_range_start: fragment.byte_range_start,
+                byte_range_end: fragment.byte_range_end,
+                size_bytes: fragment.size_bytes,
+                sha256: fragment.sha256.clone(),
+                origin_available: true,
+                replica_source_ids,
+                peer_source_ids,
+                available_source_types,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    Ok(AvailabilityResponse {
+        bucket: manifest.bucket,
+        key: manifest.key,
+        manifest_id: manifest.manifest_id,
+        object_state: manifest.availability_state,
+        origin_available: true,
+        replica_sources: replica_sources.len(),
+        peer_sources: peer_sources.len(),
+        fragments,
+    })
+}
+
+async fn get_object_policy_inner(
+    state: &AppState,
+    bucket_name: &str,
+    object_key: &str,
+) -> anyhow::Result<ObjectPolicyResponse> {
+    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
+    let manifest = load_manifest_with_policy(state, bucket_name, object_key, &policy).await?;
+    Ok(ObjectPolicyResponse {
+        bucket: manifest.bucket,
+        key: manifest.key,
+        manifest_id: manifest.manifest_id,
+        object_state: manifest.availability_state,
+        access_package_ttl_seconds: policy.access_package_ttl_seconds,
+        fragment_size_bytes: policy.fragment_size_bytes,
+        allow_replica_edge: policy.allow_replica_edge,
+        allow_peer_sharing: policy.allow_peer_sharing,
+        source_selection_strategy: policy.source_selection_strategy,
+        fragment_priority_strategy: policy.fragment_priority_strategy,
+        failure_threshold: policy.failure_threshold,
+        fallback_supports_range: policy.fallback_mode != "DISABLED",
+        fallback_mode: policy.fallback_mode,
+        preserve_validated_fragments: true,
+        updated_at: policy.updated_at,
     })
 }
 

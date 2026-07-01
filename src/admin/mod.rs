@@ -1155,6 +1155,8 @@ fn default_application_scopes() -> Vec<String> {
         "origin:objects:write".to_owned(),
         "pontemesh:access-package:create".to_owned(),
         "pontemesh:manifest:read".to_owned(),
+        "pontemesh:availability:read".to_owned(),
+        "pontemesh:policies:read".to_owned(),
     ]
 }
 
