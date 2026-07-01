@@ -141,7 +141,6 @@
       },
       "logs": {
         "title": "Logs da aplicação",
-        "description": "Eventos recentes do servidor, falhas de operação e exceções capturadas pelo plano administrativo.",
         "empty": "Nenhum evento registrado nesta execução."
       },
       "health": {

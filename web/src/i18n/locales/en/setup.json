@@ -141,7 +141,6 @@
       },
       "logs": {
         "title": "Application logs",
-        "description": "Recent server events, operation failures, and exceptions captured by the administrative plane.",
         "empty": "No events recorded in this process yet."
       },
       "health": {

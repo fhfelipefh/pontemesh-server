@@ -373,7 +373,7 @@
   border-radius: 8px;
   padding: 18px;
   color: var(--pm-muted);
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .application-logs__list {

@@ -216,7 +216,6 @@ function ApplicationLogs({ logs }: { logs: ApplicationLogEntry[] }) {
       <div className="admin-panel__header">
         <div>
           <h2>{t("setup.dashboard.logs.title")}</h2>
-          <p>{t("setup.dashboard.logs.description")}</p>
         </div>
         <ListTree size={19} aria-hidden="true" />
       </div>
