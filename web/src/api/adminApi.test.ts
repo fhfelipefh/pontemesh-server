@@ -5,7 +5,15 @@ import {
   revokeApplicationCredential
 } from "./applicationCredentialsApi";
 import { listAuditEvents } from "./auditApi";
-import { deleteObject, getObjectDownloadUrl, listBuckets, listObjects, uploadObject } from "./bucketsApi";
+import {
+  deleteObject,
+  getBucketPolicy,
+  getObjectDownloadUrl,
+  listBuckets,
+  listObjects,
+  updateBucketPolicy,
+  uploadObject
+} from "./bucketsApi";
 import {
   getBucketTrafficMetrics,
   getDashboardSummary,
@@ -132,6 +140,56 @@ describe("admin API clients", () => {
     );
   });
 
+  it("manages hybrid bucket policy through protected admin routes", async () => {
+    const policy = {
+      bucketName: "media",
+      accessPackageTtlSeconds: 300,
+      fragmentSizeBytes: 1048576,
+      allowReplicaEdge: true,
+      allowPeerSharing: false,
+      sourceSelectionStrategy: "ORIGIN_REPLICA_EDGE",
+      fragmentPriorityStrategy: "MANIFEST_ORDER",
+      failureThreshold: 3,
+      fallbackMode: "ORIGIN_RANGE",
+      updatedAt: "2026-07-01T12:00:00Z"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(policy))
+      .mockResolvedValueOnce(jsonResponse({ ...policy, allowPeerSharing: true, sourceSelectionStrategy: "PEER_FIRST" }));
+
+    await getBucketPolicy("media");
+    await updateBucketPolicy("media", {
+      accessPackageTtlSeconds: 300,
+      fragmentSizeBytes: 1048576,
+      allowReplicaEdge: true,
+      allowPeerSharing: true,
+      sourceSelectionStrategy: "PEER_FIRST",
+      fragmentPriorityStrategy: "MANIFEST_ORDER",
+      failureThreshold: 3,
+      fallbackMode: "ORIGIN_RANGE"
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/buckets/media/policy", {
+      headers: { accept: "application/json" }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/buckets/media/policy", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        accessPackageTtlSeconds: 300,
+        fragmentSizeBytes: 1048576,
+        allowReplicaEdge: true,
+        allowPeerSharing: true,
+        sourceSelectionStrategy: "PEER_FIRST",
+        fragmentPriorityStrategy: "MANIFEST_ORDER",
+        failureThreshold: 3,
+        fallbackMode: "ORIGIN_RANGE"
+      })
+    });
+  });
+
   it("surfaces bucket object 401 responses", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ error: "authentication required" }, 401)
@@ -190,8 +248,8 @@ describe("admin API clients", () => {
 
   it("fetches detailed traffic metrics from protected admin endpoints", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(jsonResponse([{ bucket: "media", originBytesServed: 1, originRequests: 1, replicaBytesSynced: 2, fragmentEvents: 1 }]))
-      .mockResolvedValueOnce(jsonResponse([{ bucket: "media", key: "a.txt", originBytesServed: 1, originRequests: 1, replicaBytesSynced: 2, fragmentEvents: 1 }]))
+      .mockResolvedValueOnce(jsonResponse([{ bucket: "media", originBytesServed: 1, originRequests: 1, replicaBytesSynced: 2, peerBytesServed: 3, fragmentEvents: 1, fallbackEvents: 1, integrityFailures: 0, originOffloadBytes: 5 }]))
+      .mockResolvedValueOnce(jsonResponse([{ bucket: "media", key: "a.txt", originBytesServed: 1, originRequests: 1, replicaBytesSynced: 2, peerBytesServed: 3, fragmentEvents: 1, fallbackEvents: 1, integrityFailures: 0, originOffloadBytes: 5 }]))
       .mockResolvedValueOnce(jsonResponse({
         replicaId: "replica-1",
         replicaName: "edge-1",

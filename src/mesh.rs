@@ -1,7 +1,10 @@
 use crate::{
     audit,
     auth::ApplicationIdentity,
-    catalog::{BucketPolicy, ObjectManifest, ObjectRecord, ReplicaAvailabilityRecord},
+    catalog::{
+        BucketPolicy, ObjectManifest, ObjectRecord, PeerAvailabilityInput, PeerAvailabilityRecord,
+        ReplicaAvailabilityRecord, SdkFragmentEventInput, SdkFragmentEventRecord,
+    },
     http::AppState,
     security::token::hash_bearer_token,
 };
@@ -36,6 +39,7 @@ pub struct AccessPackageResponse {
     expires_at: String,
     scope: Vec<String>,
     authorized_sources: Vec<AuthorizedSource>,
+    source_selection: SourceSelectionContract,
     fallback: FallbackContract,
     manifest: ManifestResponse,
 }
@@ -47,6 +51,7 @@ pub struct SourcesResponse {
     key: String,
     manifest_id: String,
     authorized_sources: Vec<AuthorizedSource>,
+    source_selection: SourceSelectionContract,
     fallback: FallbackContract,
 }
 
@@ -59,6 +64,7 @@ pub struct RevalidateAccessPackageResponse {
     manifest_id: String,
     valid: bool,
     authorized_sources: Vec<AuthorizedSource>,
+    source_selection: SourceSelectionContract,
     fallback: FallbackContract,
 }
 
@@ -102,6 +108,17 @@ pub struct AuthorizedSource {
     endpoint: String,
     priority: u8,
     expires_at: String,
+    available_fragments: Vec<i64>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSelectionContract {
+    strategy: String,
+    fragment_priority: String,
+    failure_threshold: i64,
+    allow_peer_sharing: bool,
+    allow_replica_edge: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,6 +128,31 @@ pub struct FallbackContract {
     object_endpoint: String,
     supports_range: bool,
     preserve_validated_fragments: bool,
+    mode: String,
+    revalidate_endpoint: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnouncePeerRequest {
+    peer_id: String,
+    endpoint: String,
+    available_fragments: Vec<i64>,
+    ttl_seconds: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SdkFragmentEventRequest {
+    source_type: String,
+    peer_availability_id: Option<String>,
+    fragment_index: i64,
+    fragment_hash: String,
+    event_type: String,
+    bytes_transferred: i64,
+    outcome: String,
+    latency_ms: Option<i64>,
+    detail: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -225,6 +267,56 @@ pub async fn revalidate_access_package(
     .await
     {
         Ok(response) => Json(response).into_response(),
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn announce_peer_availability(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((package_id, bucket_name, object_key)): Path<(String, String, String)>,
+    Json(payload): Json<AnnouncePeerRequest>,
+) -> Response {
+    let Some(package_token) = read_bearer_token(&headers) else {
+        return unauthorized("access package bearer token required");
+    };
+
+    match announce_peer_availability_inner(
+        &state,
+        &package_id,
+        &bucket_name,
+        object_key.trim_start_matches('/'),
+        &package_token,
+        payload,
+    )
+    .await
+    {
+        Ok(record) => (StatusCode::CREATED, Json(record)).into_response(),
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn record_sdk_fragment_event(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((package_id, bucket_name, object_key)): Path<(String, String, String)>,
+    Json(payload): Json<SdkFragmentEventRequest>,
+) -> Response {
+    let Some(package_token) = read_bearer_token(&headers) else {
+        return unauthorized("access package bearer token required");
+    };
+
+    match record_sdk_fragment_event_inner(
+        &state,
+        &package_id,
+        &bucket_name,
+        object_key.trim_start_matches('/'),
+        &package_token,
+        payload,
+    )
+    .await
+    {
+        Ok(record) => (StatusCode::CREATED, Json(record)).into_response(),
         Err(error) => bad_request(error),
     }
 }
@@ -367,8 +459,16 @@ async fn create_access_package_inner(
         &payload.key,
         &record.expires_at,
         &object_endpoint,
+        &policy,
     )
     .await?;
+    let revalidate_endpoint = Some(format!(
+        "{}/pontemesh/access-packages/{}/revalidate/{}/{}",
+        request_base_url(headers).trim_end_matches('/'),
+        url_component(&record.id),
+        url_component(&payload.bucket),
+        object_path(&payload.key)
+    ));
 
     Ok(AccessPackageResponse {
         id: record.id,
@@ -384,12 +484,8 @@ async fn create_access_package_inner(
             "manifest:read".to_owned(),
         ],
         authorized_sources,
-        fallback: FallbackContract {
-            source_type: "ORIGIN".to_owned(),
-            object_endpoint,
-            supports_range: true,
-            preserve_validated_fragments: true,
-        },
+        source_selection: source_selection_contract(&policy),
+        fallback: fallback_contract(&object_endpoint, &policy, revalidate_endpoint),
         manifest,
     })
 }
@@ -401,6 +497,7 @@ async fn get_sources_inner(
     object_key: &str,
 ) -> anyhow::Result<SourcesResponse> {
     let manifest = load_manifest(state, bucket_name, object_key).await?;
+    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
     let base_url = request_s3_base_url(headers);
     let object_endpoint = format!(
         "{base_url}/{}/{}",
@@ -414,6 +511,7 @@ async fn get_sources_inner(
         object_key,
         &expires_at,
         &object_endpoint,
+        &policy,
     )
     .await?;
 
@@ -422,12 +520,8 @@ async fn get_sources_inner(
         key: object_key.to_owned(),
         manifest_id: manifest.manifest_id,
         authorized_sources,
-        fallback: FallbackContract {
-            source_type: "ORIGIN".to_owned(),
-            object_endpoint,
-            supports_range: true,
-            preserve_validated_fragments: true,
-        },
+        source_selection: source_selection_contract(&policy),
+        fallback: fallback_contract(&object_endpoint, &policy, None),
     })
 }
 
@@ -449,6 +543,7 @@ async fn revalidate_access_package_inner(
         )
         .await?
         .ok_or_else(|| anyhow::anyhow!("access package is invalid, expired or revoked"))?;
+    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
     let base_url = request_s3_base_url(headers);
     let object_endpoint = format!(
         "{base_url}/{}/{}",
@@ -462,8 +557,16 @@ async fn revalidate_access_package_inner(
         object_key,
         &expires_at,
         &object_endpoint,
+        &policy,
     )
     .await?;
+    let revalidate_endpoint = Some(format!(
+        "{}/pontemesh/access-packages/{}/revalidate/{}/{}",
+        request_base_url(headers).trim_end_matches('/'),
+        url_component(package_id),
+        url_component(bucket_name),
+        object_path(object_key)
+    ));
 
     record_mesh_audit(
         state,
@@ -487,13 +590,111 @@ async fn revalidate_access_package_inner(
         manifest_id: authorization.manifest_id,
         valid: true,
         authorized_sources,
-        fallback: FallbackContract {
-            source_type: "ORIGIN".to_owned(),
-            object_endpoint,
-            supports_range: true,
-            preserve_validated_fragments: true,
-        },
+        source_selection: source_selection_contract(&policy),
+        fallback: fallback_contract(&object_endpoint, &policy, revalidate_endpoint),
     })
+}
+
+async fn announce_peer_availability_inner(
+    state: &AppState,
+    package_id: &str,
+    bucket_name: &str,
+    object_key: &str,
+    package_token: &str,
+    payload: AnnouncePeerRequest,
+) -> anyhow::Result<PeerAvailabilityRecord> {
+    let authorization = state
+        .catalog
+        .authorize_access_package(
+            package_id,
+            &hash_bearer_token(package_token),
+            bucket_name,
+            object_key,
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("access package is invalid, expired or revoked"))?;
+    let record = state
+        .catalog
+        .record_peer_fragment_availability(
+            &authorization,
+            PeerAvailabilityInput {
+                peer_id: payload.peer_id,
+                endpoint: payload.endpoint,
+                available_fragments: payload.available_fragments,
+                ttl_seconds: payload.ttl_seconds.unwrap_or(300),
+            },
+        )
+        .await?;
+    record_mesh_audit(
+        state,
+        "peer_availability_announced",
+        &authorization.application_id,
+        "success",
+        &format!(
+            "package_id={}; peer_id={}; manifest_id={}; bucket={}; key={}",
+            authorization.package_id,
+            record.peer_id,
+            authorization.manifest_id,
+            authorization.bucket_name,
+            authorization.object_key
+        ),
+    )
+    .await;
+    Ok(record)
+}
+
+async fn record_sdk_fragment_event_inner(
+    state: &AppState,
+    package_id: &str,
+    bucket_name: &str,
+    object_key: &str,
+    package_token: &str,
+    payload: SdkFragmentEventRequest,
+) -> anyhow::Result<SdkFragmentEventRecord> {
+    let authorization = state
+        .catalog
+        .authorize_access_package(
+            package_id,
+            &hash_bearer_token(package_token),
+            bucket_name,
+            object_key,
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("access package is invalid, expired or revoked"))?;
+    let record = state
+        .catalog
+        .record_sdk_fragment_event(
+            &authorization,
+            SdkFragmentEventInput {
+                source_type: payload.source_type,
+                peer_availability_id: payload.peer_availability_id,
+                fragment_index: payload.fragment_index,
+                fragment_hash: payload.fragment_hash,
+                event_type: payload.event_type,
+                bytes_transferred: payload.bytes_transferred,
+                outcome: payload.outcome,
+                latency_ms: payload.latency_ms,
+                detail: payload.detail.unwrap_or_else(|| serde_json::json!({})),
+            },
+        )
+        .await?;
+    record_mesh_audit(
+        state,
+        "sdk_fragment_event_recorded",
+        &authorization.application_id,
+        "success",
+        &format!(
+            "package_id={}; manifest_id={}; fragment_index={}; source_type={}; event_type={}; outcome={}",
+            authorization.package_id,
+            authorization.manifest_id,
+            record.fragment_index,
+            record.source_type,
+            record.event_type,
+            record.outcome
+        ),
+    )
+    .await;
+    Ok(record)
 }
 
 async fn authorized_sources_for_object(
@@ -502,39 +703,111 @@ async fn authorized_sources_for_object(
     object_key: &str,
     expires_at: &str,
     origin_endpoint: &str,
+    policy: &BucketPolicy,
 ) -> anyhow::Result<Vec<AuthorizedSource>> {
-    let mut sources = vec![AuthorizedSource {
+    let origin = AuthorizedSource {
         id: "origin".to_owned(),
         source_type: "ORIGIN".to_owned(),
         endpoint: origin_endpoint.to_owned(),
-        priority: 1,
+        priority: 0,
         expires_at: expires_at.to_owned(),
-    }];
+        available_fragments: Vec::new(),
+    };
+
+    if policy.source_selection_strategy == "ORIGIN_ONLY" {
+        return Ok(with_priorities(vec![origin]));
+    }
 
     let replicas = state
         .catalog
         .list_authorized_replica_sources(bucket_name, object_key)
         .await?;
-    sources.extend(
-        replicas
-            .into_iter()
-            .enumerate()
-            .map(|(index, replica)| replica_source(replica, expires_at, index)),
-    );
-    Ok(sources)
+    let replica_sources = replicas
+        .into_iter()
+        .map(|replica| replica_source(replica, expires_at))
+        .collect::<Vec<_>>();
+    let peer_sources = if policy.allow_peer_sharing {
+        let peers = state
+            .catalog
+            .list_authorized_peer_sources(bucket_name, object_key)
+            .await?;
+        peers.into_iter().map(peer_source).collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
+    let mut sources = Vec::new();
+    match policy.source_selection_strategy.as_str() {
+        "REPLICA_EDGE_FIRST" => {
+            sources.extend(replica_sources);
+            sources.extend(peer_sources);
+            sources.push(origin);
+        }
+        "PEER_FIRST" => {
+            sources.extend(peer_sources);
+            sources.extend(replica_sources);
+            sources.push(origin);
+        }
+        _ => {
+            sources.push(origin);
+            sources.extend(replica_sources);
+            sources.extend(peer_sources);
+        }
+    }
+    Ok(with_priorities(sources))
 }
 
-fn replica_source(
-    replica: ReplicaAvailabilityRecord,
-    expires_at: &str,
-    index: usize,
-) -> AuthorizedSource {
+fn replica_source(replica: ReplicaAvailabilityRecord, expires_at: &str) -> AuthorizedSource {
     AuthorizedSource {
         id: replica.replica_id,
         source_type: "REPLICA_EDGE".to_owned(),
         endpoint: replica.endpoint,
-        priority: u8::try_from(index + 2).unwrap_or(u8::MAX),
+        priority: 0,
         expires_at: expires_at.to_owned(),
+        available_fragments: replica.available_fragments,
+    }
+}
+
+fn peer_source(peer: PeerAvailabilityRecord) -> AuthorizedSource {
+    AuthorizedSource {
+        id: peer.id,
+        source_type: "PEER".to_owned(),
+        endpoint: peer.endpoint,
+        priority: 0,
+        expires_at: peer.expires_at,
+        available_fragments: peer.available_fragments,
+    }
+}
+
+fn with_priorities(mut sources: Vec<AuthorizedSource>) -> Vec<AuthorizedSource> {
+    for (index, source) in sources.iter_mut().enumerate() {
+        source.priority = u8::try_from(index + 1).unwrap_or(u8::MAX);
+    }
+    sources
+}
+
+fn source_selection_contract(policy: &BucketPolicy) -> SourceSelectionContract {
+    SourceSelectionContract {
+        strategy: policy.source_selection_strategy.clone(),
+        fragment_priority: policy.fragment_priority_strategy.clone(),
+        failure_threshold: policy.failure_threshold,
+        allow_peer_sharing: policy.allow_peer_sharing,
+        allow_replica_edge: policy.allow_replica_edge,
+    }
+}
+
+fn fallback_contract(
+    object_endpoint: &str,
+    policy: &BucketPolicy,
+    revalidate_endpoint: Option<String>,
+) -> FallbackContract {
+    FallbackContract {
+        source_type: "ORIGIN".to_owned(),
+        object_endpoint: object_endpoint.to_owned(),
+        supports_range: policy.fallback_mode != "DISABLED",
+        preserve_validated_fragments: true,
+        mode: policy.fallback_mode.clone(),
+        revalidate_endpoint,
     }
 }
 

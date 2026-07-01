@@ -83,6 +83,10 @@ pub struct BucketPolicy {
     pub fragment_size_bytes: i64,
     pub allow_replica_edge: bool,
     pub allow_peer_sharing: bool,
+    pub source_selection_strategy: String,
+    pub fragment_priority_strategy: String,
+    pub failure_threshold: i64,
+    pub fallback_mode: String,
     pub updated_at: String,
 }
 
@@ -92,6 +96,10 @@ pub struct BucketPolicyUpdate {
     pub fragment_size_bytes: i64,
     pub allow_replica_edge: bool,
     pub allow_peer_sharing: bool,
+    pub source_selection_strategy: String,
+    pub fragment_priority_strategy: String,
+    pub failure_threshold: i64,
+    pub fallback_mode: String,
 }
 
 #[derive(Debug, Clone)]
@@ -294,6 +302,54 @@ pub struct ReplicaAvailabilityRecord {
     pub last_seen_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerAvailabilityRecord {
+    pub id: String,
+    pub peer_id: String,
+    pub bucket: String,
+    pub key: String,
+    pub endpoint: String,
+    pub available_fragments: Vec<i64>,
+    pub expires_at: String,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PeerAvailabilityInput {
+    pub peer_id: String,
+    pub endpoint: String,
+    pub available_fragments: Vec<i64>,
+    pub ttl_seconds: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SdkFragmentEventInput {
+    pub source_type: String,
+    pub peer_availability_id: Option<String>,
+    pub fragment_index: i64,
+    pub fragment_hash: String,
+    pub event_type: String,
+    pub bytes_transferred: i64,
+    pub outcome: String,
+    pub latency_ms: Option<i64>,
+    pub detail: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SdkFragmentEventRecord {
+    pub id: String,
+    pub source_type: String,
+    pub fragment_index: i64,
+    pub fragment_hash: String,
+    pub event_type: String,
+    pub bytes_transferred: i64,
+    pub outcome: String,
+    pub latency_ms: Option<i64>,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ReplicaHealthReportInput {
     pub status: String,
@@ -382,7 +438,11 @@ pub struct BucketTrafficMetric {
     pub origin_bytes_served: i64,
     pub origin_requests: i64,
     pub replica_bytes_synced: i64,
+    pub peer_bytes_served: i64,
     pub fragment_events: i64,
+    pub fallback_events: i64,
+    pub integrity_failures: i64,
+    pub origin_offload_bytes: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -393,7 +453,11 @@ pub struct ObjectTrafficMetric {
     pub origin_bytes_served: i64,
     pub origin_requests: i64,
     pub replica_bytes_synced: i64,
+    pub peer_bytes_served: i64,
     pub fragment_events: i64,
+    pub fallback_events: i64,
+    pub integrity_failures: i64,
+    pub origin_offload_bytes: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -862,6 +926,10 @@ impl Catalog {
                 p.fragment_size_bytes,
                 p.allow_replica_edge,
                 p.allow_peer_sharing,
+                p.source_selection_strategy,
+                p.fragment_priority_strategy,
+                p.failure_threshold,
+                p.fallback_mode,
                 p.updated_at
             FROM bucket_policies p
             JOIN buckets b ON b.id = p.bucket_id
@@ -896,17 +964,25 @@ impl Catalog {
             r#"
             INSERT INTO bucket_policies (
                 bucket_id, access_package_ttl_seconds, fragment_size_bytes,
-                allow_replica_edge, allow_peer_sharing, updated_at
+                allow_replica_edge, allow_peer_sharing,
+                source_selection_strategy, fragment_priority_strategy,
+                failure_threshold, fallback_mode, updated_at
             )
-            VALUES ($1::uuid, $2, $3, $4, $5, now())
+            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, now())
             ON CONFLICT (bucket_id) DO UPDATE SET
                 access_package_ttl_seconds = EXCLUDED.access_package_ttl_seconds,
                 fragment_size_bytes = EXCLUDED.fragment_size_bytes,
                 allow_replica_edge = EXCLUDED.allow_replica_edge,
                 allow_peer_sharing = EXCLUDED.allow_peer_sharing,
+                source_selection_strategy = EXCLUDED.source_selection_strategy,
+                fragment_priority_strategy = EXCLUDED.fragment_priority_strategy,
+                failure_threshold = EXCLUDED.failure_threshold,
+                fallback_mode = EXCLUDED.fallback_mode,
                 updated_at = now()
             RETURNING access_package_ttl_seconds, fragment_size_bytes,
-                allow_replica_edge, allow_peer_sharing, updated_at
+                allow_replica_edge, allow_peer_sharing,
+                source_selection_strategy, fragment_priority_strategy,
+                failure_threshold, fallback_mode, updated_at
             "#,
         )
         .bind(bucket_id)
@@ -914,6 +990,10 @@ impl Catalog {
         .bind(update.fragment_size_bytes)
         .bind(update.allow_replica_edge)
         .bind(update.allow_peer_sharing)
+        .bind(&update.source_selection_strategy)
+        .bind(&update.fragment_priority_strategy)
+        .bind(update.failure_threshold)
+        .bind(&update.fallback_mode)
         .fetch_one(&mut *tx)
         .await
         .context("failed to update bucket policy")?;
@@ -927,6 +1007,10 @@ impl Catalog {
             fragment_size_bytes: row.get("fragment_size_bytes"),
             allow_replica_edge: row.get("allow_replica_edge"),
             allow_peer_sharing: row.get("allow_peer_sharing"),
+            source_selection_strategy: row.get("source_selection_strategy"),
+            fragment_priority_strategy: row.get("fragment_priority_strategy"),
+            failure_threshold: row.get("failure_threshold"),
+            fallback_mode: row.get("fallback_mode"),
             updated_at: format_datetime(row.get("updated_at")),
         })
     }
@@ -2169,6 +2253,291 @@ impl Catalog {
         rows.into_iter().map(availability_record_from_row).collect()
     }
 
+    pub async fn record_peer_fragment_availability(
+        &self,
+        authorization: &AccessPackageAuthorization,
+        input: PeerAvailabilityInput,
+    ) -> anyhow::Result<PeerAvailabilityRecord> {
+        validate_bucket_name(&authorization.bucket_name)?;
+        validate_object_key(&authorization.object_key)?;
+        validate_peer_id(&input.peer_id)?;
+        validate_peer_endpoint(&input.endpoint)?;
+        if !(30..=900).contains(&input.ttl_seconds) {
+            bail!("ttlSeconds must be between 30 and 900");
+        }
+        if input.available_fragments.is_empty() {
+            bail!("availableFragments must include at least one fragment");
+        }
+        for fragment in &input.available_fragments {
+            if *fragment < 0 {
+                bail!("available fragment indexes must be non-negative");
+            }
+        }
+
+        let fragments_json = serde_json::to_value(&input.available_fragments)
+            .context("failed to serialize peer fragments")?;
+        let expires_at = chrono::Utc::now() + chrono::Duration::seconds(input.ttl_seconds);
+        let row = query(
+            r#"
+            WITH target AS (
+                SELECT
+                    ap.id AS access_package_id,
+                    ap.application_id,
+                    b.id AS bucket_id,
+                    b.name AS bucket_name,
+                    o.id AS object_id,
+                    o.object_key,
+                    m.id AS manifest_id
+                FROM access_packages ap
+                JOIN application_credentials ac ON ac.id = ap.application_id
+                JOIN buckets b ON b.id = ap.bucket_id
+                JOIN objects o ON o.id = ap.object_id
+                JOIN object_versions v ON v.id = o.current_version_id
+                JOIN object_manifests m ON m.object_version_id = v.id
+                JOIN bucket_policies p ON p.bucket_id = b.id
+                WHERE ap.id = $1::uuid
+                  AND ap.application_id = $2::uuid
+                  AND b.name = $3
+                  AND o.object_key = $4
+                  AND ap.object_manifest_id = m.id
+                  AND ap.expires_at > now()
+                  AND ap.revoked_at IS NULL
+                  AND ac.revoked_at IS NULL
+                  AND b.deleted_at IS NULL
+                  AND o.deleted_at IS NULL
+                  AND o.state = 'AVAILABLE'
+                  AND p.allow_peer_sharing = TRUE
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements_text($7::jsonb) announced(fragment_index)
+                      LEFT JOIN object_manifest_fragments mf
+                        ON mf.manifest_id = m.id
+                       AND mf.fragment_index = announced.fragment_index::bigint
+                      WHERE mf.id IS NULL
+                  )
+            )
+            INSERT INTO peer_fragment_availability (
+                access_package_id, application_id, bucket_id, object_id, object_manifest_id,
+                peer_id, endpoint, available_fragments, expires_at, last_seen_at
+            )
+            SELECT access_package_id, application_id, bucket_id, object_id, manifest_id,
+                $5, $6, $7, $8, now()
+            FROM target
+            ON CONFLICT (access_package_id, peer_id, object_manifest_id) DO UPDATE
+            SET endpoint = EXCLUDED.endpoint,
+                available_fragments = EXCLUDED.available_fragments,
+                expires_at = EXCLUDED.expires_at,
+                last_seen_at = now()
+            RETURNING id::text, peer_id,
+                (SELECT bucket_name FROM target) AS bucket_name,
+                (SELECT object_key FROM target) AS object_key,
+                endpoint, available_fragments, expires_at, last_seen_at
+            "#,
+        )
+        .bind(&authorization.package_id)
+        .bind(&authorization.application_id)
+        .bind(&authorization.bucket_name)
+        .bind(&authorization.object_key)
+        .bind(&input.peer_id)
+        .bind(&input.endpoint)
+        .bind(fragments_json)
+        .bind(expires_at)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to record peer fragment availability")?;
+
+        let Some(row) = row else {
+            bail!("peer availability is not authorized by package, policy or manifest");
+        };
+        peer_availability_record_from_row(row)
+    }
+
+    pub async fn list_authorized_peer_sources(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<Vec<PeerAvailabilityRecord>> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let rows = query(
+            r#"
+            SELECT
+                pfa.id::text,
+                pfa.peer_id,
+                b.name AS bucket_name,
+                o.object_key,
+                pfa.endpoint,
+                pfa.available_fragments,
+                pfa.expires_at,
+                pfa.last_seen_at
+            FROM peer_fragment_availability pfa
+            JOIN access_packages ap ON ap.id = pfa.access_package_id
+            JOIN application_credentials ac ON ac.id = pfa.application_id
+            JOIN buckets b ON b.id = pfa.bucket_id
+            JOIN objects o ON o.id = pfa.object_id
+            JOIN object_versions v ON v.id = o.current_version_id
+            JOIN object_manifests m ON m.object_version_id = v.id
+            JOIN bucket_policies bp ON bp.bucket_id = b.id
+            WHERE b.name = $1
+              AND o.object_key = $2
+              AND pfa.object_manifest_id = m.id
+              AND pfa.expires_at > now()
+              AND ap.expires_at > now()
+              AND ap.revoked_at IS NULL
+              AND ac.revoked_at IS NULL
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+              AND bp.allow_peer_sharing = TRUE
+            ORDER BY pfa.last_seen_at DESC, pfa.peer_id ASC
+            LIMIT 50
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list authorized peer sources")?;
+
+        rows.into_iter()
+            .map(peer_availability_record_from_row)
+            .collect()
+    }
+
+    pub async fn record_sdk_fragment_event(
+        &self,
+        authorization: &AccessPackageAuthorization,
+        input: SdkFragmentEventInput,
+    ) -> anyhow::Result<SdkFragmentEventRecord> {
+        validate_source_type(&input.source_type)?;
+        validate_sdk_event_type(&input.event_type)?;
+        validate_sdk_outcome(&input.outcome)?;
+        if input.source_type == "PEER" && input.peer_availability_id.is_none() {
+            bail!("peerAvailabilityId is required for PEER events");
+        }
+        if input.source_type != "PEER" && input.peer_availability_id.is_some() {
+            bail!("peerAvailabilityId is only valid for PEER events");
+        }
+        validate_non_negative(input.bytes_transferred, "bytesTransferred")?;
+        if input.fragment_index < 0 {
+            bail!("fragmentIndex must be non-negative");
+        }
+        if input.fragment_hash.len() != 64
+            || !input.fragment_hash.chars().all(|ch| ch.is_ascii_hexdigit())
+        {
+            bail!("fragmentHash must be a SHA-256 hex digest");
+        }
+        if let Some(value) = input.latency_ms {
+            validate_non_negative(value, "latencyMs")?;
+        }
+
+        let expected_hash: Option<String> = query_scalar(
+            r#"
+            SELECT fragment_hash
+            FROM object_manifest_fragments
+            WHERE manifest_id = $1::uuid AND fragment_index = $2
+            "#,
+        )
+        .bind(&authorization.manifest_id)
+        .bind(input.fragment_index)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load expected fragment hash")?;
+        let Some(expected_hash) = expected_hash else {
+            bail!("fragment does not belong to the access package manifest");
+        };
+        let hash_matches = expected_hash.eq_ignore_ascii_case(&input.fragment_hash);
+        let persisted_outcome = if hash_matches {
+            input.outcome.clone()
+        } else {
+            "REJECTED".to_owned()
+        };
+        let persisted_event_type = if hash_matches {
+            input.event_type.clone()
+        } else {
+            "HASH_MISMATCH".to_owned()
+        };
+        let detail = if hash_matches {
+            input.detail
+        } else {
+            serde_json::json!({
+                "expectedHash": expected_hash,
+                "reportedHash": input.fragment_hash,
+                "detail": input.detail
+            })
+        };
+
+        let row = query(
+            r#"
+            WITH target AS (
+                SELECT b.id AS bucket_id, o.id AS object_id, m.id AS manifest_id
+                FROM access_packages ap
+                JOIN application_credentials ac ON ac.id = ap.application_id
+                JOIN buckets b ON b.id = ap.bucket_id
+                JOIN objects o ON o.id = ap.object_id
+                JOIN object_versions v ON v.id = o.current_version_id
+                JOIN object_manifests m ON m.object_version_id = v.id
+                WHERE ap.id = $1::uuid
+                  AND ap.application_id = $2::uuid
+                  AND b.name = $3
+                  AND o.object_key = $4
+                  AND ap.object_manifest_id = m.id
+                  AND ap.expires_at > now()
+                  AND ap.revoked_at IS NULL
+                  AND ac.revoked_at IS NULL
+                  AND b.deleted_at IS NULL
+                  AND o.deleted_at IS NULL
+                  AND o.state = 'AVAILABLE'
+            ),
+            peer_source AS (
+                SELECT id
+                FROM peer_fragment_availability
+                WHERE id = $11::uuid
+                  AND object_manifest_id = (SELECT manifest_id FROM target)
+                  AND expires_at > now()
+            )
+            INSERT INTO fragment_transfer_events (
+                source_type, replica_id, bucket_id, object_id, object_manifest_id,
+                access_package_id, peer_id, fragment_index, fragment_hash, event_type,
+                bytes_transferred, outcome, latency_ms, detail
+            )
+            SELECT $5, NULL::uuid, bucket_id, object_id, manifest_id,
+                $1::uuid,
+                CASE WHEN $11::uuid IS NULL THEN NULL ELSE (SELECT id FROM peer_source) END,
+                $6, $7, $8, $9, $10, $12, $13
+            FROM target
+            WHERE $11::uuid IS NULL OR EXISTS (SELECT 1 FROM peer_source)
+            RETURNING id::text, source_type, fragment_index, fragment_hash, event_type,
+                bytes_transferred, outcome, latency_ms, created_at
+            "#,
+        )
+        .bind(&authorization.package_id)
+        .bind(&authorization.application_id)
+        .bind(&authorization.bucket_name)
+        .bind(&authorization.object_key)
+        .bind(&input.source_type)
+        .bind(input.fragment_index)
+        .bind(&input.fragment_hash)
+        .bind(&persisted_event_type)
+        .bind(input.bytes_transferred)
+        .bind(&persisted_outcome)
+        .bind(input.peer_availability_id.as_deref())
+        .bind(input.latency_ms)
+        .bind(detail)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to record SDK fragment event")?;
+
+        let Some(row) = row else {
+            bail!("SDK fragment event is not authorized");
+        };
+        let record = sdk_fragment_event_from_row(row);
+        if !hash_matches {
+            bail!("fragment hash does not match manifest");
+        }
+        Ok(record)
+    }
+
     pub async fn record_replica_health(
         &self,
         replica_id: &str,
@@ -2715,6 +3084,10 @@ impl Catalog {
             fragments AS (
                 SELECT bucket_id,
                        SUM(CASE WHEN source_type = 'REPLICA_EDGE' THEN bytes_transferred ELSE 0 END)::bigint AS replica_bytes_synced,
+                       SUM(CASE WHEN source_type = 'PEER' THEN bytes_transferred ELSE 0 END)::bigint AS peer_bytes_served,
+                       SUM(CASE WHEN event_type = 'FALLBACK_DECISION' THEN 1 ELSE 0 END)::bigint AS fallback_events,
+                       SUM(CASE WHEN event_type = 'HASH_MISMATCH' OR outcome = 'REJECTED' THEN 1 ELSE 0 END)::bigint AS integrity_failures,
+                       SUM(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') AND outcome = 'SUCCESS' THEN bytes_transferred ELSE 0 END)::bigint AS origin_offload_bytes,
                        COUNT(*)::bigint AS fragment_events
                 FROM fragment_transfer_events
                 GROUP BY bucket_id
@@ -2724,7 +3097,11 @@ impl Catalog {
                 COALESCE(origin.bytes_served, 0)::bigint AS origin_bytes_served,
                 COALESCE(origin.requests, 0)::bigint AS origin_requests,
                 COALESCE(fragments.replica_bytes_synced, 0)::bigint AS replica_bytes_synced,
-                COALESCE(fragments.fragment_events, 0)::bigint AS fragment_events
+                COALESCE(fragments.peer_bytes_served, 0)::bigint AS peer_bytes_served,
+                COALESCE(fragments.fragment_events, 0)::bigint AS fragment_events,
+                COALESCE(fragments.fallback_events, 0)::bigint AS fallback_events,
+                COALESCE(fragments.integrity_failures, 0)::bigint AS integrity_failures,
+                COALESCE(fragments.origin_offload_bytes, 0)::bigint AS origin_offload_bytes
             FROM buckets b
             LEFT JOIN origin ON origin.bucket_id = b.id
             LEFT JOIN fragments ON fragments.bucket_id = b.id
@@ -2743,7 +3120,11 @@ impl Catalog {
                 origin_bytes_served: row.get("origin_bytes_served"),
                 origin_requests: row.get("origin_requests"),
                 replica_bytes_synced: row.get("replica_bytes_synced"),
+                peer_bytes_served: row.get("peer_bytes_served"),
                 fragment_events: row.get("fragment_events"),
+                fallback_events: row.get("fallback_events"),
+                integrity_failures: row.get("integrity_failures"),
+                origin_offload_bytes: row.get("origin_offload_bytes"),
             })
             .collect())
     }
@@ -2760,6 +3141,10 @@ impl Catalog {
             fragments AS (
                 SELECT object_id,
                        SUM(CASE WHEN source_type = 'REPLICA_EDGE' THEN bytes_transferred ELSE 0 END)::bigint AS replica_bytes_synced,
+                       SUM(CASE WHEN source_type = 'PEER' THEN bytes_transferred ELSE 0 END)::bigint AS peer_bytes_served,
+                       SUM(CASE WHEN event_type = 'FALLBACK_DECISION' THEN 1 ELSE 0 END)::bigint AS fallback_events,
+                       SUM(CASE WHEN event_type = 'HASH_MISMATCH' OR outcome = 'REJECTED' THEN 1 ELSE 0 END)::bigint AS integrity_failures,
+                       SUM(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') AND outcome = 'SUCCESS' THEN bytes_transferred ELSE 0 END)::bigint AS origin_offload_bytes,
                        COUNT(*)::bigint AS fragment_events
                 FROM fragment_transfer_events
                 GROUP BY object_id
@@ -2770,7 +3155,11 @@ impl Catalog {
                 COALESCE(origin.bytes_served, 0)::bigint AS origin_bytes_served,
                 COALESCE(origin.requests, 0)::bigint AS origin_requests,
                 COALESCE(fragments.replica_bytes_synced, 0)::bigint AS replica_bytes_synced,
-                COALESCE(fragments.fragment_events, 0)::bigint AS fragment_events
+                COALESCE(fragments.peer_bytes_served, 0)::bigint AS peer_bytes_served,
+                COALESCE(fragments.fragment_events, 0)::bigint AS fragment_events,
+                COALESCE(fragments.fallback_events, 0)::bigint AS fallback_events,
+                COALESCE(fragments.integrity_failures, 0)::bigint AS integrity_failures,
+                COALESCE(fragments.origin_offload_bytes, 0)::bigint AS origin_offload_bytes
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             LEFT JOIN origin ON origin.object_id = o.id
@@ -2793,7 +3182,11 @@ impl Catalog {
                 origin_bytes_served: row.get("origin_bytes_served"),
                 origin_requests: row.get("origin_requests"),
                 replica_bytes_synced: row.get("replica_bytes_synced"),
+                peer_bytes_served: row.get("peer_bytes_served"),
                 fragment_events: row.get("fragment_events"),
+                fallback_events: row.get("fallback_events"),
+                integrity_failures: row.get("integrity_failures"),
+                origin_offload_bytes: row.get("origin_offload_bytes"),
             })
             .collect())
     }
@@ -3018,6 +3411,10 @@ fn bucket_policy_from_row(row: PgRow) -> BucketPolicy {
         fragment_size_bytes: row.get("fragment_size_bytes"),
         allow_replica_edge: row.get("allow_replica_edge"),
         allow_peer_sharing: row.get("allow_peer_sharing"),
+        source_selection_strategy: row.get("source_selection_strategy"),
+        fragment_priority_strategy: row.get("fragment_priority_strategy"),
+        failure_threshold: row.get("failure_threshold"),
+        fallback_mode: row.get("fallback_mode"),
         updated_at: format_datetime(row.get("updated_at")),
     }
 }
@@ -3094,6 +3491,33 @@ fn availability_record_from_row(row: PgRow) -> anyhow::Result<ReplicaAvailabilit
         available_fragments: parse_i64_vec(row.get("available_fragments"))?,
         last_seen_at: format_datetime(row.get("last_seen_at")),
     })
+}
+
+fn peer_availability_record_from_row(row: PgRow) -> anyhow::Result<PeerAvailabilityRecord> {
+    Ok(PeerAvailabilityRecord {
+        id: row.get("id"),
+        peer_id: row.get("peer_id"),
+        bucket: row.get("bucket_name"),
+        key: row.get("object_key"),
+        endpoint: row.get("endpoint"),
+        available_fragments: parse_i64_vec(row.get("available_fragments"))?,
+        expires_at: format_datetime(row.get("expires_at")),
+        last_seen_at: format_datetime(row.get("last_seen_at")),
+    })
+}
+
+fn sdk_fragment_event_from_row(row: PgRow) -> SdkFragmentEventRecord {
+    SdkFragmentEventRecord {
+        id: row.get("id"),
+        source_type: row.get("source_type"),
+        fragment_index: row.get("fragment_index"),
+        fragment_hash: row.get("fragment_hash"),
+        event_type: row.get("event_type"),
+        bytes_transferred: row.get("bytes_transferred"),
+        outcome: row.get("outcome"),
+        latency_ms: row.get("latency_ms"),
+        created_at: format_datetime(row.get("created_at")),
+    }
 }
 
 fn audit_event_from_row(row: PgRow) -> AuditEventRecord {
@@ -3184,7 +3608,37 @@ fn validate_bucket_policy(update: &BucketPolicyUpdate) -> anyhow::Result<()> {
     if !(1024..=134_217_728).contains(&update.fragment_size_bytes) {
         bail!("fragmentSizeBytes must be between 1024 and 134217728");
     }
+    validate_policy_enum(
+        "sourceSelectionStrategy",
+        &update.source_selection_strategy,
+        &[
+            "ORIGIN_REPLICA_EDGE",
+            "ORIGIN_ONLY",
+            "REPLICA_EDGE_FIRST",
+            "PEER_FIRST",
+        ],
+    )?;
+    validate_policy_enum(
+        "fragmentPriorityStrategy",
+        &update.fragment_priority_strategy,
+        &["MANIFEST_ORDER", "INITIAL_FIRST", "RAREST_FIRST"],
+    )?;
+    if !(1..=20).contains(&update.failure_threshold) {
+        bail!("failureThreshold must be between 1 and 20");
+    }
+    validate_policy_enum(
+        "fallbackMode",
+        &update.fallback_mode,
+        &["ORIGIN_RANGE", "ORIGIN_FULL_OBJECT", "DISABLED"],
+    )?;
     Ok(())
+}
+
+fn validate_policy_enum(field: &str, value: &str, allowed: &[&str]) -> anyhow::Result<()> {
+    if allowed.iter().any(|allowed_value| *allowed_value == value) {
+        return Ok(());
+    }
+    bail!("{field} is not supported");
 }
 
 pub fn validate_bucket_name(name: &str) -> anyhow::Result<()> {
@@ -3244,6 +3698,59 @@ fn validate_replica_endpoint(endpoint: &str) -> anyhow::Result<()> {
         bail!("replica endpoint must be an HTTP or HTTPS URL");
     }
     Ok(())
+}
+
+fn validate_peer_endpoint(endpoint: &str) -> anyhow::Result<()> {
+    let endpoint = endpoint.trim();
+    if endpoint.is_empty() {
+        bail!("peer endpoint cannot be empty");
+    }
+    if endpoint.len() > 2048 {
+        bail!("peer endpoint is too long");
+    }
+    if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+        bail!("peer endpoint must be an HTTP or HTTPS URL");
+    }
+    Ok(())
+}
+
+fn validate_peer_id(peer_id: &str) -> anyhow::Result<()> {
+    if peer_id.trim().is_empty() {
+        bail!("peerId cannot be empty");
+    }
+    if peer_id.len() > 160 {
+        bail!("peerId is too long");
+    }
+    if !peer_id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':'))
+    {
+        bail!("peerId contains unsupported characters");
+    }
+    Ok(())
+}
+
+fn validate_source_type(source_type: &str) -> anyhow::Result<()> {
+    match source_type {
+        "ORIGIN" | "REPLICA_EDGE" | "PEER" => Ok(()),
+        _ => bail!("sourceType must be ORIGIN, REPLICA_EDGE or PEER"),
+    }
+}
+
+fn validate_sdk_event_type(event_type: &str) -> anyhow::Result<()> {
+    match event_type {
+        "FRAGMENT_VALIDATED" | "FRAGMENT_REJECTED" | "FALLBACK_DECISION" | "SOURCE_FAILURE" => {
+            Ok(())
+        }
+        _ => bail!("eventType is not supported"),
+    }
+}
+
+fn validate_sdk_outcome(outcome: &str) -> anyhow::Result<()> {
+    match outcome {
+        "SUCCESS" | "FAILURE" | "REJECTED" => Ok(()),
+        _ => bail!("outcome must be SUCCESS, FAILURE or REJECTED"),
+    }
 }
 
 fn validate_non_negative(value: i64, field: &str) -> anyhow::Result<()> {

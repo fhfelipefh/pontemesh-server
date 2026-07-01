@@ -66,7 +66,11 @@ export type BucketTrafficMetric = {
   originBytesServed: number;
   originRequests: number;
   replicaBytesSynced: number;
+  peerBytesServed: number;
   fragmentEvents: number;
+  fallbackEvents: number;
+  integrityFailures: number;
+  originOffloadBytes: number;
 };
 
 export type ObjectTrafficMetric = {
@@ -75,7 +79,11 @@ export type ObjectTrafficMetric = {
   originBytesServed: number;
   originRequests: number;
   replicaBytesSynced: number;
+  peerBytesServed: number;
   fragmentEvents: number;
+  fallbackEvents: number;
+  integrityFailures: number;
+  originOffloadBytes: number;
 };
 
 export type ReplicaDetailMetric = {

@@ -8,12 +8,15 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  BucketPolicy,
   BucketSummary,
   PaginatedResponse,
   createBucket,
   deleteBucket,
   deleteObject,
-  listBuckets
+  getBucketPolicy,
+  listBuckets,
+  updateBucketPolicy
 } from "../api/bucketsApi";
 import { Button } from "../components/Button";
 import { ConfirmDialog, EmptyState, PageSizeSelect, Pagination } from "../components/AdminListControls";
@@ -343,6 +346,9 @@ type BucketDrawerProps = {
 
 function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError, onConfirmDeleteObject }: BucketDrawerProps) {
   const { t } = useTranslation();
+  const [policy, setPolicy] = useState<BucketPolicy | null>(null);
+  const [policyError, setPolicyError] = useState("");
+  const [policySaving, setPolicySaving] = useState(false);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -354,6 +360,48 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    let active = true;
+    setPolicy(null);
+    setPolicyError("");
+    getBucketPolicy(bucket.name)
+      .then((nextPolicy) => {
+        if (active) {
+          setPolicy(nextPolicy);
+        }
+      })
+      .catch((loadError) => {
+        if (active) {
+          setPolicyError(loadError instanceof Error ? loadError.message : t("setup.buckets.policyLoadFailed"));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [bucket.name, t]);
+
+  async function savePolicy(nextPolicy: BucketPolicy) {
+    setPolicySaving(true);
+    setPolicyError("");
+    try {
+      const saved = await updateBucketPolicy(bucket.name, {
+        accessPackageTtlSeconds: nextPolicy.accessPackageTtlSeconds,
+        fragmentSizeBytes: nextPolicy.fragmentSizeBytes,
+        allowReplicaEdge: nextPolicy.allowReplicaEdge,
+        allowPeerSharing: nextPolicy.allowPeerSharing,
+        sourceSelectionStrategy: nextPolicy.sourceSelectionStrategy,
+        fragmentPriorityStrategy: nextPolicy.fragmentPriorityStrategy,
+        failureThreshold: nextPolicy.failureThreshold,
+        fallbackMode: nextPolicy.fallbackMode
+      });
+      setPolicy(saved);
+    } catch (saveError) {
+      setPolicyError(saveError instanceof Error ? saveError.message : t("setup.buckets.policySaveFailed"));
+    } finally {
+      setPolicySaving(false);
+    }
+  }
 
   return (
     <div className="bucket-drawer-backdrop" data-testid="modal-backdrop" role="presentation">
@@ -375,6 +423,108 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
             <X size={18} aria-hidden="true" />
           </button>
         </header>
+
+        <section className="bucket-policy-panel">
+          <div className="bucket-policy-panel__header">
+            <h3>{t("setup.buckets.policyTitle")}</h3>
+            {policy ? (
+              <Button
+                type="button"
+                loading={policySaving}
+                onClick={() => void savePolicy(policy)}
+              >
+                {t("setup.common.save")}
+              </Button>
+            ) : null}
+          </div>
+          <ErrorMessage message={policyError} />
+          {!policy && !policyError ? (
+            <div className="admin-loading">{t("setup.common.loading")}</div>
+          ) : policy ? (
+            <div className="bucket-policy-grid">
+              <label>
+                <span>{t("setup.buckets.accessPackageTtl")}</span>
+                <input
+                  type="number"
+                  min={60}
+                  max={3600}
+                  value={policy.accessPackageTtlSeconds}
+                  onChange={(event) => setPolicy({ ...policy, accessPackageTtlSeconds: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>{t("setup.buckets.fragmentSize")}</span>
+                <input
+                  type="number"
+                  min={1024}
+                  max={134217728}
+                  value={policy.fragmentSizeBytes}
+                  onChange={(event) => setPolicy({ ...policy, fragmentSizeBytes: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>{t("setup.buckets.sourceSelection")}</span>
+                <select
+                  value={policy.sourceSelectionStrategy}
+                  onChange={(event) => setPolicy({ ...policy, sourceSelectionStrategy: event.target.value })}
+                >
+                  <option value="ORIGIN_REPLICA_EDGE">{t("setup.buckets.sourceOriginReplica")}</option>
+                  <option value="ORIGIN_ONLY">{t("setup.buckets.sourceOriginOnly")}</option>
+                  <option value="REPLICA_EDGE_FIRST">{t("setup.buckets.sourceReplicaFirst")}</option>
+                  <option value="PEER_FIRST">{t("setup.buckets.sourcePeerFirst")}</option>
+                </select>
+              </label>
+              <label>
+                <span>{t("setup.buckets.fragmentPriority")}</span>
+                <select
+                  value={policy.fragmentPriorityStrategy}
+                  onChange={(event) => setPolicy({ ...policy, fragmentPriorityStrategy: event.target.value })}
+                >
+                  <option value="MANIFEST_ORDER">{t("setup.buckets.priorityManifest")}</option>
+                  <option value="INITIAL_FIRST">{t("setup.buckets.priorityInitial")}</option>
+                  <option value="RAREST_FIRST">{t("setup.buckets.priorityRarest")}</option>
+                </select>
+              </label>
+              <label>
+                <span>{t("setup.buckets.failureThreshold")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={policy.failureThreshold}
+                  onChange={(event) => setPolicy({ ...policy, failureThreshold: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span>{t("setup.buckets.fallbackMode")}</span>
+                <select
+                  value={policy.fallbackMode}
+                  onChange={(event) => setPolicy({ ...policy, fallbackMode: event.target.value })}
+                >
+                  <option value="ORIGIN_RANGE">{t("setup.buckets.fallbackRange")}</option>
+                  <option value="ORIGIN_FULL_OBJECT">{t("setup.buckets.fallbackFull")}</option>
+                  <option value="DISABLED">{t("setup.buckets.fallbackDisabled")}</option>
+                </select>
+              </label>
+              <label className="bucket-policy-toggle">
+                <input
+                  type="checkbox"
+                  checked={policy.allowReplicaEdge}
+                  onChange={(event) => setPolicy({ ...policy, allowReplicaEdge: event.target.checked })}
+                />
+                <span>{t("setup.buckets.allowReplicaEdge")}</span>
+              </label>
+              <label className="bucket-policy-toggle">
+                <input
+                  type="checkbox"
+                  checked={policy.allowPeerSharing}
+                  onChange={(event) => setPolicy({ ...policy, allowPeerSharing: event.target.checked })}
+                />
+                <span>{t("setup.buckets.allowPeerSharing")}</span>
+              </label>
+            </div>
+          ) : null}
+        </section>
 
         <ObjectManager
           bucketName={bucket.name}

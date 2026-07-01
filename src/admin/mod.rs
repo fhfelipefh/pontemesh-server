@@ -92,6 +92,10 @@ pub struct UpdateBucketPolicyRequest {
     fragment_size_bytes: i64,
     allow_replica_edge: bool,
     allow_peer_sharing: bool,
+    source_selection_strategy: Option<String>,
+    fragment_priority_strategy: Option<String>,
+    failure_threshold: Option<i64>,
+    fallback_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -360,6 +364,16 @@ pub async fn update_bucket_policy(
         fragment_size_bytes: payload.fragment_size_bytes,
         allow_replica_edge: payload.allow_replica_edge,
         allow_peer_sharing: payload.allow_peer_sharing,
+        source_selection_strategy: payload
+            .source_selection_strategy
+            .unwrap_or_else(|| "ORIGIN_REPLICA_EDGE".to_owned()),
+        fragment_priority_strategy: payload
+            .fragment_priority_strategy
+            .unwrap_or_else(|| "MANIFEST_ORDER".to_owned()),
+        failure_threshold: payload.failure_threshold.unwrap_or(3),
+        fallback_mode: payload
+            .fallback_mode
+            .unwrap_or_else(|| "ORIGIN_RANGE".to_owned()),
     };
     match state
         .catalog
@@ -371,7 +385,11 @@ pub async fn update_bucket_policy(
                 "accessPackageTtlSeconds": policy.access_package_ttl_seconds,
                 "fragmentSizeBytes": policy.fragment_size_bytes,
                 "allowReplicaEdge": policy.allow_replica_edge,
-                "allowPeerSharing": policy.allow_peer_sharing
+                "allowPeerSharing": policy.allow_peer_sharing,
+                "sourceSelectionStrategy": policy.source_selection_strategy,
+                "fragmentPriorityStrategy": policy.fragment_priority_strategy,
+                "failureThreshold": policy.failure_threshold,
+                "fallbackMode": policy.fallback_mode
             });
             if let Err(error) = state
                 .catalog

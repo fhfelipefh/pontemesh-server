@@ -194,6 +194,14 @@ fn pontemesh_routes(state: AppState) -> Router<AppState> {
         .route(
             "/access-packages/{package_id}/revalidate/{bucket_name}/{*object_key}",
             post(mesh::revalidate_access_package),
+        )
+        .route(
+            "/access-packages/{package_id}/peers/{bucket_name}/{*object_key}",
+            post(mesh::announce_peer_availability),
+        )
+        .route(
+            "/access-packages/{package_id}/events/{bucket_name}/{*object_key}",
+            post(mesh::record_sdk_fragment_event),
         );
 
     let application_routes = Router::new()
@@ -1627,7 +1635,7 @@ mod tests {
                     .header(header::COOKIE, &admin_cookie)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
-                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":true,"allowPeerSharing":false}"#,
+                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":true,"allowPeerSharing":false,"sourceSelectionStrategy":"ORIGIN_REPLICA_EDGE","fragmentPriorityStrategy":"MANIFEST_ORDER","failureThreshold":3,"fallbackMode":"ORIGIN_RANGE"}"#,
                     ))
                     .expect("valid request"),
             )
@@ -1759,6 +1767,35 @@ mod tests {
         let package_token = package_body["packageToken"]
             .as_str()
             .expect("access package token");
+        assert_eq!(
+            package_body["sourceSelection"]["allowPeerSharing"],
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            package_body["authorizedSources"]
+                .as_array()
+                .expect("initial package sources")
+                .len(),
+            1
+        );
+        let peer_without_policy = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_id}/peers/test-bucket/folder/hello.txt"
+                    ))
+                    .header(header::AUTHORIZATION, format!("Bearer {package_token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"peerId":"client-a","endpoint":"https://peer-a.example.test/fragments","availableFragments":[0],"ttlSeconds":120}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(peer_without_policy.status(), StatusCode::BAD_REQUEST);
         let package_object = app
             .clone()
             .oneshot(
@@ -2135,6 +2172,216 @@ mod tests {
         let package_with_replica_token = package_with_replica_body["packageToken"]
             .as_str()
             .expect("package with replica token");
+
+        let enable_peer_policy = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/buckets/test-bucket/policy")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":true,"allowPeerSharing":true,"sourceSelectionStrategy":"PEER_FIRST","fragmentPriorityStrategy":"INITIAL_FIRST","failureThreshold":2,"fallbackMode":"ORIGIN_RANGE"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(enable_peer_policy.status(), StatusCode::OK);
+        let enable_peer_policy_body: serde_json::Value =
+            serde_json::from_str(&response_text(enable_peer_policy).await)
+                .expect("peer policy JSON");
+        assert_eq!(enable_peer_policy_body["allowPeerSharing"], true);
+        assert_eq!(
+            enable_peer_policy_body["sourceSelectionStrategy"],
+            "PEER_FIRST"
+        );
+
+        let peer_availability = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_with_replica_id}/peers/test-bucket/folder/hello.txt"
+                    ))
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {package_with_replica_token}"),
+                    )
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"peerId":"client-a","endpoint":"https://peer-a.example.test/fragments","availableFragments":[0],"ttlSeconds":120}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(peer_availability.status(), StatusCode::CREATED);
+        let peer_availability_body: serde_json::Value =
+            serde_json::from_str(&response_text(peer_availability).await)
+                .expect("peer availability JSON");
+        let peer_availability_id = peer_availability_body["id"]
+            .as_str()
+            .expect("peer availability id");
+        assert_eq!(peer_availability_body["peerId"], "client-a");
+
+        let sources_with_peer = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/pontemesh/objects/test-bucket/sources/folder/hello.txt")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(sources_with_peer.status(), StatusCode::OK);
+        let sources_with_peer_body: serde_json::Value =
+            serde_json::from_str(&response_text(sources_with_peer).await)
+                .expect("sources with peer JSON");
+        let sources_with_peer_list = sources_with_peer_body["authorizedSources"]
+            .as_array()
+            .expect("sources with peer");
+        assert_eq!(sources_with_peer_list[0]["sourceType"], "PEER");
+        assert_eq!(
+            sources_with_peer_body["sourceSelection"]["strategy"],
+            "PEER_FIRST"
+        );
+
+        let valid_fragment_hash = manifest_body["fragments"][0]["sha256"]
+            .as_str()
+            .expect("fragment hash");
+        let peer_fragment_event = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_with_replica_id}/events/test-bucket/folder/hello.txt"
+                    ))
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {package_with_replica_token}"),
+                    )
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"sourceType":"PEER","peerAvailabilityId":"{peer_availability_id}","fragmentIndex":0,"fragmentHash":"{valid_fragment_hash}","eventType":"FRAGMENT_VALIDATED","bytesTransferred":11,"outcome":"SUCCESS","latencyMs":9,"detail":{{"sessionId":"sdk-session-1"}}}}"#
+                    )))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(peer_fragment_event.status(), StatusCode::CREATED);
+
+        let fallback_event = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_with_replica_id}/events/test-bucket/folder/hello.txt"
+                    ))
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {package_with_replica_token}"),
+                    )
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"sourceType":"REPLICA_EDGE","fragmentIndex":0,"fragmentHash":"{valid_fragment_hash}","eventType":"FALLBACK_DECISION","bytesTransferred":0,"outcome":"SUCCESS","latencyMs":12,"detail":{{"from":"REPLICA_EDGE","to":"ORIGIN","preservedFragments":[0]}}}}"#
+                    )))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(fallback_event.status(), StatusCode::CREATED);
+
+        let invalid_hash_event = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!(
+                        "/pontemesh/access-packages/{package_with_replica_id}/events/test-bucket/folder/hello.txt"
+                    ))
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {package_with_replica_token}"),
+                    )
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"sourceType":"PEER","peerAvailabilityId":"{peer_availability_id}","fragmentIndex":0,"fragmentHash":"0000000000000000000000000000000000000000000000000000000000000000","eventType":"FRAGMENT_VALIDATED","bytesTransferred":11,"outcome":"SUCCESS","latencyMs":9,"detail":{{"sessionId":"sdk-session-1"}}}}"#
+                    )))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(invalid_hash_event.status(), StatusCode::BAD_REQUEST);
+
+        sqlx_core::query::query(
+            "UPDATE peer_fragment_availability SET expires_at = now() - interval '1 second'",
+        )
+        .execute(ctx.catalog.pool())
+        .await
+        .expect("expire peer availability");
+        let sources_after_peer_expiry = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/pontemesh/objects/test-bucket/sources/folder/hello.txt")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(sources_after_peer_expiry.status(), StatusCode::OK);
+        let sources_after_peer_expiry_body: serde_json::Value =
+            serde_json::from_str(&response_text(sources_after_peer_expiry).await)
+                .expect("sources after peer expiry JSON");
+        assert!(
+            sources_after_peer_expiry_body["authorizedSources"]
+                .as_array()
+                .expect("sources after peer expiry")
+                .iter()
+                .all(|source| source["sourceType"] != "PEER")
+        );
+
+        let sdk_bucket_metrics = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/buckets")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(sdk_bucket_metrics.status(), StatusCode::OK);
+        let sdk_bucket_metrics_body: serde_json::Value =
+            serde_json::from_str(&response_text(sdk_bucket_metrics).await)
+                .expect("SDK bucket metrics JSON");
+        assert_eq!(sdk_bucket_metrics_body[0]["peerBytesServed"], 11);
+        assert_eq!(sdk_bucket_metrics_body[0]["originOffloadBytes"], 11);
+        assert_eq!(sdk_bucket_metrics_body[0]["fallbackEvents"], 1);
+        assert_eq!(sdk_bucket_metrics_body[0]["integrityFailures"], 1);
+
+        let sdk_event_counts: (i64, i64) = sqlx_core::query_as::query_as(
+            r#"
+            SELECT
+                COUNT(*) FILTER (WHERE event_type = 'FALLBACK_DECISION')::bigint AS fallback_count,
+                COUNT(*) FILTER (WHERE event_type = 'HASH_MISMATCH' AND outcome = 'REJECTED')::bigint AS rejected_hash_count
+            FROM fragment_transfer_events
+            "#,
+        )
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("SDK event counts");
+        assert_eq!(sdk_event_counts, (1, 1));
+
         let revalidate = app
             .clone()
             .oneshot(

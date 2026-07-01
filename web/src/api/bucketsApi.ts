@@ -7,6 +7,30 @@ export type BucketSummary = {
   createdAt: string;
 };
 
+export type BucketPolicy = {
+  bucketName: string;
+  accessPackageTtlSeconds: number;
+  fragmentSizeBytes: number;
+  allowReplicaEdge: boolean;
+  allowPeerSharing: boolean;
+  sourceSelectionStrategy: "ORIGIN_REPLICA_EDGE" | "ORIGIN_ONLY" | "REPLICA_EDGE_FIRST" | "PEER_FIRST" | string;
+  fragmentPriorityStrategy: "MANIFEST_ORDER" | "INITIAL_FIRST" | "RAREST_FIRST" | string;
+  failureThreshold: number;
+  fallbackMode: "ORIGIN_RANGE" | "ORIGIN_FULL_OBJECT" | "DISABLED" | string;
+  updatedAt: string;
+};
+
+export type UpdateBucketPolicyInput = {
+  accessPackageTtlSeconds: number;
+  fragmentSizeBytes: number;
+  allowReplicaEdge: boolean;
+  allowPeerSharing: boolean;
+  sourceSelectionStrategy: string;
+  fragmentPriorityStrategy: string;
+  failureThreshold: number;
+  fallbackMode: string;
+};
+
 export type ObjectSummary = {
   key: string;
   sizeBytes: number;
@@ -58,6 +82,28 @@ export async function deleteBucket(bucketName: string): Promise<void> {
     method: "DELETE"
   });
   await ensureOk(response);
+}
+
+export async function getBucketPolicy(bucketName: string): Promise<BucketPolicy> {
+  const response = await fetch(`/api/admin/buckets/${encodeURIComponent(bucketName)}/policy`, {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<BucketPolicy>;
+}
+
+export async function updateBucketPolicy(bucketName: string, policy: UpdateBucketPolicyInput): Promise<BucketPolicy> {
+  const response = await fetch(`/api/admin/buckets/${encodeURIComponent(bucketName)}/policy`, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(policy)
+  });
+  await ensureOk(response);
+  return response.json() as Promise<BucketPolicy>;
 }
 
 export async function listObjects(bucketName: string, params: PageParams): Promise<PaginatedResponse<ObjectSummary>> {

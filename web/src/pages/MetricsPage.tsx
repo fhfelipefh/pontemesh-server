@@ -2,6 +2,8 @@ import { ReactNode, useEffect, useState } from "react";
 import { Activity, DownloadCloud, Gauge, SplitSquareHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  BucketTrafficMetric,
+  getBucketTrafficMetrics,
   getOriginTrafficMetrics,
   getReplicaTrafficMetrics,
   OriginTrafficMetrics,
@@ -13,13 +15,15 @@ export function MetricsPage() {
   const { t } = useTranslation();
   const [metrics, setMetrics] = useState<OriginTrafficMetrics | null>(null);
   const [replicaMetrics, setReplicaMetrics] = useState<ReplicaTrafficMetrics | null>(null);
+  const [bucketMetrics, setBucketMetrics] = useState<BucketTrafficMetric[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([getOriginTrafficMetrics(), getReplicaTrafficMetrics()])
-      .then(([origin, replicas]) => {
+    Promise.all([getOriginTrafficMetrics(), getReplicaTrafficMetrics(), getBucketTrafficMetrics()])
+      .then(([origin, replicas, buckets]) => {
         setMetrics(origin);
         setReplicaMetrics(replicas);
+        setBucketMetrics(buckets);
       })
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : t("setup.metrics.loadFailed"));
@@ -33,6 +37,16 @@ export function MetricsPage() {
   if (!metrics || !replicaMetrics) {
     return <div className="admin-loading">{t("setup.common.loading")}</div>;
   }
+
+  const totals = bucketMetrics.reduce(
+    (summary, bucket) => ({
+      peerBytesServed: summary.peerBytesServed + bucket.peerBytesServed,
+      fallbackEvents: summary.fallbackEvents + bucket.fallbackEvents,
+      integrityFailures: summary.integrityFailures + bucket.integrityFailures,
+      originOffloadBytes: summary.originOffloadBytes + bucket.originOffloadBytes
+    }),
+    { peerBytesServed: 0, fallbackEvents: 0, integrityFailures: 0, originOffloadBytes: 0 }
+  );
 
   return (
     <div className="dashboard-grid">
@@ -50,6 +64,10 @@ export function MetricsPage() {
       <Metric icon={<DownloadCloud size={20} />} label={t("setup.metrics.replicaBytesSynced")} value={formatBytes(replicaMetrics.totalBytesSynced)} />
       <Metric icon={<SplitSquareHorizontal size={20} />} label={t("setup.metrics.replicaFragmentsSynced")} value={String(replicaMetrics.totalFragmentsSynced)} />
       <Metric icon={<Gauge size={20} />} label={t("setup.metrics.replicaFailures")} value={String(replicaMetrics.syncFailures + replicaMetrics.authFailures)} />
+      <Metric icon={<DownloadCloud size={20} />} label={t("setup.metrics.peerBytesServed")} value={formatBytes(totals.peerBytesServed)} />
+      <Metric icon={<Gauge size={20} />} label={t("setup.metrics.originOffloadBytes")} value={formatBytes(totals.originOffloadBytes)} />
+      <Metric icon={<SplitSquareHorizontal size={20} />} label={t("setup.metrics.fallbackEvents")} value={String(totals.fallbackEvents)} />
+      <Metric icon={<Activity size={20} />} label={t("setup.metrics.integrityFailures")} value={String(totals.integrityFailures)} />
     </div>
   );
 }

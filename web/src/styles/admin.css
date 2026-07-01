@@ -1498,6 +1498,64 @@
   gap: 18px;
 }
 
+.bucket-policy-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--pm-bg-elevated);
+}
+
+.bucket-policy-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bucket-policy-panel__header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.bucket-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.bucket-policy-grid label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  color: var(--pm-muted);
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.bucket-policy-grid input,
+.bucket-policy-grid select {
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--pm-border-medium);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--pm-text);
+  background: var(--pm-surface);
+}
+
+.bucket-policy-toggle {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.bucket-policy-toggle input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+
 .bucket-upload {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(220px, 0.8fr) auto;
@@ -2203,6 +2261,12 @@
 
   .objects-table-container {
     overflow-x: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .bucket-policy-grid {
+    grid-template-columns: 1fr;
   }
 }
 
