@@ -9,10 +9,10 @@
     "i18n:check": "tsx scripts/prune-i18n.ts --check",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint . --ext .ts,.tsx",
-    "test": "vitest run",
+    "test": "vitest run src scripts",
     "test:ui": "playwright test",
     "test:ui:quality": "playwright test tests/ui-quality",
-    "validate": "npm run i18n:check && npm run typecheck && npm run lint && npm run test:ui:quality",
+    "validate": "npm run i18n:check && npm run typecheck && npm run lint && npm run test && npm run test:ui:quality",
     "build": "npm run i18n:prune && npm run validate && vite build",
     "build:ci": "npm run i18n:check && npm run validate && vite build",
     "preview": "vite preview"

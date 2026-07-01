@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import { getInstanceSummary } from "../api/dashboardApi";
 import logoIcon from "../assets/logo-icon.png";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { ThemeToggle } from "./ThemeToggle";
 
 type AdminLayoutProps = {
   children: ReactNode;
@@ -105,6 +106,7 @@ export function AdminLayout({ children, instanceName, username, onLogout }: Admi
             <strong>{resolvedInstanceName ?? t("setup.common.loading")}</strong>
           </div>
           <div className="admin-topbar__actions">
+            <ThemeToggle />
             <LanguageSwitcher />
             <span className="admin-user">{username ?? t("setup.auth.admin")}</span>
             <button className="admin-logout" type="button" onClick={onLogout}>

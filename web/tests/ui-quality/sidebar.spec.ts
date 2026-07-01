@@ -6,6 +6,35 @@ test.describe("Sidebar quality", () => {
     await installAdminApiFixtures(page);
   });
 
+  test("theme toggle should switch and persist the user theme", async ({ page }) => {
+    await page.addInitScript(() => {
+      if (!sessionStorage.getItem("pontemesh.themeTestInitialized")) {
+        localStorage.setItem("pontemesh.theme", "light");
+        sessionStorage.setItem("pontemesh.themeTestInitialized", "true");
+      }
+    });
+    await page.goto("/dashboard");
+
+    const toggle = page.getByTestId("theme-toggle");
+
+    await expect(toggle).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("light");
+
+    await toggle.click();
+
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("pontemesh.theme"))).toBe("dark");
+
+    await page.reload();
+
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
+
+    await toggle.click();
+
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("light");
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("pontemesh.theme"))).toBe("light");
+  });
+
   test("sidebar should collapse, expand and keep version fixed at bottom", async ({ page }) => {
     await page.goto("/dashboard");
     await page.evaluate(() => localStorage.removeItem("pontemesh.sidebarCollapsed"));
