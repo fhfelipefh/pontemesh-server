@@ -635,7 +635,7 @@ function McpSettingsCard({
                   <tr key={token.id}>
                     <td className="settings-table__name">{token.name}</td>
                     <td><code>{token.tokenPrefix}</code></td>
-                    <td>{token.scopes.join(", ")}</td>
+                    <td>{formatScopes(token.scopes, t("setup.common.unavailable"))}</td>
                     <td>
                       <StatusBadge
                         active={token.active}
@@ -841,8 +841,7 @@ function ApplicationCredentialsCard({
           columns={[
             { key: "name", label: t("setup.settings.applications.name"), className: "settings-table__col-name" },
             { key: "scopes", label: t("setup.settings.applications.scopes"), className: "settings-table__col-key" },
-            { key: "scopes", label: t("setup.settings.mcp.tokenScopes"), className: "settings-table__col-status" },
-              { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
+            { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
             { key: "createdAt", label: t("setup.settings.s3.createdAt"), className: "settings-table__col-created" },
             { key: "actions", ariaLabel: t("setup.settings.s3.actions"), className: "settings-table__col-actions" }
           ]}
@@ -851,7 +850,7 @@ function ApplicationCredentialsCard({
               {applications.map((application) => (
                 <tr key={application.id}>
                   <td className="settings-table__name">{application.name}</td>
-                  <td>{application.scopes.join(", ")}</td>
+                  <td>{formatScopes(application.scopes, t("setup.common.unavailable"))}</td>
                   <td>
                     <StatusBadge
                       active={!application.revoked}
@@ -884,4 +883,8 @@ function formatDate(value: string, locale: string): string {
     dateStyle: "short",
     timeStyle: "short"
   }).format(new Date(value));
+}
+
+function formatScopes(scopes: string[] | undefined, fallback: string): string {
+  return scopes && scopes.length > 0 ? scopes.join(", ") : fallback;
 }
