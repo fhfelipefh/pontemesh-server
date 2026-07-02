@@ -1,7 +1,8 @@
-.PHONY: check i18n-check api-contract architecture-check
+.PHONY: check i18n-check api-contract architecture-check migrations-check
 
 check:
 	$(MAKE) architecture-check
+	$(MAKE) migrations-check
 	$(MAKE) i18n-check
 	cd web && npm run typecheck
 	cd web && npm run lint
@@ -17,3 +18,6 @@ api-contract:
 
 architecture-check:
 	./scripts/check-architecture.sh
+
+migrations-check:
+	./scripts/check-migrations.sh

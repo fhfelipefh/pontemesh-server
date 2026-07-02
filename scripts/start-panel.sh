@@ -109,6 +109,9 @@ require_command curl
 
 cd "$ROOT_DIR"
 
+log "Checking PostgreSQL migrations"
+./scripts/check-migrations.sh
+
 if [ "$RESET_DEV" -eq 1 ]; then
   log "Resetting Ponte Mesh Compose project"
   compose down --volumes --remove-orphans
