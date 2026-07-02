@@ -1,0 +1,5 @@
+ALTER TABLE mcp_settings
+    ADD COLUMN IF NOT EXISTS admin_tools_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE mcp_access_tokens
+    ADD COLUMN IF NOT EXISTS scopes TEXT[] NOT NULL DEFAULT ARRAY['read'];

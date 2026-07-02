@@ -39,6 +39,7 @@ export type DashboardSummary = {
     authRequired: boolean;
     readToolsEnabled: boolean;
     writeToolsEnabled: boolean;
+    adminToolsEnabled: boolean;
     resourcesEnabled: boolean;
     promptsEnabled: boolean;
     lastActivityAt: string | null;
