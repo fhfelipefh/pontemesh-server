@@ -302,13 +302,6 @@ export function SettingsPage() {
       </header>
 
       <div className="settings-page__grid">
-        <ConfigurationBackupCard
-          importing={configurationImporting}
-          result={configurationResult}
-          error={configurationError}
-          onExport={() => void handleExportConfiguration()}
-          onImport={(file) => void handleImportConfiguration(file)}
-        />
         <McpSettingsCard
           settings={mcpSettings}
           status={mcpStatus}
@@ -357,6 +350,13 @@ export function SettingsPage() {
           onDismissCreatedKey={() => setCreatedKey(null)}
           onPageChange={(page) => void refreshKeys(page)}
           onRevokeKey={(id, name) => setDestructiveConfirmation({ kind: "s3Key", id, name })}
+        />
+        <ConfigurationBackupCard
+          importing={configurationImporting}
+          result={configurationResult}
+          error={configurationError}
+          onExport={() => void handleExportConfiguration()}
+          onImport={(file) => void handleImportConfiguration(file)}
         />
       </div>
       {destructiveConfirmation ? (
