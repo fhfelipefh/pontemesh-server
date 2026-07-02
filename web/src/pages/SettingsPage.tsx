@@ -488,6 +488,9 @@ function McpSettingsCard({
   onRevokeToken
 }: McpSettingsCardProps) {
   const { t, i18n } = useTranslation();
+  const mcpConnectionConfig = createdToken && settings && status
+    ? JSON.stringify(buildMcpConnectionConfig(createdToken, settings, status), null, 2)
+    : "";
 
   function update(patch: Partial<McpSettings>) {
     if (!settings || saving) {
@@ -565,6 +568,18 @@ function McpSettingsCard({
                   </dd>
                 </div>
               </dl>
+              <div className="mcp-connection-config">
+                <div className="mcp-connection-config__header">
+                  <strong>{t("setup.settings.mcp.connectionConfig")}</strong>
+                  <IconButton
+                    label={t("setup.settings.mcp.copyConnectionConfig")}
+                    icon={<Copy size={16} aria-hidden="true" />}
+                    onClick={() => void navigator.clipboard?.writeText(mcpConnectionConfig)}
+                  />
+                </div>
+                <p>{t("setup.settings.mcp.connectionConfigHint")}</p>
+                <pre>{mcpConnectionConfig}</pre>
+              </div>
               <button className="settings-secondary-button" type="button" onClick={onDismissCreatedToken}>
                 <Check size={16} aria-hidden="true" />
                 {t("setup.common.ok")}
@@ -636,6 +651,56 @@ function McpSettingsCard({
       )}
     </SettingsSection>
   );
+}
+
+function buildMcpConnectionConfig(
+  createdToken: CreatedMcpAccessToken,
+  settings: McpSettings,
+  status: McpStatus
+) {
+  const url = absoluteMcpUrl(status.endpoint || settings.endpointPath);
+  return {
+    name: createdToken.token.name,
+    transport: "streamable-http",
+    url,
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${createdToken.secret}`,
+      "Content-Type": "application/json"
+    },
+    environment: {
+      PONTEMESH_MCP_URL: url,
+      PONTEMESH_MCP_TOKEN: createdToken.secret
+    },
+    initialize: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: {
+          name: "pontemesh-mcp-client",
+          version: "1.0.0"
+        }
+      }
+    },
+    options: {
+      localhostOnly: settings.allowLocalhostOnly,
+      readToolsEnabled: settings.readToolsEnabled,
+      writeToolsEnabled: settings.writeToolsEnabled,
+      resourcesEnabled: settings.exposeResources,
+      promptsEnabled: settings.exposePrompts
+    }
+  };
+}
+
+function absoluteMcpUrl(endpoint: string) {
+  if (/^https?:\/\//i.test(endpoint)) {
+    return endpoint;
+  }
+  const origin = typeof window === "undefined" ? "http://127.0.0.1:8080" : window.location.origin;
+  return `${origin}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 }
 
 function McpSummaryItem({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {

@@ -1943,6 +1943,34 @@
   color: var(--pm-muted);
 }
 
+.mcp-connection-config {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mcp-connection-config__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mcp-connection-config pre {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--pm-surface);
+  color: var(--pm-deep-navy);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .empty-state,
 .admin-loading {
   display: grid;
