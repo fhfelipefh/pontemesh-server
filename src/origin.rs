@@ -199,7 +199,10 @@ pub async fn list_objects(
     };
 
     match state.catalog.list_objects_v2(&bucket_name, options).await {
-        Ok(page) => s3_xml_response(StatusCode::OK, list_objects_v2_xml(&bucket_name, &query, &page)),
+        Ok(page) => s3_xml_response(
+            StatusCode::OK,
+            list_objects_v2_xml(&bucket_name, &query, &page),
+        ),
         Err(error) => s3_bad_request(error, Some(&bucket_name), None),
     }
 }
@@ -576,7 +579,11 @@ async fn put_bucket_versioning(
         s3_checksum_algorithm: current.s3_checksum_algorithm,
         s3_multipart_abort_days: current.s3_multipart_abort_days,
     };
-    match state.catalog.update_bucket_policy(&bucket_name, update).await {
+    match state
+        .catalog
+        .update_bucket_policy(&bucket_name, update)
+        .await
+    {
         Ok(_) => {
             record_origin_audit(
                 &state,
@@ -608,7 +615,11 @@ async fn get_object_tagging(
         Ok(false) => return tagging_disabled_response(&bucket_name, &object_key),
         Err(error) => return s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
     }
-    match state.catalog.list_object_tags(&bucket_name, &object_key).await {
+    match state
+        .catalog
+        .list_object_tags(&bucket_name, &object_key)
+        .await
+    {
         Ok(tags) => {
             record_origin_audit(
                 &state,
@@ -676,7 +687,11 @@ async fn delete_object_tagging(
         Ok(false) => return tagging_disabled_response(&bucket_name, &object_key),
         Err(error) => return s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
     }
-    match state.catalog.delete_object_tags(&bucket_name, &object_key).await {
+    match state
+        .catalog
+        .delete_object_tags(&bucket_name, &object_key)
+        .await
+    {
         Ok(()) => {
             record_origin_audit(
                 &state,
@@ -1974,7 +1989,11 @@ fn list_buckets_xml(buckets: &[BucketSummary]) -> String {
     )
 }
 
-fn list_objects_v2_xml(bucket_name: &str, query: &ListObjectsQuery, page: &S3ListObjectsPage) -> String {
+fn list_objects_v2_xml(
+    bucket_name: &str,
+    query: &ListObjectsQuery,
+    page: &S3ListObjectsPage,
+) -> String {
     let prefix = query.prefix.as_deref().unwrap_or("");
     let contents = page
         .items
@@ -1993,7 +2012,12 @@ fn list_objects_v2_xml(bucket_name: &str, query: &ListObjectsQuery, page: &S3Lis
     let common_prefixes = page
         .common_prefixes
         .iter()
-        .map(|prefix| format!("<CommonPrefixes><Prefix>{}</Prefix></CommonPrefixes>", xml_escape(prefix)))
+        .map(|prefix| {
+            format!(
+                "<CommonPrefixes><Prefix>{}</Prefix></CommonPrefixes>",
+                xml_escape(prefix)
+            )
+        })
         .collect::<String>();
     let delimiter = query
         .delimiter
@@ -2003,12 +2027,22 @@ fn list_objects_v2_xml(bucket_name: &str, query: &ListObjectsQuery, page: &S3Lis
     let continuation_token = query
         .continuation_token
         .as_deref()
-        .map(|value| format!("<ContinuationToken>{}</ContinuationToken>", xml_escape(value)))
+        .map(|value| {
+            format!(
+                "<ContinuationToken>{}</ContinuationToken>",
+                xml_escape(value)
+            )
+        })
         .unwrap_or_default();
     let next_continuation_token = page
         .next_continuation_token
         .as_deref()
-        .map(|value| format!("<NextContinuationToken>{}</NextContinuationToken>", xml_escape(value)))
+        .map(|value| {
+            format!(
+                "<NextContinuationToken>{}</NextContinuationToken>",
+                xml_escape(value)
+            )
+        })
         .unwrap_or_default();
     let start_after = page
         .start_after
@@ -2363,11 +2397,7 @@ mod tests {
             next_continuation_token: Some("photos/nested/file.txt".to_owned()),
             start_after: Some("photos/a.jpg".to_owned()),
         };
-        let xml = list_objects_v2_xml(
-            "media-bucket",
-            &query,
-            &page,
-        );
+        let xml = list_objects_v2_xml("media-bucket", &query, &page);
 
         assert!(
             xml.contains("<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">")
@@ -2378,7 +2408,9 @@ mod tests {
         assert!(xml.contains("<KeyCount>2</KeyCount>"));
         assert!(xml.contains("<MaxKeys>2</MaxKeys>"));
         assert!(xml.contains("<IsTruncated>true</IsTruncated>"));
-        assert!(xml.contains("<NextContinuationToken>photos/nested/file.txt</NextContinuationToken>"));
+        assert!(
+            xml.contains("<NextContinuationToken>photos/nested/file.txt</NextContinuationToken>")
+        );
         assert!(xml.contains("<StartAfter>photos/a.jpg</StartAfter>"));
         assert!(xml.contains("<Key>photos/cat &amp; dog.jpg</Key>"));
         assert!(xml.contains("<CommonPrefixes><Prefix>photos/nested/</Prefix></CommonPrefixes>"));

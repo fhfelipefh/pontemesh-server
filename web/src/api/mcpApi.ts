@@ -7,6 +7,7 @@ export type McpSettings = {
   requireAuth: boolean;
   readToolsEnabled: boolean;
   writeToolsEnabled: boolean;
+  adminToolsEnabled: boolean;
   exposeResources: boolean;
   exposePrompts: boolean;
   allowLocalhostOnly: boolean;
@@ -22,6 +23,7 @@ export type McpStatus = {
   authRequired: boolean;
   readToolsEnabled: boolean;
   writeToolsEnabled: boolean;
+  adminToolsEnabled: boolean;
   resourcesEnabled: boolean;
   promptsEnabled: boolean;
   lastActivityAt: string | null;
@@ -37,6 +39,7 @@ export type McpAccessTokenSummary = {
   createdAt: string;
   revokedAt: string | null;
   lastUsedAt: string | null;
+  scopes: string[];
 };
 
 export type CreatedMcpAccessToken = {
@@ -96,14 +99,14 @@ export async function listMcpTokens(): Promise<McpAccessTokenSummary[]> {
   return response.json() as Promise<McpAccessTokenSummary[]>;
 }
 
-export async function createMcpToken(name: string): Promise<CreatedMcpAccessToken> {
+export async function createMcpToken(name: string, scopes: string[] = ["read"]): Promise<CreatedMcpAccessToken> {
   const response = await fetch("/api/admin/mcp/tokens", {
     method: "POST",
     headers: {
       accept: "application/json",
       "content-type": "application/json"
     },
-    body: JSON.stringify({ name: name.trim() })
+    body: JSON.stringify({ name: name.trim(), scopes })
   });
   await ensureOk(response);
   return response.json() as Promise<CreatedMcpAccessToken>;

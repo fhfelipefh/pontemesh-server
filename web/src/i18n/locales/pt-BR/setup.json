@@ -365,7 +365,11 @@
         "loadFailed": "Falha ao carregar configuração MCP.",
         "saveFailed": "Falha ao salvar configuração MCP.",
         "createTokenFailed": "Falha ao criar token MCP.",
-        "revokeTokenFailed": "Falha ao revogar token MCP."
+        "revokeTokenFailed": "Falha ao revogar token MCP.",
+        "adminTools": "Tools administrativas",
+        "fullAdmin": "Administração completa",
+        "tokenScopes": "Escopos",
+        "permissionWarning": "Tokens com permissão de escrita podem modificar buckets e objetos. Tokens administrativos podem alterar configurações sensíveis da instância."
       },
       "s3": {
         "title": "Credenciais S3",

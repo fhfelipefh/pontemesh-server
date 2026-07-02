@@ -578,6 +578,7 @@ pub struct McpSettings {
     pub require_auth: bool,
     pub read_tools_enabled: bool,
     pub write_tools_enabled: bool,
+    pub admin_tools_enabled: bool,
     pub expose_resources: bool,
     pub expose_prompts: bool,
     pub allow_localhost_only: bool,
@@ -594,6 +595,7 @@ pub struct McpSettingsUpdate {
     pub require_auth: bool,
     pub read_tools_enabled: bool,
     pub write_tools_enabled: bool,
+    pub admin_tools_enabled: bool,
     pub expose_resources: bool,
     pub expose_prompts: bool,
     pub allow_localhost_only: bool,
@@ -609,6 +611,7 @@ pub struct McpAccessTokenSummary {
     pub created_at: String,
     pub revoked_at: Option<String>,
     pub last_used_at: Option<String>,
+    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -622,6 +625,7 @@ pub struct CreatedMcpAccessToken {
 pub struct McpTokenAuthorization {
     pub id: String,
     pub name: String,
+    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -643,6 +647,7 @@ pub struct McpStatus {
     pub auth_required: bool,
     pub read_tools_enabled: bool,
     pub write_tools_enabled: bool,
+    pub admin_tools_enabled: bool,
     pub resources_enabled: bool,
     pub prompts_enabled: bool,
     pub last_activity_at: Option<String>,
@@ -1643,9 +1648,7 @@ impl Catalog {
             .await
             .context("failed to store object tag")?;
         }
-        tx.commit()
-            .await
-            .context("failed to commit object tags")?;
+        tx.commit().await.context("failed to commit object tags")?;
         Ok(tags)
     }
 
@@ -2121,7 +2124,7 @@ impl Catalog {
             VALUES (TRUE)
             ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
             RETURNING enabled, endpoint_path, bind_host, require_auth,
-                read_tools_enabled, write_tools_enabled, expose_resources,
+                read_tools_enabled, write_tools_enabled, admin_tools_enabled, expose_resources,
                 expose_prompts, allow_localhost_only, created_at, updated_at
             "#,
         )
@@ -2140,10 +2143,10 @@ impl Catalog {
             r#"
             INSERT INTO mcp_settings (
                 id, enabled, endpoint_path, bind_host, require_auth,
-                read_tools_enabled, write_tools_enabled, expose_resources,
+                read_tools_enabled, write_tools_enabled, admin_tools_enabled, expose_resources,
                 expose_prompts, allow_localhost_only, updated_at
             )
-            VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+            VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
             ON CONFLICT (id) DO UPDATE
             SET enabled = EXCLUDED.enabled,
                 endpoint_path = EXCLUDED.endpoint_path,
@@ -2151,12 +2154,13 @@ impl Catalog {
                 require_auth = EXCLUDED.require_auth,
                 read_tools_enabled = EXCLUDED.read_tools_enabled,
                 write_tools_enabled = EXCLUDED.write_tools_enabled,
+                admin_tools_enabled = EXCLUDED.admin_tools_enabled,
                 expose_resources = EXCLUDED.expose_resources,
                 expose_prompts = EXCLUDED.expose_prompts,
                 allow_localhost_only = EXCLUDED.allow_localhost_only,
                 updated_at = now()
             RETURNING enabled, endpoint_path, bind_host, require_auth,
-                read_tools_enabled, write_tools_enabled, expose_resources,
+                read_tools_enabled, write_tools_enabled, admin_tools_enabled, expose_resources,
                 expose_prompts, allow_localhost_only, created_at, updated_at
             "#,
         )
@@ -2166,6 +2170,7 @@ impl Catalog {
         .bind(update.require_auth)
         .bind(update.read_tools_enabled)
         .bind(update.write_tools_enabled)
+        .bind(update.admin_tools_enabled)
         .bind(update.expose_resources)
         .bind(update.expose_prompts)
         .bind(update.allow_localhost_only)
@@ -2193,6 +2198,7 @@ impl Catalog {
             auth_required: settings.require_auth,
             read_tools_enabled: settings.read_tools_enabled,
             write_tools_enabled: settings.write_tools_enabled,
+            admin_tools_enabled: settings.admin_tools_enabled,
             resources_enabled: settings.expose_resources,
             prompts_enabled: settings.expose_prompts,
             last_activity_at: row
@@ -2206,25 +2212,28 @@ impl Catalog {
     pub async fn create_mcp_access_token(
         &self,
         name: &str,
+        scopes: &[String],
         created_by_user_id: Option<&str>,
     ) -> anyhow::Result<CreatedMcpAccessToken> {
         let name = name.trim();
         if name.is_empty() {
             bail!("MCP token name cannot be empty");
         }
+        let scopes = validate_mcp_scopes(scopes)?;
         let secret = secure_url_token("pm_mcp_", 32);
         let token_prefix = secret.chars().take(14).collect::<String>();
         let token_hash = hash_bearer_token(&secret);
         let row = query(
             r#"
-            INSERT INTO mcp_access_tokens (name, token_prefix, token_hash, created_by_user_id)
-            VALUES ($1, $2, $3, $4::uuid)
-            RETURNING id::text, name, token_prefix, is_active, created_at, revoked_at, last_used_at
+            INSERT INTO mcp_access_tokens (name, token_prefix, token_hash, scopes, created_by_user_id)
+            VALUES ($1, $2, $3, $4, $5::uuid)
+            RETURNING id::text, name, token_prefix, is_active, created_at, revoked_at, last_used_at, scopes
             "#,
         )
         .bind(name)
         .bind(&token_prefix)
         .bind(token_hash)
+        .bind(&scopes)
         .bind(created_by_user_id)
         .fetch_one(&self.pool)
         .await
@@ -2238,7 +2247,7 @@ impl Catalog {
     pub async fn list_mcp_access_tokens(&self) -> anyhow::Result<Vec<McpAccessTokenSummary>> {
         let rows = query(
             r#"
-            SELECT id::text, name, token_prefix, is_active, created_at, revoked_at, last_used_at
+            SELECT id::text, name, token_prefix, is_active, created_at, revoked_at, last_used_at, scopes
             FROM mcp_access_tokens
             ORDER BY created_at DESC, name ASC
             "#,
@@ -2270,7 +2279,7 @@ impl Catalog {
         let token_hash = hash_bearer_token(token);
         let row = query(
             r#"
-            SELECT id::text, name
+            SELECT id::text, name, scopes
             FROM mcp_access_tokens
             WHERE token_hash = $1
               AND is_active = TRUE
@@ -2284,6 +2293,7 @@ impl Catalog {
         Ok(row.map(|row| McpTokenAuthorization {
             id: row.get("id"),
             name: row.get("name"),
+            scopes: row.get("scopes"),
         }))
     }
 
@@ -4282,6 +4292,7 @@ fn mcp_settings_from_row(row: PgRow) -> McpSettings {
         require_auth: row.get("require_auth"),
         read_tools_enabled: row.get("read_tools_enabled"),
         write_tools_enabled: row.get("write_tools_enabled"),
+        admin_tools_enabled: row.get("admin_tools_enabled"),
         expose_resources: row.get("expose_resources"),
         expose_prompts: row.get("expose_prompts"),
         allow_localhost_only: row.get("allow_localhost_only"),
@@ -4306,6 +4317,7 @@ fn mcp_access_token_from_row(row: PgRow) -> McpAccessTokenSummary {
         last_used_at: row
             .get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_used_at")
             .map(format_datetime),
+        scopes: row.get("scopes"),
     }
 }
 
@@ -4629,11 +4641,17 @@ fn validate_mcp_settings_update(update: &McpSettingsUpdate) -> anyhow::Result<()
 }
 
 fn mcp_audit_event_for_method(method: &str, outcome: &str) -> &'static str {
-    if outcome == "failed" {
+    if outcome == "failed" && method == "auth" {
         return "MCP_AUTH_FAILED";
     }
-    if outcome == "rejected" {
+    if outcome == "rejected" || outcome == "error" {
         return "MCP_REQUEST_REJECTED";
+    }
+    if method == "prompts/list" {
+        return "MCP_PROMPTS_LISTED";
+    }
+    if method.starts_with("prompts/") {
+        return "MCP_PROMPT_READ";
     }
     if method.starts_with("resources/") {
         return "MCP_RESOURCE_READ";
@@ -4641,7 +4659,7 @@ fn mcp_audit_event_for_method(method: &str, outcome: &str) -> &'static str {
     if method.starts_with("tools/") {
         return "MCP_TOOL_CALLED";
     }
-    "MCP_REQUEST_REJECTED"
+    "MCP_REQUEST_COMPLETED"
 }
 
 fn validate_policy_enum(field: &str, value: &str, allowed: &[&str]) -> anyhow::Result<()> {
@@ -4895,4 +4913,27 @@ mod tests {
         assert!(build_object_manifest(b"abc", 0).is_err());
         assert!(build_object_manifest(b"abc", -1).is_err());
     }
+}
+
+fn validate_mcp_scopes(scopes: &[String]) -> anyhow::Result<Vec<String>> {
+    let mut normalized = Vec::new();
+    for scope in scopes {
+        let scope = scope.trim().to_ascii_lowercase();
+        if !matches!(scope.as_str(), "read" | "write" | "admin") {
+            bail!("invalid MCP token scope: {scope}");
+        }
+        if !normalized.contains(&scope) {
+            normalized.push(scope);
+        }
+    }
+    if normalized.is_empty() {
+        normalized.push("read".to_owned());
+    }
+    if normalized.iter().any(|s| s == "admin") && !normalized.iter().any(|s| s == "write") {
+        normalized.push("write".to_owned());
+    }
+    if !normalized.iter().any(|s| s == "read") {
+        normalized.insert(0, "read".to_owned());
+    }
+    Ok(normalized)
 }

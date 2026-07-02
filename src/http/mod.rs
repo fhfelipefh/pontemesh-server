@@ -649,7 +649,7 @@ mod tests {
                     .header(header::COOKIE, &cookie)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
-                        r#"{"enabled":true,"endpointPath":"/mcp","bindHost":null,"requireAuth":true,"readToolsEnabled":true,"writeToolsEnabled":false,"exposeResources":true,"exposePrompts":true,"allowLocalhostOnly":true}"#,
+                        r#"{"enabled":true,"endpointPath":"/mcp","bindHost":null,"requireAuth":true,"readToolsEnabled":true,"writeToolsEnabled":false,"adminToolsEnabled":false,"exposeResources":true,"exposePrompts":true,"allowLocalhostOnly":true}"#,
                     ))
                     .expect("valid request"),
             )

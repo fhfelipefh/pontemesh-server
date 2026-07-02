@@ -123,6 +123,12 @@ pub struct CreateS3AccessKeyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateMcpTokenRequest {
     name: String,
+    #[serde(default = "default_mcp_token_scopes")]
+    scopes: Vec<String>,
+}
+
+fn default_mcp_token_scopes() -> Vec<String> {
+    vec!["read".to_owned()]
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,6 +173,8 @@ pub struct ConfigurationMcpSettings {
     pub require_auth: bool,
     pub read_tools_enabled: bool,
     pub write_tools_enabled: bool,
+    #[serde(default)]
+    pub admin_tools_enabled: bool,
     pub expose_resources: bool,
     pub expose_prompts: bool,
     pub allow_localhost_only: bool,
@@ -278,6 +286,7 @@ pub async fn export_configuration(State(state): State<AppState>) -> Response {
             require_auth: settings.require_auth,
             read_tools_enabled: settings.read_tools_enabled,
             write_tools_enabled: settings.write_tools_enabled,
+            admin_tools_enabled: settings.admin_tools_enabled,
             expose_resources: settings.expose_resources,
             expose_prompts: settings.expose_prompts,
             allow_localhost_only: settings.allow_localhost_only,
@@ -315,6 +324,7 @@ pub async fn import_configuration(
             require_auth: settings.require_auth,
             read_tools_enabled: settings.read_tools_enabled,
             write_tools_enabled: settings.write_tools_enabled,
+            admin_tools_enabled: settings.admin_tools_enabled,
             expose_resources: settings.expose_resources,
             expose_prompts: settings.expose_prompts,
             allow_localhost_only: settings.allow_localhost_only,
@@ -435,7 +445,7 @@ pub async fn create_mcp_token(
 ) -> Response {
     match state
         .catalog
-        .create_mcp_access_token(&payload.name, Some(&session.user_id))
+        .create_mcp_access_token(&payload.name, &payload.scopes, Some(&session.user_id))
         .await
     {
         Ok(token) => {

@@ -204,7 +204,7 @@ pub async fn method_not_allowed() -> Response {
 async fn handle_json_rpc(
     state: &AppState,
     settings: &crate::catalog::McpSettings,
-    _authorization: &McpTokenAuthorization,
+    authorization: &McpTokenAuthorization,
     request: &protocol::JsonRpcRequest,
 ) -> anyhow::Result<Option<Value>> {
     match request.method.as_str() {
@@ -215,7 +215,7 @@ async fn handle_json_rpc(
             if !settings.read_tools_enabled {
                 anyhow::bail!("MCP read tools are disabled");
             }
-            Ok(Some(tools::list_tools(settings.write_tools_enabled)))
+            Ok(Some(tools::list_tools(settings, &authorization.scopes)))
         }
         "tools/call" => {
             if !settings.read_tools_enabled {
@@ -230,7 +230,12 @@ async fn handle_json_rpc(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            Ok(Some(tools::call_tool(state, name, arguments, settings.write_tools_enabled).await?))
+            if let Some(permission) = tools::tool_permission(name) {
+                if !tools::is_allowed(permission, settings, &authorization.scopes) {
+                    anyhow::bail!("MCP token is not allowed to call tool {name}");
+                }
+            }
+            Ok(Some(tools::call_tool(state, name, arguments).await?))
         }
         "resources/list" => {
             if !settings.expose_resources {

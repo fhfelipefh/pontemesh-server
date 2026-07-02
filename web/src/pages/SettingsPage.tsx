@@ -72,6 +72,7 @@ export function SettingsPage() {
   const [mcpTokens, setMcpTokens] = useState<McpAccessTokenSummary[]>([]);
   const [mcpActivity, setMcpActivity] = useState<McpActivityRecord[]>([]);
   const [mcpTokenName, setMcpTokenName] = useState("default-mcp-client");
+  const [mcpTokenScopes, setMcpTokenScopes] = useState<string[]>(["read"]);
   const [createdMcpToken, setCreatedMcpToken] = useState<CreatedMcpAccessToken | null>(null);
   const [loadingMcp, setLoadingMcp] = useState(true);
   const [savingMcp, setSavingMcp] = useState(false);
@@ -215,6 +216,7 @@ export function SettingsPage() {
         requireAuth: nextSettings.requireAuth,
         readToolsEnabled: nextSettings.readToolsEnabled,
         writeToolsEnabled: nextSettings.writeToolsEnabled,
+        adminToolsEnabled: nextSettings.adminToolsEnabled,
         exposeResources: nextSettings.exposeResources,
         exposePrompts: nextSettings.exposePrompts,
         allowLocalhostOnly: nextSettings.allowLocalhostOnly
@@ -235,9 +237,10 @@ export function SettingsPage() {
     setCreatingMcpToken(true);
     setMcpError("");
     try {
-      const created = await createMcpToken(mcpTokenName);
+      const created = await createMcpToken(mcpTokenName, mcpTokenScopes);
       setCreatedMcpToken(created);
       setMcpTokenName("");
+      setMcpTokenScopes(["read"]);
       setMcpTokens(await listMcpTokens());
     } catch (createError) {
       setMcpError(createError instanceof Error ? createError.message : t("setup.settings.mcp.createTokenFailed"));
@@ -308,6 +311,8 @@ export function SettingsPage() {
           tokens={mcpTokens}
           activity={mcpActivity}
           tokenName={mcpTokenName}
+          tokenScopes={mcpTokenScopes}
+          onTokenScopesChange={setMcpTokenScopes}
           createdToken={createdMcpToken}
           loading={loadingMcp}
           saving={savingMcp}
@@ -456,6 +461,8 @@ type McpSettingsCardProps = {
   tokens: McpAccessTokenSummary[];
   activity: McpActivityRecord[];
   tokenName: string;
+  tokenScopes: string[];
+  onTokenScopesChange: (scopes: string[]) => void;
   createdToken: CreatedMcpAccessToken | null;
   loading: boolean;
   saving: boolean;
@@ -475,6 +482,7 @@ function McpSettingsCard({
   tokens,
   activity,
   tokenName,
+  tokenScopes,
   createdToken,
   loading,
   saving,
@@ -482,6 +490,7 @@ function McpSettingsCard({
   revokingToken,
   error,
   onTokenNameChange,
+  onTokenScopesChange,
   onUpdateSettings,
   onCreateToken,
   onDismissCreatedToken,
@@ -521,7 +530,7 @@ function McpSettingsCard({
           <div className="mcp-summary-grid">
             <McpSummaryItem icon={<Activity size={17} />} label={t("setup.settings.mcp.status")} value={status.enabled ? t("setup.settings.mcp.enabled") : t("setup.settings.mcp.disabled")} />
             <McpSummaryItem icon={<Network size={17} />} label={t("setup.settings.mcp.endpoint")} value={status.endpoint} />
-            <McpSummaryItem icon={<ShieldCheck size={17} />} label={t("setup.settings.mcp.accessMode")} value={status.writeToolsEnabled ? t("setup.settings.mcp.readWrite") : t("setup.settings.mcp.readOnly")} />
+            <McpSummaryItem icon={<ShieldCheck size={17} />} label={t("setup.settings.mcp.accessMode")} value={status.adminToolsEnabled ? t("setup.settings.mcp.fullAdmin") : status.writeToolsEnabled ? t("setup.settings.mcp.readWrite") : t("setup.settings.mcp.readOnly")} />
             <McpSummaryItem icon={<Wrench size={17} />} label={t("setup.settings.mcp.lastActivity")} value={status.lastActivityAt ? formatDate(status.lastActivityAt, i18n.language) : t("setup.common.unavailable")} />
           </div>
 
@@ -531,6 +540,7 @@ function McpSettingsCard({
             <ToggleRow label={t("setup.settings.mcp.localhostOnly")} checked={settings.allowLocalhostOnly} disabled={saving} onChange={(checked) => update({ allowLocalhostOnly: checked })} />
             <ToggleRow label={t("setup.settings.mcp.readTools")} checked={settings.readToolsEnabled} disabled={saving} onChange={(checked) => update({ readToolsEnabled: checked })} />
             <ToggleRow label={t("setup.settings.mcp.writeTools")} checked={settings.writeToolsEnabled} disabled={saving} onChange={(checked) => update({ writeToolsEnabled: checked })} />
+            <ToggleRow label={t("setup.settings.mcp.adminTools")} checked={settings.adminToolsEnabled} disabled={saving} onChange={(checked) => update({ adminToolsEnabled: checked })} />
             <ToggleRow label={t("setup.settings.mcp.resources")} checked={settings.exposeResources} disabled={saving} onChange={(checked) => update({ exposeResources: checked })} />
             <ToggleRow label={t("setup.settings.mcp.prompts")} checked={settings.exposePrompts} disabled={saving} onChange={(checked) => update({ exposePrompts: checked })} />
           </div>
@@ -549,6 +559,23 @@ function McpSettingsCard({
               <Plus size={17} aria-hidden="true" />
               {t("setup.settings.mcp.createToken")}
             </button>
+          <div className="settings-checkbox-group" role="group" aria-label={t("setup.settings.mcp.tokenScopes")}>
+              {["read", "write", "admin"].map((scope) => (
+                <label key={scope}>
+                  <input
+                    type="checkbox"
+                    checked={tokenScopes.includes(scope)}
+                    disabled={scope === "read"}
+                    onChange={(event) => {
+                      const next = event.target.checked ? [...tokenScopes, scope] : tokenScopes.filter((item) => item !== scope);
+                      onTokenScopesChange(Array.from(new Set(["read", ...next])));
+                    }}
+                  />
+                  {scope}
+                </label>
+              ))}
+            </div>
+            {tokenScopes.some((scope) => scope === "write" || scope === "admin") ? <p className="settings-warning">{t("setup.settings.mcp.permissionWarning")}</p> : null}
           </form>
 
           {createdToken ? (
@@ -591,6 +618,7 @@ function McpSettingsCard({
             columns={[
               { key: "name", label: t("setup.settings.mcp.tokenName"), className: "settings-table__col-name" },
               { key: "prefix", label: t("setup.settings.mcp.tokenPrefix"), className: "settings-table__col-key" },
+              { key: "scopes", label: t("setup.settings.mcp.tokenScopes"), className: "settings-table__col-status" },
               { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
               { key: "lastUsed", label: t("setup.settings.s3.lastUsed"), className: "settings-table__col-last-used" },
               { key: "createdAt", label: t("setup.settings.s3.createdAt"), className: "settings-table__col-created" },
@@ -599,7 +627,7 @@ function McpSettingsCard({
           >
                 {tokens.length === 0 ? (
                   <tr className="settings-table__empty-row">
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <EmptyState title={t("setup.settings.mcp.noTokens")} />
                     </td>
                   </tr>
@@ -607,6 +635,7 @@ function McpSettingsCard({
                   <tr key={token.id}>
                     <td className="settings-table__name">{token.name}</td>
                     <td><code>{token.tokenPrefix}</code></td>
+                    <td>{token.scopes.join(", ")}</td>
                     <td>
                       <StatusBadge
                         active={token.active}
@@ -812,7 +841,8 @@ function ApplicationCredentialsCard({
           columns={[
             { key: "name", label: t("setup.settings.applications.name"), className: "settings-table__col-name" },
             { key: "scopes", label: t("setup.settings.applications.scopes"), className: "settings-table__col-key" },
-            { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
+            { key: "scopes", label: t("setup.settings.mcp.tokenScopes"), className: "settings-table__col-status" },
+              { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
             { key: "createdAt", label: t("setup.settings.s3.createdAt"), className: "settings-table__col-created" },
             { key: "actions", ariaLabel: t("setup.settings.s3.actions"), className: "settings-table__col-actions" }
           ]}

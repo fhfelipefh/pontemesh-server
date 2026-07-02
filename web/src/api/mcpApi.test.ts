@@ -23,6 +23,7 @@ describe("mcpApi", () => {
         requireAuth: true,
         readToolsEnabled: true,
         writeToolsEnabled: false,
+    adminToolsEnabled: false,
         exposeResources: true,
         exposePrompts: true,
         allowLocalhostOnly: true,
@@ -60,6 +61,7 @@ describe("mcpApi", () => {
       requireAuth: true,
       readToolsEnabled: true,
       writeToolsEnabled: false,
+      adminToolsEnabled: false,
       exposeResources: true,
       exposePrompts: true,
       allowLocalhostOnly: true
@@ -135,7 +137,7 @@ describe("mcpApi", () => {
         accept: "application/json",
         "content-type": "application/json"
       },
-      body: JSON.stringify({ name: "desktop" })
+      body: JSON.stringify({ name: "desktop", scopes: ["read"] })
     });
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/mcp/tokens/token%2F1", {
       method: "DELETE"

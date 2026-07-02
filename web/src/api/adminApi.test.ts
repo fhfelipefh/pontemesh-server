@@ -445,6 +445,7 @@ function dashboardSummary() {
       authRequired: true,
       readToolsEnabled: true,
       writeToolsEnabled: false,
+    adminToolsEnabled: false,
       resourcesEnabled: true,
       promptsEnabled: true,
       lastActivityAt: null,

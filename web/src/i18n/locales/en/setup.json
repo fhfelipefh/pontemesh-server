@@ -365,7 +365,11 @@
         "loadFailed": "Failed to load MCP configuration.",
         "saveFailed": "Failed to save MCP configuration.",
         "createTokenFailed": "Failed to create MCP token.",
-        "revokeTokenFailed": "Failed to revoke MCP token."
+        "revokeTokenFailed": "Failed to revoke MCP token.",
+        "adminTools": "Admin tools",
+        "fullAdmin": "Full administration",
+        "tokenScopes": "Scopes",
+        "permissionWarning": "Tokens with write permission can modify buckets and objects. Administrative tokens can change sensitive instance settings."
       },
       "s3": {
         "title": "S3 Credentials",

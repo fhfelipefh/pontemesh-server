@@ -1,89 +1,226 @@
 use crate::{
     admin::{ConfigurationBackup, ConfigurationMcpSettings},
-    catalog::{AuditEventFilter, BucketPolicyUpdate},
+    catalog::{self, AuditEventFilter, BucketPolicyUpdate, NewObject},
     config,
     http::AppState,
     system::storage,
 };
-use anyhow::bail;
+use anyhow::{Context, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
-pub fn list_tools(write_enabled: bool) -> Value {
-    let mut tools = vec![
-        tool(
-            "pontemesh_get_instance_status",
-            "Retorna status geral da instancia.",
-            json!({"type":"object","properties":{}}),
-        ),
-        tool(
-            "pontemesh_get_storage_summary",
-            "Retorna resumo do storage configurado.",
-            json!({"type":"object","properties":{}}),
-        ),
-        tool(
-            "pontemesh_list_buckets",
-            "Lista buckets com paginacao.",
-            paged_schema(json!({})),
-        ),
-        tool(
-            "pontemesh_get_bucket",
-            "Consulta um bucket.",
-            json!({"type":"object","properties":{"bucket":{"type":"string"}},"required":["bucket"]}),
-        ),
-        tool(
-            "pontemesh_list_objects",
-            "Lista objetos de um bucket com paginacao.",
-            json!({"type":"object","properties":{"bucket":{"type":"string"},"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100},"cursor":{"type":"string"}},"required":["bucket"]}),
-        ),
-        tool(
-            "pontemesh_get_object_metadata",
-            "Consulta metadados de um objeto.",
-            json!({"type":"object","properties":{"bucket":{"type":"string"},"key":{"type":"string"}},"required":["bucket","key"]}),
-        ),
-        tool(
-            "pontemesh_get_health",
-            "Retorna verificacoes basicas de saude.",
-            json!({"type":"object","properties":{}}),
-        ),
-        tool(
-            "pontemesh_get_recent_audit_events",
-            "Lista eventos recentes de auditoria.",
-            json!({"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":100}}}),
-        ),
-        tool(
-            "pontemesh_export_configuration",
-            "Exporta configuracoes operacionais sem segredos.",
-            json!({"type":"object","properties":{}}),
-        ),
-    ];
-    if write_enabled {
-        tools.push(tool(
-            "pontemesh_update_bucket_policy",
-            "Atualiza politica hibrida e S3-compatible de um bucket existente.",
-            json!({"type":"object","properties":{"bucket":{"type":"string"},"policy":{"type":"object"}},"required":["bucket","policy"]}),
-        ));
-        tools.push(tool(
-            "pontemesh_import_configuration",
-            "Importa backup de configuracao operacional sem segredos.",
-            json!({"type":"object","properties":{"configuration":{"type":"object"}},"required":["configuration"]}),
-        ));
-    } else {
-        tools.push(tool(
-            "pontemesh_write_tools_status",
-            "Informa que ferramentas de escrita estao desabilitadas.",
-            json!({"type":"object","properties":{}}),
-        ));
+const MCP_MAX_OBJECT_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolPermission {
+    Read,
+    Write,
+    Admin,
+}
+
+impl ToolPermission {
+    pub fn scope(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Admin => "admin",
+        }
     }
+}
+
+struct ToolDefinition {
+    name: &'static str,
+    description: &'static str,
+    schema: Value,
+    permission: ToolPermission,
+}
+
+pub fn list_tools(settings: &crate::catalog::McpSettings, scopes: &[String]) -> Value {
+    let tools: Vec<Value> = tool_definitions()
+        .into_iter()
+        .filter(|definition| is_allowed(definition.permission, settings, scopes))
+        .map(|definition| tool(definition.name, definition.description, definition.schema))
+        .collect();
     json!({ "tools": tools })
 }
 
-pub async fn call_tool(
-    state: &AppState,
-    name: &str,
-    arguments: Value,
-    write_enabled: bool,
-) -> anyhow::Result<Value> {
+pub fn tool_permission(name: &str) -> Option<ToolPermission> {
+    tool_definitions()
+        .into_iter()
+        .find(|tool| tool.name == name)
+        .map(|tool| tool.permission)
+}
+
+pub fn is_allowed(
+    permission: ToolPermission,
+    settings: &crate::catalog::McpSettings,
+    scopes: &[String],
+) -> bool {
+    let has_scope = scopes.iter().any(|scope| scope == permission.scope())
+        || (permission == ToolPermission::Read
+            && scopes
+                .iter()
+                .any(|scope| scope == "write" || scope == "admin"));
+    has_scope
+        && match permission {
+            ToolPermission::Read => settings.read_tools_enabled,
+            ToolPermission::Write => settings.write_tools_enabled,
+            ToolPermission::Admin => settings.admin_tools_enabled,
+        }
+}
+
+fn tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            name: "pontemesh_get_instance_status",
+            description: "Retorna status geral da instancia.",
+            schema: json!({"type":"object","properties":{}}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_get_storage_summary",
+            description: "Retorna resumo do storage configurado.",
+            schema: json!({"type":"object","properties":{}}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_list_buckets",
+            description: "Lista buckets com paginacao.",
+            schema: paged_schema(json!({})),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_get_bucket",
+            description: "Consulta um bucket.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"}},"required":["bucket"]}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_list_objects",
+            description: "Lista objetos de um bucket com paginacao.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"},"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100},"cursor":{"type":"string"}},"required":["bucket"]}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_get_object_metadata",
+            description: "Consulta metadados de um objeto.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"},"key":{"type":"string"}},"required":["bucket","key"]}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_get_health",
+            description: "Retorna verificacoes basicas de saude.",
+            schema: json!({"type":"object","properties":{}}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_get_recent_audit_events",
+            description: "Lista eventos recentes de auditoria.",
+            schema: json!({"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":100}}}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_export_configuration",
+            description: "Exporta configuracoes operacionais sem segredos.",
+            schema: json!({"type":"object","properties":{}}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_create_bucket",
+            description: "Cria um bucket usando o servico real.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"}},"required":["bucket"]}),
+            permission: ToolPermission::Write,
+        },
+        ToolDefinition {
+            name: "pontemesh_delete_bucket",
+            description: "Remove um bucket vazio.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"}},"required":["bucket"]}),
+            permission: ToolPermission::Write,
+        },
+        ToolDefinition {
+            name: "pontemesh_put_text_object",
+            description: "Envia objeto textual pequeno via MCP. Para arquivos grandes, use a API S3-compatible.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"},"key":{"type":"string"},"content":{"type":"string"},"contentType":{"type":"string"}},"required":["bucket","key","content"]}),
+            permission: ToolPermission::Write,
+        },
+        ToolDefinition {
+            name: "pontemesh_put_base64_object",
+            description: "Envia objeto binario pequeno em base64 via MCP. Para arquivos grandes, use a API S3-compatible.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"},"key":{"type":"string"},"contentBase64":{"type":"string"},"contentType":{"type":"string"}},"required":["bucket","key","contentBase64"]}),
+            permission: ToolPermission::Write,
+        },
+        ToolDefinition {
+            name: "pontemesh_delete_object",
+            description: "Apaga objeto usando o servico real.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"},"key":{"type":"string"}},"required":["bucket","key"]}),
+            permission: ToolPermission::Write,
+        },
+        ToolDefinition {
+            name: "pontemesh_update_bucket_policy",
+            description: "Atualiza politica hibrida e S3-compatible de um bucket existente.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"},"policy":{"type":"object"}},"required":["bucket","policy"]}),
+            permission: ToolPermission::Admin,
+        },
+        ToolDefinition {
+            name: "pontemesh_import_configuration",
+            description: "Importa backup de configuracao operacional sem segredos.",
+            schema: json!({"type":"object","properties":{"configuration":{"type":"object"}},"required":["configuration"]}),
+            permission: ToolPermission::Admin,
+        },
+    ]
+}
+
+pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow::Result<Value> {
     let result = match name {
+        "pontemesh_create_bucket" => {
+            let bucket = required_str(&arguments, "bucket")?;
+            catalog::validate_bucket_name(bucket)?;
+            json!(state.catalog.create_bucket(bucket).await?)
+        }
+        "pontemesh_delete_bucket" => {
+            let bucket = required_str(&arguments, "bucket")?;
+            state.catalog.delete_bucket(bucket).await?;
+            json!({"deleted": true, "bucket": bucket})
+        }
+        "pontemesh_put_text_object" => {
+            let bucket = required_str(&arguments, "bucket")?;
+            let key = required_str(&arguments, "key")?;
+            let content = required_str(&arguments, "content")?;
+            let content_type = arguments
+                .get("contentType")
+                .and_then(Value::as_str)
+                .unwrap_or("text/plain");
+            put_small_object(
+                state,
+                bucket,
+                key,
+                content.as_bytes().to_vec(),
+                content_type,
+            )
+            .await?
+        }
+        "pontemesh_put_base64_object" => {
+            let bucket = required_str(&arguments, "bucket")?;
+            let key = required_str(&arguments, "key")?;
+            let encoded = required_str(&arguments, "contentBase64")?;
+            if encoded.len() > MCP_MAX_OBJECT_BYTES * 2 {
+                bail!("MCP object payload is too large");
+            }
+            let bytes = BASE64.decode(encoded).context("invalid base64 content")?;
+            let content_type = arguments
+                .get("contentType")
+                .and_then(Value::as_str)
+                .unwrap_or("application/octet-stream");
+            put_small_object(state, bucket, key, bytes, content_type).await?
+        }
+        "pontemesh_delete_object" => {
+            let bucket = required_str(&arguments, "bucket")?;
+            let key = required_str(&arguments, "key")?;
+            state.catalog.delete_object(bucket, key).await?;
+            json!({"deleted": true, "bucket": bucket, "key": key})
+        }
+
         "pontemesh_get_instance_status" => {
             json!({
                 "name": config::load_instance_config(&state.paths).map(|config| config.instance.name).unwrap_or_else(|_| "Ponte Mesh".to_owned()),
@@ -166,6 +303,7 @@ pub async fn call_tool(
                     require_auth: mcp_settings.require_auth,
                     read_tools_enabled: mcp_settings.read_tools_enabled,
                     write_tools_enabled: mcp_settings.write_tools_enabled,
+                    admin_tools_enabled: mcp_settings.admin_tools_enabled,
                     expose_resources: mcp_settings.expose_resources,
                     expose_prompts: mcp_settings.expose_prompts,
                     allow_localhost_only: mcp_settings.allow_localhost_only,
@@ -174,7 +312,6 @@ pub async fn call_tool(
             })
         }
         "pontemesh_update_bucket_policy" => {
-            ensure_write_enabled(write_enabled)?;
             let bucket = required_str(&arguments, "bucket")?;
             let policy_value = arguments
                 .get("policy")
@@ -184,7 +321,6 @@ pub async fn call_tool(
             json!(state.catalog.update_bucket_policy(bucket, policy).await?)
         }
         "pontemesh_import_configuration" => {
-            ensure_write_enabled(write_enabled)?;
             let configuration_value = arguments
                 .get("configuration")
                 .cloned()
@@ -203,6 +339,7 @@ pub async fn call_tool(
                         require_auth: settings.require_auth,
                         read_tools_enabled: settings.read_tools_enabled,
                         write_tools_enabled: settings.write_tools_enabled,
+                        admin_tools_enabled: false,
                         expose_resources: settings.expose_resources,
                         expose_prompts: settings.expose_prompts,
                         allow_localhost_only: settings.allow_localhost_only,
@@ -212,7 +349,12 @@ pub async fn call_tool(
             let mut applied = 0_usize;
             let mut skipped = Vec::new();
             for policy in configuration.bucket_policies {
-                if state.catalog.get_bucket(&policy.bucket_name).await?.is_none() {
+                if state
+                    .catalog
+                    .get_bucket(&policy.bucket_name)
+                    .await?
+                    .is_none()
+                {
                     skipped.push(policy.bucket_name);
                     continue;
                 }
@@ -243,33 +385,110 @@ pub async fn call_tool(
             }
             json!({"appliedBucketPolicies": applied, "skippedBucketPolicies": skipped})
         }
-        "pontemesh_write_tools_status" => json!({"writeToolsEnabled": false}),
         _ => bail!("unknown MCP tool: {name}"),
     };
-
-    Ok(json!({
-        "content": [{
-            "type": "text",
-            "text": serde_json::to_string_pretty(&result)?
-        }],
-        "structuredContent": result
-    }))
+    Ok(
+        json!({"content":[{"type":"text","text":serde_json::to_string_pretty(&result)?}],"structuredContent":result}),
+    )
 }
 
-fn ensure_write_enabled(write_enabled: bool) -> anyhow::Result<()> {
-    if write_enabled {
-        Ok(())
-    } else {
-        bail!("MCP write tools are disabled")
+async fn put_small_object(
+    state: &AppState,
+    bucket: &str,
+    key: &str,
+    bytes: Vec<u8>,
+    content_type: &str,
+) -> anyhow::Result<Value> {
+    catalog::validate_bucket_name(bucket)?;
+    catalog::validate_object_key(key)?;
+    if bytes.len() > MCP_MAX_OBJECT_BYTES {
+        bail!(
+            "MCP object payload exceeds 1 MiB limit; use the S3-compatible API for large uploads"
+        );
+    }
+    let policy = state.catalog.get_bucket_policy(bucket).await?;
+    let storage_path = config::configured_storage_dir(&state.paths)?;
+    let bucket_dir = storage_path.join(bucket);
+    tokio::fs::create_dir_all(&bucket_dir)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to create bucket storage directory {}",
+                bucket_dir.display()
+            )
+        })?;
+    let sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let object_path = bucket_dir.join(format!("{}-{}", uuid::Uuid::new_v4(), sha256));
+    tokio::fs::write(&object_path, &bytes)
+        .await
+        .with_context(|| format!("failed to write MCP object data {}", object_path.display()))?;
+    let object = NewObject {
+        bucket_name: bucket.to_owned(),
+        key: key.to_owned(),
+        size_bytes: i64::try_from(bytes.len()).context("object too large")?,
+        content_type: content_type.to_owned(),
+        sha256: sha256.clone(),
+        storage_path: object_path.display().to_string(),
+        manifest: build_manifest(&bytes, policy.fragment_size_bytes)?,
+    };
+    match state
+        .catalog
+        .put_object_with_audit(
+            object,
+            "mcp",
+            &format!("bucket={bucket}; key={key}; source=mcp"),
+        )
+        .await
+    {
+        Ok(summary) => Ok(json!(summary)),
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&object_path).await;
+            Err(error)
+        }
     }
 }
 
-fn tool(name: &str, description: &str, input_schema: Value) -> Value {
-    json!({
-        "name": name,
-        "description": description,
-        "inputSchema": input_schema
+fn build_manifest(
+    bytes: &[u8],
+    fragment_size_bytes: i64,
+) -> anyhow::Result<catalog::NewObjectManifest> {
+    if fragment_size_bytes <= 0 {
+        bail!("fragmentSizeBytes must be positive");
+    }
+    let fragment_size =
+        usize::try_from(fragment_size_bytes).context("fragment size is too large")?;
+    let fragments = bytes
+        .chunks(fragment_size)
+        .enumerate()
+        .map(|(index, chunk)| {
+            let start = index
+                .checked_mul(fragment_size)
+                .and_then(|v| i64::try_from(v).ok())
+                .ok_or_else(|| anyhow::anyhow!("fragment byte range is too large"))?;
+            let size_bytes =
+                i64::try_from(chunk.len()).context("fragment size cannot fit in i64")?;
+            Ok(catalog::NewObjectFragment {
+                index: i64::try_from(index).context("fragment index cannot fit in i64")?,
+                byte_range_start: start,
+                byte_range_end: start + size_bytes.saturating_sub(1),
+                size_bytes,
+                sha256: format!("{:x}", Sha256::digest(chunk)),
+                priority: if index == 0 {
+                    "INITIAL".to_owned()
+                } else {
+                    "NORMAL".to_owned()
+                },
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(catalog::NewObjectManifest {
+        fragment_size_bytes,
+        fragments,
     })
+}
+
+fn tool(name: &str, description: &str, input_schema: Value) -> Value {
+    json!({"name":name,"description":description,"inputSchema":input_schema})
 }
 
 fn paged_schema(extra: Value) -> Value {
@@ -285,28 +504,29 @@ fn paged_schema(extra: Value) -> Value {
             properties.insert(key.clone(), value.clone());
         }
     }
-    json!({"type":"object","properties": properties})
+    json!({"type":"object","properties":properties})
 }
 
 fn page_args(arguments: &Value) -> (u32, u32) {
     let page = arguments
-        .get("cursor")
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse::<u32>().ok())
+        .get("page")
+        .and_then(Value::as_u64)
         .unwrap_or(1)
-        .max(1);
+        .clamp(1, 10_000) as u32;
     let page_size = arguments
         .get("limit")
+        .or_else(|| arguments.get("pageSize"))
         .and_then(Value::as_u64)
         .unwrap_or(20)
         .clamp(1, 100) as u32;
     (page, page_size)
 }
 
-fn required_str<'a>(arguments: &'a Value, key: &str) -> anyhow::Result<&'a str> {
+fn required_str<'a>(arguments: &'a Value, name: &str) -> anyhow::Result<&'a str> {
     arguments
-        .get(key)
+        .get(name)
         .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow::anyhow!("{key} is required"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("{name} is required"))
 }
