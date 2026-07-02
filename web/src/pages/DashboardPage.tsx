@@ -144,13 +144,6 @@ export function DashboardPage() {
         value={`${healthItems.length - failedHealthItems.length}/${healthItems.length}`}
         detail={failedHealthItems.length === 0 ? t("setup.dashboard.health.operational") : t("setup.dashboard.health.attention")}
       />
-      <MetricCard
-        icon={<Network size={20} />}
-        label={t("setup.dashboard.cards.mcp")}
-        value={summary.mcp.enabled ? t("setup.dashboard.mcp.enabled") : t("setup.dashboard.mcp.disabled")}
-        detail={summary.mcp.enabled ? t("setup.dashboard.mcp.activeDetail", { count: summary.mcp.recentCallsCount }) : summary.mcp.endpoint}
-        to="/settings#mcp"
-      />
 
       <ApplicationLogs logs={logs} />
 
