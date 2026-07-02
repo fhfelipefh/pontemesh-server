@@ -365,10 +365,46 @@
   transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
+.button--primary {
+  color: var(--pm-surface);
+  background: var(--pm-primary-blue);
+}
+
+.button--secondary {
+  border: 1px solid var(--pm-border-medium);
+  color: var(--pm-deep-navy);
+  background: var(--pm-surface);
+  box-shadow: none;
+}
+
+.button--ghost {
+  color: var(--pm-primary-blue-strong);
+  background: transparent;
+  box-shadow: none;
+}
+
+.button--danger {
+  color: var(--pm-surface);
+  background: var(--pm-danger);
+  box-shadow: 0 16px 34px rgb(var(--pm-danger-rgb) / 0.18);
+}
+
 .button:hover:not(:disabled) {
   background: var(--pm-accent-cyan-blue);
   box-shadow: 0 18px 38px rgb(var(--pm-accent-cyan-blue-rgb) / 0.26);
   transform: translateY(-1px);
+}
+
+.button--secondary:hover:not(:disabled),
+.button--ghost:hover:not(:disabled) {
+  color: var(--pm-primary-blue);
+  background: var(--pm-primary-faint);
+  box-shadow: none;
+}
+
+.button--danger:hover:not(:disabled) {
+  background: var(--pm-danger-strong);
+  box-shadow: 0 18px 38px rgb(var(--pm-danger-rgb) / 0.22);
 }
 
 .button:focus-visible {

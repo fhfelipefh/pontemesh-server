@@ -5,6 +5,7 @@ type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
   className?: string;
   icon?: ReactNode;
   type?: "button" | "submit";
+  variant?: "primary" | "secondary" | "ghost" | "danger";
   disabled?: boolean;
   loading?: boolean;
 };
@@ -14,15 +15,18 @@ export function Button({
   className,
   icon,
   type = "button",
+  variant = "primary",
   disabled = false,
   loading = false,
   onClick,
   ...buttonProps
 }: ButtonProps) {
+  const classes = ["button", `button--${variant}`, className].filter(Boolean).join(" ");
+
   return (
     <button
       {...buttonProps}
-      className={className ? `button ${className}` : "button"}
+      className={classes}
       type={type}
       disabled={disabled || loading}
       aria-busy={loading}

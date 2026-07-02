@@ -1,4 +1,5 @@
 import { Clipboard } from "lucide-react";
+import { IconButton } from "./IconButton";
 
 type CopyButtonProps = {
   value: string;
@@ -11,8 +12,6 @@ export function CopyButton({ value, label }: CopyButtonProps) {
   }
 
   return (
-    <button className="settings-copy-button" type="button" title={label} aria-label={label} onClick={handleCopy}>
-      <Clipboard size={15} aria-hidden="true" />
-    </button>
+    <IconButton label={label} icon={<Clipboard size={15} aria-hidden="true" />} onClick={handleCopy} />
   );
 }

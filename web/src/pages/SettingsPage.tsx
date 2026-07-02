@@ -30,7 +30,14 @@ import {
   updateMcpSettings
 } from "../api/mcpApi";
 import { ConfigurationImportResult, exportConfiguration, importConfiguration } from "../api/configurationApi";
+import { Button } from "../components/Button";
+import { CredentialTable } from "../components/settings/CredentialTable";
+import { EmptyState } from "../components/settings/EmptyState";
+import { IconButton } from "../components/settings/IconButton";
+import { InfoBox } from "../components/settings/InfoBox";
 import { S3CredentialsCard } from "../components/settings/S3CredentialsCard";
+import { SettingsSection } from "../components/settings/SettingsSection";
+import { StatusBadge } from "../components/settings/StatusBadge";
 
 const S3_KEYS_PAGE_SIZE = 10;
 
@@ -357,23 +364,21 @@ function ConfigurationBackupCard({ importing, result, error, onExport, onImport 
   const { t } = useTranslation();
 
   return (
-    <section className="settings-card settings-card--wide">
-      <div className="settings-card__header">
-        <div className="settings-card__title-group">
-          <div className="settings-card__title-icon">
-            <Download size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <h2>{t("setup.settings.configuration.title")}</h2>
-          </div>
-        </div>
-      </div>
-
+    <SettingsSection
+      className="settings-card--wide"
+      title={t("setup.settings.configuration.title")}
+      icon={<Download size={20} />}
+    >
       <div className="settings-actions-row">
-        <button className="settings-create-key-button" type="button" onClick={onExport}>
-          <Download size={17} aria-hidden="true" />
+        <Button
+          className="settings-create-key-button"
+          type="button"
+          variant="secondary"
+          icon={<Download size={17} aria-hidden="true" />}
+          onClick={onExport}
+        >
           {t("setup.settings.configuration.export")}
-        </button>
+        </Button>
         <label className="settings-file-button">
           <Upload size={17} aria-hidden="true" />
           <span>{importing ? t("setup.common.loading") : t("setup.settings.configuration.import")}</span>
@@ -391,14 +396,16 @@ function ConfigurationBackupCard({ importing, result, error, onExport, onImport 
 
       {error ? <p className="error-message">{error}</p> : null}
       {result ? (
-        <p className="settings-inline-status">
+        <InfoBox variant="success">
+          <p>
           {t("setup.settings.configuration.imported", {
             count: result.appliedBucketPolicies,
             skipped: result.skippedBucketPolicies.length
           })}
-        </p>
+          </p>
+        </InfoBox>
       ) : null}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -449,18 +456,13 @@ function McpSettingsCard({
   }
 
   return (
-    <section className="settings-card settings-card--wide" id="mcp">
-      <div className="settings-card__header">
-        <div className="settings-card__title-group">
-          <div className="settings-card__title-icon">
-            <Network size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <h2>{t("setup.settings.mcp.title")}</h2>
-            <p>{t("setup.settings.mcp.subtitle")}</p>
-          </div>
-        </div>
-      </div>
+    <SettingsSection
+      className="settings-card--wide"
+      id="mcp"
+      title={t("setup.settings.mcp.title")}
+      description={t("setup.settings.mcp.subtitle")}
+      icon={<Network size={20} />}
+    >
 
       {error ? <p className="error-message">{error}</p> : null}
 
@@ -518,9 +520,7 @@ function McpSettingsCard({
                   <dt>{t("setup.settings.mcp.tokenSecret")}</dt>
                   <dd>
                     <code>{createdToken.secret}</code>
-                    <button className="icon-button" type="button" title={t("setup.settings.mcp.copyToken")} aria-label={t("setup.settings.mcp.copyToken")} onClick={() => void navigator.clipboard?.writeText(createdToken.secret)}>
-                      <Copy size={16} aria-hidden="true" />
-                    </button>
+                    <IconButton label={t("setup.settings.mcp.copyToken")} icon={<Copy size={16} aria-hidden="true" />} onClick={() => void navigator.clipboard?.writeText(createdToken.secret)} />
                   </dd>
                 </div>
               </dl>
@@ -530,42 +530,49 @@ function McpSettingsCard({
             </section>
           ) : null}
 
-          <div className="settings-table-wrap">
-            <table className="settings-table">
-              <thead>
-                <tr>
-                  <th>{t("setup.settings.mcp.tokenName")}</th>
-                  <th>{t("setup.settings.mcp.tokenPrefix")}</th>
-                  <th>{t("setup.settings.s3.status")}</th>
-                  <th>{t("setup.settings.s3.lastUsed")}</th>
-                  <th>{t("setup.settings.s3.createdAt")}</th>
-                  <th aria-label={t("setup.settings.s3.actions")} />
-                </tr>
-              </thead>
-              <tbody>
+          <CredentialTable
+            columns={[
+              { key: "name", label: t("setup.settings.mcp.tokenName"), className: "settings-table__col-name" },
+              { key: "prefix", label: t("setup.settings.mcp.tokenPrefix"), className: "settings-table__col-key" },
+              { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
+              { key: "lastUsed", label: t("setup.settings.s3.lastUsed"), className: "settings-table__col-last-used" },
+              { key: "createdAt", label: t("setup.settings.s3.createdAt"), className: "settings-table__col-created" },
+              { key: "actions", ariaLabel: t("setup.settings.s3.actions"), className: "settings-table__col-actions" }
+            ]}
+          >
                 {tokens.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>{t("setup.settings.mcp.noTokens")}</td>
+                  <tr className="settings-table__empty-row">
+                    <td colSpan={6}>
+                      <EmptyState title={t("setup.settings.mcp.noTokens")} />
+                    </td>
                   </tr>
                 ) : tokens.map((token) => (
                   <tr key={token.id}>
                     <td className="settings-table__name">{token.name}</td>
                     <td><code>{token.tokenPrefix}</code></td>
-                    <td>{token.active ? t("setup.settings.s3.active") : t("setup.settings.s3.revoked")}</td>
+                    <td>
+                      <StatusBadge
+                        active={token.active}
+                        activeLabel={t("setup.settings.s3.active")}
+                        revokedLabel={t("setup.settings.s3.revoked")}
+                      />
+                    </td>
                     <td>{token.lastUsedAt ? formatDate(token.lastUsedAt, i18n.language) : t("setup.common.unavailable")}</td>
                     <td>{formatDate(token.createdAt, i18n.language)}</td>
                     <td className="settings-table__actions">
                       {token.active ? (
-                        <button className="settings-revoke-button" type="button" title={t("setup.settings.mcp.revokeToken")} aria-label={t("setup.settings.mcp.revokeToken")} disabled={revokingToken === token.id} onClick={() => onRevokeToken(token.id)}>
-                          <Ban size={16} aria-hidden="true" />
-                        </button>
+                        <IconButton
+                          variant="danger"
+                          label={t("setup.settings.mcp.revokeToken")}
+                          icon={<Ban size={16} aria-hidden="true" />}
+                          disabled={revokingToken === token.id}
+                          onClick={() => onRevokeToken(token.id)}
+                        />
                       ) : null}
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+          </CredentialTable>
 
           <section className="mcp-activity">
             <h3>{t("setup.settings.mcp.recentActivity")}</h3>
@@ -585,7 +592,7 @@ function McpSettingsCard({
           </section>
         </>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -640,18 +647,10 @@ function ApplicationCredentialsCard({
   const { t, i18n } = useTranslation();
 
   return (
-    <section className="settings-card">
-      <div className="settings-card__header">
-        <div className="settings-card__title-group">
-          <div className="settings-card__title-icon">
-            <KeyRound size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <h2>{t("setup.settings.applications.title")}</h2>
-          </div>
-        </div>
-      </div>
-
+    <SettingsSection
+      title={t("setup.settings.applications.title")}
+      icon={<KeyRound size={20} />}
+    >
       <form className="inline-form" onSubmit={(event) => {
         event.preventDefault();
         onCreateApplication();
@@ -679,15 +678,13 @@ function ApplicationCredentialsCard({
               <dd><code>{createdApplication.credential.id}</code></dd>
             </div>
             <div>
-              <dt>{t("setup.settings.applications.token")}</dt>
-              <dd>
-                <code>{createdApplication.token}</code>
-                <button className="icon-button" type="button" title={t("setup.settings.applications.copyToken")} aria-label={t("setup.settings.applications.copyToken")} onClick={() => void navigator.clipboard?.writeText(createdApplication.token)}>
-                  <Copy size={16} aria-hidden="true" />
-                </button>
-              </dd>
-            </div>
-          </dl>
+                <dt>{t("setup.settings.applications.token")}</dt>
+                <dd>
+                  <code>{createdApplication.token}</code>
+                  <IconButton label={t("setup.settings.applications.copyToken")} icon={<Copy size={16} aria-hidden="true" />} onClick={() => void navigator.clipboard?.writeText(createdApplication.token)} />
+                </dd>
+              </div>
+            </dl>
           <button className="settings-secondary-button" type="button" onClick={onDismissCreatedApplication}>
             {t("setup.common.ok")}
           </button>
@@ -697,43 +694,50 @@ function ApplicationCredentialsCard({
       {loading ? (
         <div className="settings-loading">{t("setup.common.loading")}</div>
       ) : applications.length === 0 ? (
-        <div className="settings-empty-state">
-          <h3>{t("setup.settings.applications.emptyTitle")}</h3>
-          <p>{t("setup.settings.applications.emptyDescription")}</p>
-        </div>
+        <EmptyState
+          icon={<KeyRound size={22} />}
+          title={t("setup.settings.applications.emptyTitle")}
+          description={t("setup.settings.applications.emptyDescription")}
+        />
       ) : (
-        <div className="settings-table-wrap">
-          <table className="settings-table">
-            <thead>
-              <tr>
-                <th>{t("setup.settings.applications.name")}</th>
-                <th>{t("setup.settings.applications.scopes")}</th>
-                <th>{t("setup.settings.s3.status")}</th>
-                <th>{t("setup.settings.s3.createdAt")}</th>
-                <th aria-label={t("setup.settings.s3.actions")} />
-              </tr>
-            </thead>
-            <tbody>
+        <CredentialTable
+          columns={[
+            { key: "name", label: t("setup.settings.applications.name"), className: "settings-table__col-name" },
+            { key: "scopes", label: t("setup.settings.applications.scopes"), className: "settings-table__col-key" },
+            { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
+            { key: "createdAt", label: t("setup.settings.s3.createdAt"), className: "settings-table__col-created" },
+            { key: "actions", ariaLabel: t("setup.settings.s3.actions"), className: "settings-table__col-actions" }
+          ]}
+          minWidth={820}
+        >
               {applications.map((application) => (
                 <tr key={application.id}>
                   <td className="settings-table__name">{application.name}</td>
                   <td>{application.scopes.join(", ")}</td>
-                  <td>{application.revoked ? t("setup.settings.s3.revoked") : t("setup.settings.s3.active")}</td>
+                  <td>
+                    <StatusBadge
+                      active={!application.revoked}
+                      activeLabel={t("setup.settings.s3.active")}
+                      revokedLabel={t("setup.settings.s3.revoked")}
+                    />
+                  </td>
                   <td>{formatDate(application.createdAt, i18n.language)}</td>
                   <td className="settings-table__actions">
                     {!application.revoked ? (
-                      <button className="settings-revoke-button" type="button" title={t("setup.settings.applications.revoke")} aria-label={t("setup.settings.applications.revoke")} disabled={revoking === application.id} onClick={() => onRevokeApplication(application.id)}>
-                        <Ban size={16} aria-hidden="true" />
-                      </button>
+                      <IconButton
+                        variant="danger"
+                        label={t("setup.settings.applications.revoke")}
+                        icon={<Ban size={16} aria-hidden="true" />}
+                        disabled={revoking === application.id}
+                        onClick={() => onRevokeApplication(application.id)}
+                      />
                     ) : null}
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-        </div>
+        </CredentialTable>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 

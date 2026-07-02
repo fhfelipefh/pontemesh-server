@@ -544,12 +544,24 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+  --settings-page-bg: var(--pm-bg-soft);
+  --settings-surface: var(--pm-surface-strong);
+  --settings-surface-muted: var(--pm-bg-elevated);
+  --settings-border: var(--pm-border-soft);
+  --settings-border-strong: var(--pm-border-medium);
+  --settings-text: var(--pm-deep-navy);
+  --settings-text-muted: var(--pm-muted);
+  --settings-primary: var(--pm-primary-blue);
+  --settings-success: var(--pm-success);
+  --settings-warning: var(--pm-warning);
+  --settings-danger: var(--pm-danger);
+  --settings-info: var(--pm-accent-cyan-blue);
   width: 100%;
   max-width: 1440px;
   margin: 0 auto;
   padding: 32px;
   display: grid;
-  gap: 28px;
+  gap: var(--space-6);
 }
 
 .settings-page__header {
@@ -592,7 +604,7 @@
 
 .settings-card {
   min-width: 0;
-  padding: var(--space-8);
+  padding: var(--space-6);
 }
 
 .settings-card--wide {
@@ -604,7 +616,20 @@
   align-items: start;
   justify-content: space-between;
   gap: var(--space-6);
-  margin-bottom: 28px;
+  margin-bottom: var(--space-6);
+}
+
+.settings-card__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.settings-card__body {
+  display: grid;
+  gap: var(--space-4);
 }
 
 .settings-card__title-group {
@@ -734,6 +759,11 @@
   opacity: 0.68;
 }
 
+.settings-toggle-row button:focus-visible {
+  outline: 4px solid var(--pm-cyan-focus);
+  outline-offset: 2px;
+}
+
 .mcp-activity {
   display: grid;
   gap: 10px;
@@ -778,12 +808,47 @@
 }
 
 .settings-create-key-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   width: auto;
   max-width: 280px;
   min-width: 148px;
   min-height: 44px;
+  border-radius: 10px;
   padding: 0 20px;
+  color: var(--pm-surface);
+  background: var(--pm-primary-blue);
+  font-weight: 850;
+  cursor: pointer;
   flex: 0 0 auto;
+}
+
+.settings-create-key-button:hover:not(:disabled),
+.settings-create-key-button:focus-visible {
+  color: var(--pm-surface);
+  background: var(--pm-primary-blue-strong);
+  outline: none;
+}
+
+.settings-create-key-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.button--secondary.settings-create-key-button {
+  border: 1px solid var(--pm-border-medium);
+  color: var(--pm-deep-navy);
+  background: var(--pm-surface);
+  box-shadow: none;
+}
+
+.button--secondary.settings-create-key-button:hover:not(:disabled),
+.button--secondary.settings-create-key-button:focus-visible {
+  color: var(--pm-primary-blue);
+  border-color: var(--pm-primary-border-strong);
+  background: var(--pm-primary-faint);
 }
 
 .settings-actions-row {
@@ -810,6 +875,13 @@
   cursor: pointer;
 }
 
+.settings-file-button:hover,
+.settings-file-button:focus-within {
+  color: var(--pm-primary-blue);
+  border-color: var(--pm-primary-border-strong);
+  background: var(--pm-primary-faint);
+}
+
 .settings-file-button input {
   position: absolute;
   inline-size: 0;
@@ -818,17 +890,16 @@
   pointer-events: none;
 }
 
-.settings-inline-status {
-  margin: 14px 0 0;
-  color: var(--pm-muted);
-  font-weight: 800;
-}
-
 .inline-form .button,
 .inline-form .settings-create-key-button {
   justify-self: start;
   width: auto;
   max-width: 280px;
+}
+
+.inline-form {
+  grid-template-columns: minmax(220px, 420px) auto;
+  align-items: center;
 }
 
 .settings-modal-field span,
@@ -877,6 +948,7 @@
   border: 1px solid var(--pm-border-medium);
   border-radius: 14px;
   max-width: 100%;
+  background: var(--pm-surface);
 }
 
 .settings-table {
@@ -932,6 +1004,14 @@
   background: var(--pm-surface-muted-soft);
 }
 
+.settings-table__empty-row:hover {
+  background: transparent;
+}
+
+.settings-table__empty-row td {
+  padding: 16px;
+}
+
 .settings-table__name {
   font-weight: 850;
   overflow-wrap: anywhere;
@@ -962,19 +1042,22 @@
   background: var(--pm-rose-soft);
 }
 
+.settings-icon-button,
 .settings-copy-button,
 .settings-revoke-button {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 9px;
   color: var(--pm-primary-blue);
   background: var(--pm-primary-soft);
   cursor: pointer;
 }
 
+.settings-icon-button:hover,
+.settings-icon-button:focus-visible,
 .settings-copy-button:hover,
 .settings-copy-button:focus-visible,
 .settings-revoke-button:hover,
@@ -984,16 +1067,25 @@
   outline: none;
 }
 
+.settings-icon-button--neutral {
+  color: var(--pm-muted);
+  background: var(--pm-neutral-soft);
+}
+
+.settings-icon-button--danger,
 .settings-revoke-button {
   color: var(--pm-danger-deep);
   background: var(--pm-danger-deep-soft);
 }
 
+.settings-icon-button--danger:hover,
+.settings-icon-button--danger:focus-visible,
 .settings-revoke-button:hover,
 .settings-revoke-button:focus-visible {
   background: var(--pm-danger-deep);
 }
 
+.settings-icon-button:disabled,
 .settings-revoke-button:disabled {
   cursor: wait;
   opacity: 0.55;
@@ -1044,11 +1136,11 @@
   cursor: not-allowed;
 }
 
+.settings-info-box,
 .settings-inline-help {
   display: flex;
   align-items: start;
   gap: 12px;
-  margin-top: var(--space-6);
   border: 1px solid var(--pm-primary-border);
   border-radius: 14px;
   padding: 14px 16px;
@@ -1056,6 +1148,29 @@
   background: var(--pm-primary-faint);
 }
 
+.settings-info-box--success {
+  color: var(--pm-success);
+  border-color: var(--pm-teal-border);
+  background: var(--pm-teal-faint);
+}
+
+.settings-info-box--warning {
+  color: var(--pm-warning);
+  border-color: var(--pm-warning-border);
+  background: var(--pm-warning-soft);
+}
+
+.settings-info-box--danger {
+  color: var(--pm-danger);
+  border-color: var(--pm-danger-border);
+  background: var(--pm-danger-soft);
+}
+
+.settings-info-box > div {
+  min-width: 0;
+}
+
+.settings-info-box p,
 .settings-inline-help p {
   margin: 0;
   color: var(--pm-neutral-strong);
@@ -1216,12 +1331,23 @@
 .settings-loading {
   display: grid;
   place-items: center;
+  gap: 8px;
   min-height: 190px;
   border: 1px dashed var(--pm-border);
   border-radius: 14px;
   padding: 24px;
   color: var(--pm-muted);
   text-align: center;
+}
+
+.settings-empty-state__icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  color: var(--pm-primary-blue);
+  background: var(--pm-primary-faint);
 }
 
 .settings-empty-state h3 {

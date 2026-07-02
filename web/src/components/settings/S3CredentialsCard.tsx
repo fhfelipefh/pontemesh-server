@@ -1,10 +1,15 @@
-import { Ban, ChevronLeft, ChevronRight, Info, KeyRound, Plus, X } from "lucide-react";
+import { Ban, ChevronLeft, ChevronRight, KeyRound, Plus, X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CreatedS3AccessKey, S3AccessKeySummary } from "../../api/s3KeysApi";
 import { Button } from "../Button";
 import { ErrorMessage } from "../ErrorMessage";
+import { CredentialTable } from "./CredentialTable";
 import { CopyButton } from "./CopyButton";
+import { EmptyState } from "./EmptyState";
+import { IconButton } from "./IconButton";
+import { InfoBox } from "./InfoBox";
+import { SettingsSection } from "./SettingsSection";
 import { StatusBadge } from "./StatusBadge";
 
 type S3CredentialsCardProps = {
@@ -58,16 +63,10 @@ export function S3CredentialsCard({
   }, [createdKey]);
 
   return (
-    <section className="settings-card">
-      <div className="settings-card__header">
-        <div className="settings-card__title-group">
-          <div className="settings-card__title-icon">
-            <KeyRound size={20} aria-hidden="true" />
-          </div>
-          <div>
-            <h2>{t("setup.settings.s3.title")}</h2>
-          </div>
-        </div>
+    <SettingsSection
+      title={t("setup.settings.s3.title")}
+      icon={<KeyRound size={20} />}
+      actions={
         <Button
           className="settings-create-key-button"
           type="button"
@@ -77,7 +76,8 @@ export function S3CredentialsCard({
         >
           {t("setup.settings.s3.create")}
         </Button>
-      </div>
+      }
+    >
 
       <ErrorMessage message={error} />
 
@@ -88,10 +88,11 @@ export function S3CredentialsCard({
       {loading ? (
         <div className="settings-loading">{t("setup.common.loading")}</div>
       ) : keys.length === 0 ? (
-        <div className="settings-empty-state">
-          <h3>{t("setup.settings.s3.emptyTitle")}</h3>
-          <p>{t("setup.settings.s3.emptyDescription")}</p>
-        </div>
+        <EmptyState
+          icon={<KeyRound size={22} />}
+          title={t("setup.settings.s3.emptyTitle")}
+          description={t("setup.settings.s3.emptyDescription")}
+        />
       ) : (
         <S3CredentialsTable
           keys={keys}
@@ -106,10 +107,9 @@ export function S3CredentialsCard({
         />
       )}
 
-      <div className="settings-inline-help">
-        <Info size={18} aria-hidden="true" />
+      <InfoBox>
         <p>{t("setup.settings.s3.helpText")}</p>
-      </div>
+      </InfoBox>
 
       {createDialogOpen && (
         <CreateS3KeyModal
@@ -120,7 +120,7 @@ export function S3CredentialsCard({
           onClose={() => setCreateDialogOpen(false)}
         />
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -285,27 +285,17 @@ function S3CredentialsTable({
 
   return (
     <>
-      <div className="settings-table-wrap">
-        <table className="settings-table">
-          <colgroup>
-            <col className="settings-table__col-name" />
-            <col className="settings-table__col-key" />
-            <col className="settings-table__col-status" />
-            <col className="settings-table__col-last-used" />
-            <col className="settings-table__col-created" />
-            <col className="settings-table__col-actions" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>{t("setup.settings.s3.name")}</th>
-              <th>{t("setup.settings.s3.accessKeyId")}</th>
-              <th>{t("setup.settings.s3.status")}</th>
-              <th>{t("setup.settings.s3.lastUsed")}</th>
-              <th>{t("setup.settings.s3.createdAt")}</th>
-              <th aria-label={t("setup.settings.s3.actions")} />
-            </tr>
-          </thead>
-          <tbody>
+      <CredentialTable
+        columns={[
+          { key: "name", label: t("setup.settings.s3.name"), className: "settings-table__col-name" },
+          { key: "accessKeyId", label: t("setup.settings.s3.accessKeyId"), className: "settings-table__col-key" },
+          { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
+          { key: "lastUsed", label: t("setup.settings.s3.lastUsed"), className: "settings-table__col-last-used" },
+          { key: "createdAt", label: t("setup.settings.s3.createdAt"), className: "settings-table__col-created" },
+          { key: "actions", ariaLabel: t("setup.settings.s3.actions"), className: "settings-table__col-actions" }
+        ]}
+        minWidth={940}
+      >
             {keys.map((key) => (
               <tr key={key.id}>
                 <td className="settings-table__name">{key.name ?? t("setup.common.unavailable")}</td>
@@ -326,23 +316,18 @@ function S3CredentialsTable({
                 <td>{formatDate(key.createdAt, locale)}</td>
                 <td className="settings-table__actions">
                   {key.isActive && (
-                    <button
-                      className="settings-revoke-button"
-                      type="button"
-                      title={t("setup.settings.s3.revoke")}
-                      aria-label={t("setup.settings.s3.revoke")}
+                    <IconButton
+                      variant="danger"
+                      label={t("setup.settings.s3.revoke")}
+                      icon={<Ban size={16} aria-hidden="true" />}
                       disabled={revoking === key.id}
                       onClick={() => onRevokeKey(key.id)}
-                    >
-                      <Ban size={16} aria-hidden="true" />
-                    </button>
+                    />
                   )}
                 </td>
               </tr>
             ))}
-          </tbody>
-        </table>
-      </div>
+      </CredentialTable>
       {totalKeys > pageSize && (
         <nav className="settings-pagination" aria-label={t("setup.settings.s3.paginationLabel")}>
           <p>
