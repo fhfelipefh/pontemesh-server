@@ -75,7 +75,7 @@ export async function expectBodyDoesNotScroll(page: Page) {
 }
 
 export async function expectNoTinyTextInputs(page: Page) {
-  const inputs = page.locator("input:not([type=hidden]), textarea");
+  const inputs = page.locator("input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea");
   const count = await inputs.count();
 
   for (let i = 0; i < count; i++) {

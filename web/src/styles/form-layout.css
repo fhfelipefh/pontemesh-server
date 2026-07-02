@@ -72,7 +72,7 @@
   line-height: 1.25;
 }
 
-.form-field input,
+.form-field input:not([type="checkbox"]):not([type="radio"]),
 .form-field select {
   width: 100%;
   min-width: 0;
@@ -86,7 +86,7 @@
   font-weight: 650;
 }
 
-.form-field input:focus,
+.form-field input:not([type="checkbox"]):not([type="radio"]):focus,
 .form-field select:focus {
   border-color: var(--pm-accent-cyan-blue);
   box-shadow: 0 0 0 4px var(--pm-cyan-focus);
@@ -127,10 +127,15 @@
   font-weight: 650;
 }
 
-.checkbox-field input {
+input[type="checkbox"] {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  max-width: 16px;
+  max-height: 16px;
+  margin: 0;
   padding: 0;
 }
 

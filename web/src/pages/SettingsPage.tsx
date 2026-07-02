@@ -545,7 +545,7 @@ function McpSettingsCard({
             <ToggleRow label={t("setup.settings.mcp.prompts")} checked={settings.exposePrompts} disabled={saving} onChange={(checked) => update({ exposePrompts: checked })} />
           </div>
 
-          <form className="inline-form" onSubmit={(event) => {
+          <form className="inline-form mcp-token-form" onSubmit={(event) => {
             event.preventDefault();
             onCreateToken();
           }}>
@@ -559,21 +559,25 @@ function McpSettingsCard({
               <Plus size={17} aria-hidden="true" />
               {t("setup.settings.mcp.createToken")}
             </button>
-          <div className="settings-checkbox-group" role="group" aria-label={t("setup.settings.mcp.tokenScopes")}>
-              {["read", "write", "admin"].map((scope) => (
-                <label key={scope}>
-                  <input
-                    type="checkbox"
-                    checked={tokenScopes.includes(scope)}
-                    disabled={scope === "read"}
-                    onChange={(event) => {
-                      const next = event.target.checked ? [...tokenScopes, scope] : tokenScopes.filter((item) => item !== scope);
-                      onTokenScopesChange(Array.from(new Set(["read", ...next])));
-                    }}
-                  />
-                  {scope}
-                </label>
-              ))}
+            <div className="mcp-token-scopes">
+              <span className="mcp-token-scopes__label">{t("setup.settings.mcp.tokenScopes")}</span>
+              <div className="settings-checkbox-group" role="group" aria-label={t("setup.settings.mcp.tokenScopes")} data-testid="mcp-token-scope-group">
+                {["read", "write", "admin"].map((scope) => (
+                  <label key={scope} className="settings-checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={tokenScopes.includes(scope)}
+                      disabled={scope === "read"}
+                      data-testid={`mcp-token-scope-${scope}`}
+                      onChange={(event) => {
+                        const next = event.target.checked ? [...tokenScopes, scope] : tokenScopes.filter((item) => item !== scope);
+                        onTokenScopesChange(Array.from(new Set(["read", ...next])));
+                      }}
+                    />
+                    {scope}
+                  </label>
+                ))}
+              </div>
             </div>
             {tokenScopes.some((scope) => scope === "write" || scope === "admin") ? <p className="settings-warning">{t("setup.settings.mcp.permissionWarning")}</p> : null}
           </form>
