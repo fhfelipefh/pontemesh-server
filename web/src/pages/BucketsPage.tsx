@@ -21,6 +21,7 @@ import {
 import { Button } from "../components/Button";
 import { ConfirmDialog, EmptyState, PageSizeSelect, Pagination } from "../components/AdminListControls";
 import { ErrorMessage } from "../components/ErrorMessage";
+import { CheckboxField, CheckboxGrid, FormField, FormGrid, FormSection, FormSectionHeader } from "../components/layout";
 import { ObjectManager } from "../components/ObjectManager";
 import { emptyPage, formatBytes, formatDate } from "../utils/adminFormat";
 
@@ -431,11 +432,12 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
           </button>
         </header>
 
-        <section className="bucket-policy-panel">
-          <div className="bucket-policy-panel__header">
-            <h3>{t("setup.buckets.policyTitle")}</h3>
-            {policy ? (
+        <FormSection data-testid="hybrid-policy-section">
+          <FormSectionHeader
+            title={t("setup.buckets.policyTitle")}
+            actions={policy ? (
               <Button
+                data-testid="hybrid-policy-save-button"
                 type="button"
                 loading={policySaving}
                 onClick={() => void savePolicy(policy)}
@@ -443,35 +445,36 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
                 {t("setup.common.save")}
               </Button>
             ) : null}
-          </div>
+          />
           <ErrorMessage message={policyError} />
           {!policy && !policyError ? (
             <div className="admin-loading">{t("setup.common.loading")}</div>
           ) : policy ? (
-            <div className="bucket-policy-grid">
-              <label>
-                <span>{t("setup.buckets.accessPackageTtl")}</span>
+            <>
+              <FormGrid columns={4}>
+                <FormField label={t("setup.buckets.accessPackageTtl")} htmlFor="bucket-policy-access-package-ttl">
                 <input
+                  id="bucket-policy-access-package-ttl"
                   type="number"
                   min={60}
                   max={3600}
                   value={policy.accessPackageTtlSeconds}
                   onChange={(event) => setPolicy({ ...policy, accessPackageTtlSeconds: Number(event.target.value) })}
                 />
-              </label>
-              <label>
-                <span>{t("setup.buckets.fragmentSize")}</span>
+                </FormField>
+                <FormField label={t("setup.buckets.fragmentSize")} htmlFor="bucket-policy-fragment-size">
                 <input
+                  id="bucket-policy-fragment-size"
                   type="number"
                   min={1024}
                   max={134217728}
                   value={policy.fragmentSizeBytes}
                   onChange={(event) => setPolicy({ ...policy, fragmentSizeBytes: Number(event.target.value) })}
                 />
-              </label>
-              <label>
-                <span>{t("setup.buckets.sourceSelection")}</span>
+                </FormField>
+                <FormField label={t("setup.buckets.sourceSelection")} htmlFor="bucket-policy-source-selection">
                 <select
+                  id="bucket-policy-source-selection"
                   value={policy.sourceSelectionStrategy}
                   onChange={(event) => setPolicy({ ...policy, sourceSelectionStrategy: event.target.value })}
                 >
@@ -480,10 +483,10 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
                   <option value="REPLICA_EDGE_FIRST">{t("setup.buckets.sourceReplicaFirst")}</option>
                   <option value="PEER_FIRST">{t("setup.buckets.sourcePeerFirst")}</option>
                 </select>
-              </label>
-              <label>
-                <span>{t("setup.buckets.fragmentPriority")}</span>
+                </FormField>
+                <FormField label={t("setup.buckets.fragmentPriority")} htmlFor="bucket-policy-fragment-priority">
                 <select
+                  id="bucket-policy-fragment-priority"
                   value={policy.fragmentPriorityStrategy}
                   onChange={(event) => setPolicy({ ...policy, fragmentPriorityStrategy: event.target.value })}
                 >
@@ -491,20 +494,20 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
                   <option value="INITIAL_FIRST">{t("setup.buckets.priorityInitial")}</option>
                   <option value="RAREST_FIRST">{t("setup.buckets.priorityRarest")}</option>
                 </select>
-              </label>
-              <label>
-                <span>{t("setup.buckets.failureThreshold")}</span>
+                </FormField>
+                <FormField label={t("setup.buckets.failureThreshold")} htmlFor="bucket-policy-failure-threshold">
                 <input
+                  id="bucket-policy-failure-threshold"
                   type="number"
                   min={1}
                   max={20}
                   value={policy.failureThreshold}
                   onChange={(event) => setPolicy({ ...policy, failureThreshold: Number(event.target.value) })}
                 />
-              </label>
-              <label>
-                <span>{t("setup.buckets.fallbackMode")}</span>
+                </FormField>
+                <FormField label={t("setup.buckets.fallbackMode")} htmlFor="bucket-policy-fallback-mode">
                 <select
+                  id="bucket-policy-fallback-mode"
                   value={policy.fallbackMode}
                   onChange={(event) => setPolicy({ ...policy, fallbackMode: event.target.value })}
                 >
@@ -512,46 +515,30 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
                   <option value="ORIGIN_FULL_OBJECT">{t("setup.buckets.fallbackFull")}</option>
                   <option value="DISABLED">{t("setup.buckets.fallbackDisabled")}</option>
                 </select>
-              </label>
-              <label className="bucket-policy-toggle">
+                </FormField>
+                <FormField label={t("setup.buckets.s3ListDefaultMaxKeys")} htmlFor="bucket-policy-s3-default-max-keys">
                 <input
-                  type="checkbox"
-                  checked={policy.allowReplicaEdge}
-                  onChange={(event) => setPolicy({ ...policy, allowReplicaEdge: event.target.checked })}
-                />
-                <span>{t("setup.buckets.allowReplicaEdge")}</span>
-              </label>
-              <label className="bucket-policy-toggle">
-                <input
-                  type="checkbox"
-                  checked={policy.allowPeerSharing}
-                  onChange={(event) => setPolicy({ ...policy, allowPeerSharing: event.target.checked })}
-                />
-                <span>{t("setup.buckets.allowPeerSharing")}</span>
-              </label>
-              <label>
-                <span>{t("setup.buckets.s3ListDefaultMaxKeys")}</span>
-                <input
+                  id="bucket-policy-s3-default-max-keys"
                   type="number"
                   min={1}
                   max={10000}
                   value={policy.s3ListDefaultMaxKeys}
                   onChange={(event) => setPolicy({ ...policy, s3ListDefaultMaxKeys: Number(event.target.value) })}
                 />
-              </label>
-              <label>
-                <span>{t("setup.buckets.s3ListMaxKeysLimit")}</span>
+                </FormField>
+                <FormField label={t("setup.buckets.s3ListMaxKeysLimit")} htmlFor="bucket-policy-s3-max-keys-limit">
                 <input
+                  id="bucket-policy-s3-max-keys-limit"
                   type="number"
                   min={1}
                   max={100000}
                   value={policy.s3ListMaxKeysLimit}
                   onChange={(event) => setPolicy({ ...policy, s3ListMaxKeysLimit: Number(event.target.value) })}
                 />
-              </label>
-              <label>
-                <span>{t("setup.buckets.s3ChecksumAlgorithm")}</span>
+                </FormField>
+                <FormField label={t("setup.buckets.s3ChecksumAlgorithm")} htmlFor="bucket-policy-s3-checksum">
                 <select
+                  id="bucket-policy-s3-checksum"
                   value={policy.s3ChecksumAlgorithm}
                   onChange={(event) => setPolicy({ ...policy, s3ChecksumAlgorithm: event.target.value })}
                 >
@@ -559,44 +546,58 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
                   <option value="ETAG_MD5_COMPATIBLE">ETag MD5</option>
                   <option value="NONE">{t("setup.common.disabled")}</option>
                 </select>
-              </label>
-              <label>
-                <span>{t("setup.buckets.s3MultipartAbortDays")}</span>
+                </FormField>
+                <FormField label={t("setup.buckets.s3MultipartAbortDays")} htmlFor="bucket-policy-s3-multipart-abort-days">
                 <input
+                  id="bucket-policy-s3-multipart-abort-days"
                   type="number"
                   min={1}
                   max={365}
                   value={policy.s3MultipartAbortDays}
                   onChange={(event) => setPolicy({ ...policy, s3MultipartAbortDays: Number(event.target.value) })}
                 />
-              </label>
-              <label className="bucket-policy-toggle">
-                <input
-                  type="checkbox"
-                  checked={policy.s3ListAllowDelimiter}
-                  onChange={(event) => setPolicy({ ...policy, s3ListAllowDelimiter: event.target.checked })}
-                />
-                <span>{t("setup.buckets.s3ListAllowDelimiter")}</span>
-              </label>
-              <label className="bucket-policy-toggle">
-                <input
-                  type="checkbox"
-                  checked={policy.s3VersioningEnabled}
-                  onChange={(event) => setPolicy({ ...policy, s3VersioningEnabled: event.target.checked })}
-                />
-                <span>{t("setup.buckets.s3VersioningEnabled")}</span>
-              </label>
-              <label className="bucket-policy-toggle">
-                <input
-                  type="checkbox"
-                  checked={policy.s3ObjectTaggingEnabled}
-                  onChange={(event) => setPolicy({ ...policy, s3ObjectTaggingEnabled: event.target.checked })}
-                />
-                <span>{t("setup.buckets.s3ObjectTaggingEnabled")}</span>
-              </label>
-            </div>
+                </FormField>
+              </FormGrid>
+              <CheckboxGrid columns={3} data-testid="hybrid-policy-checkbox-grid">
+                <CheckboxField label={t("setup.buckets.s3ListAllowDelimiter")}>
+                  <input
+                    type="checkbox"
+                    checked={policy.s3ListAllowDelimiter}
+                    onChange={(event) => setPolicy({ ...policy, s3ListAllowDelimiter: event.target.checked })}
+                  />
+                </CheckboxField>
+                <CheckboxField label={t("setup.buckets.s3VersioningEnabled")}>
+                  <input
+                    type="checkbox"
+                    checked={policy.s3VersioningEnabled}
+                    onChange={(event) => setPolicy({ ...policy, s3VersioningEnabled: event.target.checked })}
+                  />
+                </CheckboxField>
+                <CheckboxField label={t("setup.buckets.s3ObjectTaggingEnabled")}>
+                  <input
+                    type="checkbox"
+                    checked={policy.s3ObjectTaggingEnabled}
+                    onChange={(event) => setPolicy({ ...policy, s3ObjectTaggingEnabled: event.target.checked })}
+                  />
+                </CheckboxField>
+                <CheckboxField label={t("setup.buckets.allowReplicaEdge")}>
+                  <input
+                    type="checkbox"
+                    checked={policy.allowReplicaEdge}
+                    onChange={(event) => setPolicy({ ...policy, allowReplicaEdge: event.target.checked })}
+                  />
+                </CheckboxField>
+                <CheckboxField label={t("setup.buckets.allowPeerSharing")}>
+                  <input
+                    type="checkbox"
+                    checked={policy.allowPeerSharing}
+                    onChange={(event) => setPolicy({ ...policy, allowPeerSharing: event.target.checked })}
+                  />
+                </CheckboxField>
+              </CheckboxGrid>
+            </>
           ) : null}
-        </section>
+        </FormSection>
 
         <ObjectManager
           bucketName={bucket.name}

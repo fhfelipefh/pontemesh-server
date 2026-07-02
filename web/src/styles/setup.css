@@ -286,10 +286,12 @@
 .input-wrap input,
 .input-wrap select {
   width: 100%;
-  min-height: 46px;
+  min-width: 0;
+  height: var(--pm-control-height);
+  min-height: var(--pm-control-height);
   border: 1px solid var(--pm-border);
-  border-radius: var(--pm-radius-md);
-  padding: 11px 13px;
+  border-radius: var(--pm-control-radius);
+  padding: 0 13px;
   background: var(--pm-surface-strong);
   color: var(--pm-deep-navy);
   font-size: 0.92rem;
@@ -352,10 +354,12 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  width: 100%;
-  min-height: 48px;
-  border-radius: var(--pm-radius-md);
-  padding: 11px 16px;
+  width: auto;
+  min-width: 96px;
+  height: var(--pm-control-height);
+  min-height: var(--pm-control-height);
+  border-radius: var(--pm-control-radius);
+  padding: 0 16px;
   color: var(--pm-surface);
   background: var(--pm-primary-blue);
   font-weight: 800;
@@ -363,6 +367,28 @@
   cursor: pointer;
   box-shadow: 0 16px 34px rgb(var(--pm-primary-blue-rgb) / 0.24);
   transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.button--sm {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 0.88rem;
+}
+
+.button--md {
+  height: var(--pm-control-height);
+  min-height: var(--pm-control-height);
+}
+
+.button--lg {
+  height: var(--pm-control-height-lg);
+  min-height: var(--pm-control-height-lg);
+  padding: 0 18px;
+}
+
+.button--full-width {
+  width: 100%;
 }
 
 .button--primary {

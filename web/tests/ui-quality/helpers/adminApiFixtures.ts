@@ -91,6 +91,24 @@ const objects = [
   }
 ];
 
+const bucketPolicy = {
+  accessPackageTtlSeconds: 900,
+  fragmentSizeBytes: 4_194_304,
+  sourceSelectionStrategy: "ORIGIN_REPLICA_EDGE",
+  fragmentPriorityStrategy: "INITIAL_FIRST",
+  failureThreshold: 3,
+  fallbackMode: "ORIGIN_RANGE",
+  allowReplicaEdge: false,
+  allowPeerSharing: false,
+  s3ListDefaultMaxKeys: 1000,
+  s3ListMaxKeysLimit: 10000,
+  s3ListAllowDelimiter: true,
+  s3VersioningEnabled: false,
+  s3ObjectTaggingEnabled: true,
+  s3ChecksumAlgorithm: "SHA256",
+  s3MultipartAbortDays: 7
+};
+
 type AdminFixtureOptions = {
   buckets?: typeof buckets;
   objectsByBucket?: Record<string, typeof objects>;
@@ -155,6 +173,10 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
         ? bucketObjects.filter((object) => object.key.toLowerCase().includes(query))
         : bucketObjects;
       return json(route, pageResponse(filteredObjects));
+    }
+
+    if (path.match(/^\/api\/admin\/buckets\/[^/]+\/policy$/)) {
+      return json(route, bucketPolicy);
     }
 
     if (path.match(/^\/api\/admin\/buckets\/[^/]+(\/objects\/.+)?$/)) {

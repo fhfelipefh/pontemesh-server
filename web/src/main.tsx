@@ -6,6 +6,7 @@ import { applyTheme, resolveInitialTheme } from "./theme";
 import "./styles/theme.css";
 import "./styles/global.css";
 import "./styles/setup.css";
+import "./styles/form-layout.css";
 import "./styles/admin.css";
 
 applyTheme(resolveInitialTheme());

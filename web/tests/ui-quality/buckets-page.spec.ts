@@ -55,6 +55,57 @@ test.describe("Buckets page layout quality", () => {
     await expectBodyDoesNotScroll(page);
   });
 
+  test("hybrid policy form should keep proportional controls and aligned checkboxes", async ({ page }) => {
+    await openBucketsPage(page);
+
+    await page.getByTestId("bucket-row").first().getByRole("button", { name: /open|abrir/i }).click();
+
+    const section = page.getByTestId("hybrid-policy-section");
+    await expect(section).toBeVisible();
+
+    const saveButton = page.getByTestId("hybrid-policy-save-button");
+    await expect(saveButton).toBeVisible();
+    await expectElementMaxSize(saveButton, {
+      label: "hybrid policy save button",
+      maxWidth: 220
+    });
+
+    const buttonBox = await saveButton.boundingBox();
+    const sectionBox = await section.boundingBox();
+    expect(buttonBox, "hybrid policy save button should be measurable").not.toBeNull();
+    expect(sectionBox, "hybrid policy section should be measurable").not.toBeNull();
+    if (buttonBox && sectionBox) {
+      expect(buttonBox.width, "hybrid policy save button should not occupy the full section width").toBeLessThan(sectionBox.width * 0.5);
+    }
+
+    const fieldControls = section.locator(".form-field input, .form-field select");
+    const fieldCount = await fieldControls.count();
+    expect(fieldCount, "hybrid policy should render form controls").toBeGreaterThanOrEqual(10);
+    for (let index = 0; index < fieldCount; index++) {
+      await expectElementMinSize(fieldControls.nth(index), {
+        label: `hybrid policy field control ${index}`,
+        minHeight: UI_LIMITS.inputMinHeight
+      });
+    }
+
+    const checkboxGrid = page.getByTestId("hybrid-policy-checkbox-grid");
+    await expect(checkboxGrid).toBeVisible();
+    const display = await checkboxGrid.evaluate((element) => getComputedStyle(element).display);
+    expect(display, "hybrid policy checkbox container should use grid layout").toBe("grid");
+
+    const checkboxFields = checkboxGrid.locator(".checkbox-field");
+    await expect(checkboxFields).toHaveCount(5);
+    const checkboxHeights = await checkboxFields.evaluateAll((fields) => fields.map((field) => field.getBoundingClientRect().height));
+    const firstHeight = checkboxHeights[0];
+    for (const [index, height] of checkboxHeights.entries()) {
+      expect(Math.abs(height - firstHeight), `checkbox field ${index} should align to the same height`).toBeLessThanOrEqual(1);
+    }
+
+    await expect(section.getByText(/TTL máximo do pacote|Max package TTL/i)).toBeVisible();
+    await expect(section.getByText(/Permitir delimiter S3|Allow S3 delimiter/i)).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
   test("object upload should reset the form without throwing runtime errors", async ({ page }) => {
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));

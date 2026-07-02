@@ -3,7 +3,9 @@ import { ButtonHTMLAttributes, ReactNode } from "react";
 type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
   children: ReactNode;
   className?: string;
+  fullWidth?: boolean;
   icon?: ReactNode;
+  size?: "sm" | "md" | "lg";
   type?: "button" | "submit";
   variant?: "primary" | "secondary" | "ghost" | "danger";
   disabled?: boolean;
@@ -13,7 +15,9 @@ type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type"> & {
 export function Button({
   children,
   className,
+  fullWidth = false,
   icon,
+  size = "md",
   type = "button",
   variant = "primary",
   disabled = false,
@@ -21,7 +25,7 @@ export function Button({
   onClick,
   ...buttonProps
 }: ButtonProps) {
-  const classes = ["button", `button--${variant}`, className].filter(Boolean).join(" ");
+  const classes = ["button", `button--${variant}`, `button--${size}`, fullWidth ? "button--full-width" : null, className].filter(Boolean).join(" ");
 
   return (
     <button
