@@ -132,13 +132,7 @@
         "buckets": "Buckets",
         "objects": "Objects",
         "resources": "Resources",
-        "health": "Health",
-        "mcp": "MCP"
-      },
-      "mcp": {
-        "enabled": "Active",
-        "disabled": "Disabled",
-        "activeDetail": "{{count}} recent calls"
+        "health": "Health"
       },
       "storage": {
         "title": "Storage usage",

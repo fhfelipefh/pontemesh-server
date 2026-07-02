@@ -1,5 +1,5 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Boxes, CheckCircle2, Cpu, Database, HardDrive, ListTree, Network, Server, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, Boxes, CheckCircle2, Cpu, Database, HardDrive, ListTree, Server, ShieldCheck, XCircle } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ApplicationLogEntry, DashboardSummary, getApplicationLogs, getDashboardSummary } from "../api/dashboardApi";
