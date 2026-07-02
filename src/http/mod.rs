@@ -41,6 +41,10 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/auth/me", get(auth::me))
         .route(
+            "/pontemesh/replica/access-packages/{package_id}/objects/{bucket_name}/{*object_key}",
+            get(replica::serve_access_package_object).head(replica::head_access_package_object),
+        )
+        .route(
             "/mcp",
             post(mcp::transport_http::post_mcp)
                 .get(mcp::transport_http::method_not_allowed)

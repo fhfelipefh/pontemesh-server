@@ -558,6 +558,7 @@ async fn create_access_package_inner(
         &record.expires_at,
         &object_endpoint,
         &policy,
+        Some(&record.id),
     )
     .await?;
     let revalidate_endpoint = Some(format!(
@@ -610,6 +611,7 @@ async fn get_sources_inner(
         &expires_at,
         &object_endpoint,
         &policy,
+        None,
     )
     .await?;
 
@@ -758,6 +760,7 @@ async fn revalidate_access_package_inner(
         &expires_at,
         &object_endpoint,
         &policy,
+        Some(package_id),
     )
     .await?;
     let revalidate_endpoint = Some(format!(
@@ -904,6 +907,7 @@ async fn authorized_sources_for_object(
     expires_at: &str,
     origin_endpoint: &str,
     policy: &BucketPolicy,
+    package_id: Option<&str>,
 ) -> anyhow::Result<Vec<AuthorizedSource>> {
     let origin = AuthorizedSource {
         id: "origin".to_owned(),
@@ -924,7 +928,7 @@ async fn authorized_sources_for_object(
         .await?;
     let replica_sources = replicas
         .into_iter()
-        .map(|replica| replica_source(replica, expires_at))
+        .map(|replica| replica_source(replica, expires_at, package_id, bucket_name, object_key))
         .collect::<Vec<_>>();
     let peer_sources = if policy.allow_peer_sharing {
         let peers = state
@@ -957,15 +961,49 @@ async fn authorized_sources_for_object(
     Ok(with_priorities(sources))
 }
 
-fn replica_source(replica: ReplicaAvailabilityRecord, expires_at: &str) -> AuthorizedSource {
+fn replica_source(
+    replica: ReplicaAvailabilityRecord,
+    expires_at: &str,
+    package_id: Option<&str>,
+    bucket_name: &str,
+    object_key: &str,
+) -> AuthorizedSource {
     AuthorizedSource {
         id: replica.replica_id,
         source_type: "REPLICA_EDGE".to_owned(),
-        endpoint: replica.endpoint,
+        endpoint: package_id
+            .map(|package_id| {
+                replica_direct_object_endpoint(
+                    &replica.endpoint,
+                    package_id,
+                    bucket_name,
+                    object_key,
+                )
+            })
+            .unwrap_or(replica.endpoint),
         priority: 0,
         expires_at: expires_at.to_owned(),
         available_fragments: replica.available_fragments,
     }
+}
+
+fn replica_direct_object_endpoint(
+    announced_endpoint: &str,
+    package_id: &str,
+    bucket_name: &str,
+    object_key: &str,
+) -> String {
+    let base = announced_endpoint
+        .split_once("/objects/")
+        .map(|(base, _)| base)
+        .unwrap_or(announced_endpoint)
+        .trim_end_matches('/');
+    format!(
+        "{base}/pontemesh/replica/access-packages/{}/objects/{}/{}",
+        url_component(package_id),
+        url_component(bucket_name),
+        object_path(object_key)
+    )
 }
 
 fn peer_source(peer: PeerAvailabilityRecord) -> AuthorizedSource {
@@ -1095,6 +1133,10 @@ fn build_manifest_with_policy(
 }
 
 fn request_base_url(headers: &HeaderMap) -> String {
+    if let Some(endpoint) = public_endpoint("PONTEMESH_PUBLIC_WEB_URL") {
+        return endpoint;
+    }
+
     let proto = headers
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok())
@@ -1108,6 +1150,10 @@ fn request_base_url(headers: &HeaderMap) -> String {
 }
 
 fn request_s3_base_url(headers: &HeaderMap) -> String {
+    if let Some(endpoint) = public_endpoint("PONTEMESH_PUBLIC_S3_URL") {
+        return endpoint;
+    }
+
     if let Ok(endpoint) = std::env::var("PONTEMESH_PUBLIC_S3_ENDPOINT") {
         let endpoint = endpoint.trim_end_matches('/');
         if !endpoint.is_empty() {
@@ -1119,6 +1165,17 @@ fn request_s3_base_url(headers: &HeaderMap) -> String {
         .replace(":8080", ":9000")
         .trim_end_matches('/')
         .to_owned()
+}
+
+fn public_endpoint(name: &str) -> Option<String> {
+    std::env::var(name).ok().and_then(|value| {
+        let endpoint = value.trim().trim_end_matches('/');
+        if endpoint.is_empty() {
+            None
+        } else {
+            Some(endpoint.to_owned())
+        }
+    })
 }
 
 fn object_path(value: &str) -> String {

@@ -24,6 +24,8 @@ O bloco de configuração do **Origin** deve concentrar os parâmetros relaciona
 Configurações esperadas:
 
 * endereço de escuta;
+* URL pública web usada em contratos entregues a clientes, quando diferente do endereço interno;
+* URL pública S3 usada em manifestos, fontes e fallback, quando diferente do endereço interno;
 * armazenamento primário;
 * PostgreSQL;
 * chave de assinatura de manifestos;
@@ -46,6 +48,8 @@ Configurações esperadas:
 O Origin deve ser configurado como autoridade central do sistema. Ele é responsável por autenticar, autorizar, emitir pacotes de acesso, gerar manifestos, controlar disponibilidade e aplicar políticas de revogação.
 
 O Origin atende às operações fundamentais de objeto e coordena a distribuição híbrida quando houver política aplicável.
+
+Em ambientes com Docker, proxy reverso ou múltiplas instâncias, `PONTEMESH_PUBLIC_WEB_URL` e `PONTEMESH_PUBLIC_S3_URL` podem ser definidos para que access packages, fontes autorizadas e fallback retornem endpoints alcançáveis pelo cliente externo, em vez de nomes internos da rede de containers.
 
 ## Replica/Edge
 

@@ -10,7 +10,7 @@ use crate::{
 use axum::{
     Json,
     body::Bytes,
-    extract::{Request, State},
+    extract::{OriginalUri, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -430,11 +430,15 @@ fn validate_replica_request_signature(
         return Err("replica nonce must be between 16 and 128 characters".to_owned());
     }
     validate_replica_timestamp(timestamp)?;
-    let path_and_query = request
-        .uri()
+    let uri = request
+        .extensions()
+        .get::<OriginalUri>()
+        .map(|original| &original.0)
+        .unwrap_or_else(|| request.uri());
+    let path_and_query = uri
         .path_and_query()
         .map(|value| value.as_str())
-        .unwrap_or(request.uri().path());
+        .unwrap_or(uri.path());
     let signing_payload = format!(
         "{}\n{}\n{}\n{}",
         request.method(),

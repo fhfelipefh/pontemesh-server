@@ -1,0 +1,93 @@
+name: ponte-mesh-e2e-origin-replica
+
+services:
+  origin-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.local
+    image: pontemesh-server:e2e-origin-replica
+    environment:
+      PONTEMESH_HOME: /var/pontemesh_home
+      PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@origin-postgres:5432/pontemesh
+      PONTEMESH_WEB_PORT: 8080
+      PONTEMESH_S3_PORT: 9000
+      PONTEMESH_PUBLIC_WEB_URL: http://127.0.0.1:18080
+      PONTEMESH_PUBLIC_S3_URL: http://127.0.0.1:19000
+      PONTEMESH_S3_BOOTSTRAP_ACCESS_KEY_ID: PMKORIGINE2EACCESSKEY
+      PONTEMESH_S3_BOOTSTRAP_SECRET_ACCESS_KEY: pm-origin-e2e-secret-material-123
+      RUST_LOG: pontemesh_server=info,tower_http=info
+    ports:
+      - "18080:8080"
+      - "19000:9000"
+    volumes:
+      - origin_pontemesh_home:/var/pontemesh_home
+    depends_on:
+      origin-postgres:
+        condition: service_healthy
+    networks:
+      - e2e
+
+  origin-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: pontemesh
+      POSTGRES_USER: pontemesh
+      POSTGRES_PASSWORD: pontemesh
+    volumes:
+      - origin_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pontemesh -d pontemesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - e2e
+
+  replica-server:
+    image: pontemesh-server:e2e-origin-replica
+    environment:
+      PONTEMESH_HOME: /var/pontemesh_home
+      PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@replica-postgres:5432/pontemesh
+      PONTEMESH_WEB_PORT: 8080
+      PONTEMESH_S3_PORT: 9000
+      PONTEMESH_PUBLIC_WEB_URL: http://127.0.0.1:18081
+      PONTEMESH_PUBLIC_S3_URL: http://127.0.0.1:19001
+      RUST_LOG: pontemesh_server=info,tower_http=info
+    ports:
+      - "18081:8080"
+      - "19001:9000"
+    volumes:
+      - replica_pontemesh_home:/var/pontemesh_home
+    depends_on:
+      replica-postgres:
+        condition: service_healthy
+      origin-server:
+        condition: service_started
+    networks:
+      - e2e
+
+  replica-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: pontemesh
+      POSTGRES_USER: pontemesh
+      POSTGRES_PASSWORD: pontemesh
+    volumes:
+      - replica_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pontemesh -d pontemesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - e2e
+
+networks:
+  e2e:
+    driver: bridge
+
+volumes:
+  origin_pontemesh_home:
+  origin_postgres:
+  replica_pontemesh_home:
+  replica_postgres:

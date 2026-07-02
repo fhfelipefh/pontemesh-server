@@ -12,6 +12,7 @@
     "test": "vitest run src scripts",
     "test:ui": "playwright test",
     "test:ui:quality": "playwright test tests/ui-quality",
+    "test:e2e:origin-replica": "playwright test --config playwright.e2e.config.ts tests/e2e/origin-replica-flow.spec.ts",
     "validate": "npm run i18n:check && npm run typecheck && npm run lint && npm run test && npm run test:ui:quality",
     "build": "npm run i18n:prune && npm run validate && vite build",
     "build:ci": "npm run i18n:check && npm run validate && vite build",
