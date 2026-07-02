@@ -1,6 +1,6 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Ban, Copy, Download, KeyRound, Network, Plus, ShieldCheck, Upload, Wrench } from "lucide-react";
+import { Activity, Ban, Check, Copy, Download, KeyRound, Network, Plus, ShieldCheck, Upload, Wrench } from "lucide-react";
 import {
   ApplicationCredentialSummary,
   CreatedApplicationCredential,
@@ -31,6 +31,7 @@ import {
 } from "../api/mcpApi";
 import { ConfigurationImportResult, exportConfiguration, importConfiguration } from "../api/configurationApi";
 import { Button } from "../components/Button";
+import { ConfirmDialog } from "../components/AdminListControls";
 import { CredentialTable } from "../components/settings/CredentialTable";
 import { EmptyState } from "../components/settings/EmptyState";
 import { IconButton } from "../components/settings/IconButton";
@@ -40,6 +41,12 @@ import { SettingsSection } from "../components/settings/SettingsSection";
 import { StatusBadge } from "../components/settings/StatusBadge";
 
 const S3_KEYS_PAGE_SIZE = 10;
+
+type DestructiveConfirmation =
+  | { kind: "s3Key"; id: string; name: string }
+  | { kind: "application"; id: string; name: string }
+  | { kind: "mcpToken"; id: string; name: string }
+  | null;
 
 export function SettingsPage() {
   const { t } = useTranslation();
@@ -74,6 +81,7 @@ export function SettingsPage() {
   const [configurationImporting, setConfigurationImporting] = useState(false);
   const [configurationResult, setConfigurationResult] = useState<ConfigurationImportResult | null>(null);
   const [configurationError, setConfigurationError] = useState("");
+  const [destructiveConfirmation, setDestructiveConfirmation] = useState<DestructiveConfirmation>(null);
 
   const refreshKeys = useCallback(async (page: number) => {
     setLoading(true);
@@ -155,6 +163,7 @@ export function SettingsPage() {
     setError("");
     try {
       await revokeS3AccessKey(id);
+      setDestructiveConfirmation(null);
       await refreshKeys(currentPage);
     } catch (revokeError) {
       setError(revokeError instanceof Error ? revokeError.message : t("setup.settings.s3.revokeFailed"));
@@ -186,6 +195,7 @@ export function SettingsPage() {
     setApplicationError("");
     try {
       await revokeApplicationCredential(id);
+      setDestructiveConfirmation(null);
       await refreshApplications();
     } catch (revokeError) {
       setApplicationError(revokeError instanceof Error ? revokeError.message : t("setup.settings.applications.revokeFailed"));
@@ -241,6 +251,7 @@ export function SettingsPage() {
     setMcpError("");
     try {
       await revokeMcpToken(id);
+      setDestructiveConfirmation(null);
       setMcpTokens(await listMcpTokens());
     } catch (revokeError) {
       setMcpError(revokeError instanceof Error ? revokeError.message : t("setup.settings.mcp.revokeTokenFailed"));
@@ -314,7 +325,7 @@ export function SettingsPage() {
           onUpdateSettings={handleUpdateMcpSettings}
           onCreateToken={handleCreateMcpToken}
           onDismissCreatedToken={() => setCreatedMcpToken(null)}
-          onRevokeToken={handleRevokeMcpToken}
+          onRevokeToken={(id, name) => setDestructiveConfirmation({ kind: "mcpToken", id, name })}
         />
         <ApplicationCredentialsCard
           applications={applications}
@@ -327,7 +338,7 @@ export function SettingsPage() {
           onApplicationNameChange={setApplicationName}
           onCreateApplication={handleCreateApplication}
           onDismissCreatedApplication={() => setCreatedApplication(null)}
-          onRevokeApplication={handleRevokeApplication}
+          onRevokeApplication={(id, name) => setDestructiveConfirmation({ kind: "application", id, name })}
         />
         <S3CredentialsCard
           keys={keys}
@@ -345,9 +356,39 @@ export function SettingsPage() {
           onCreateKey={handleCreateKey}
           onDismissCreatedKey={() => setCreatedKey(null)}
           onPageChange={(page) => void refreshKeys(page)}
-          onRevokeKey={handleRevokeKey}
+          onRevokeKey={(id, name) => setDestructiveConfirmation({ kind: "s3Key", id, name })}
         />
       </div>
+      {destructiveConfirmation ? (
+        <ConfirmDialog
+          title={
+            destructiveConfirmation.kind === "s3Key"
+              ? t("setup.settings.s3.confirmRevokeTitle")
+              : destructiveConfirmation.kind === "application"
+                ? t("setup.settings.applications.confirmRevokeTitle")
+                : t("setup.settings.mcp.confirmRevokeTokenTitle")
+          }
+          description={
+            destructiveConfirmation.kind === "s3Key"
+              ? t("setup.settings.s3.confirmRevokeDescription", { name: destructiveConfirmation.name })
+              : destructiveConfirmation.kind === "application"
+                ? t("setup.settings.applications.confirmRevokeDescription", { name: destructiveConfirmation.name })
+                : t("setup.settings.mcp.confirmRevokeTokenDescription", { name: destructiveConfirmation.name })
+          }
+          onCancel={() => setDestructiveConfirmation(null)}
+          onConfirm={() => {
+            if (destructiveConfirmation.kind === "s3Key") {
+              void handleRevokeKey(destructiveConfirmation.id);
+              return;
+            }
+            if (destructiveConfirmation.kind === "application") {
+              void handleRevokeApplication(destructiveConfirmation.id);
+              return;
+            }
+            void handleRevokeMcpToken(destructiveConfirmation.id);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -425,7 +466,7 @@ type McpSettingsCardProps = {
   onUpdateSettings: (settings: McpSettings) => void;
   onCreateToken: () => void;
   onDismissCreatedToken: () => void;
-  onRevokeToken: (id: string) => void;
+  onRevokeToken: (id: string, name: string) => void;
 };
 
 function McpSettingsCard({
@@ -525,6 +566,7 @@ function McpSettingsCard({
                 </div>
               </dl>
               <button className="settings-secondary-button" type="button" onClick={onDismissCreatedToken}>
+                <Check size={16} aria-hidden="true" />
                 {t("setup.common.ok")}
               </button>
             </section>
@@ -566,7 +608,7 @@ function McpSettingsCard({
                           label={t("setup.settings.mcp.revokeToken")}
                           icon={<Ban size={16} aria-hidden="true" />}
                           disabled={revokingToken === token.id}
-                          onClick={() => onRevokeToken(token.id)}
+                          onClick={() => onRevokeToken(token.id, token.name)}
                         />
                       ) : null}
                     </td>
@@ -628,7 +670,7 @@ type ApplicationCredentialsCardProps = {
   onApplicationNameChange: (value: string) => void;
   onCreateApplication: () => void;
   onDismissCreatedApplication: () => void;
-  onRevokeApplication: (id: string) => void;
+  onRevokeApplication: (id: string, name: string) => void;
 };
 
 function ApplicationCredentialsCard({
@@ -686,6 +728,7 @@ function ApplicationCredentialsCard({
               </div>
             </dl>
           <button className="settings-secondary-button" type="button" onClick={onDismissCreatedApplication}>
+            <Check size={16} aria-hidden="true" />
             {t("setup.common.ok")}
           </button>
         </section>
@@ -729,7 +772,7 @@ function ApplicationCredentialsCard({
                         label={t("setup.settings.applications.revoke")}
                         icon={<Ban size={16} aria-hidden="true" />}
                         disabled={revoking === application.id}
-                        onClick={() => onRevokeApplication(application.id)}
+                        onClick={() => onRevokeApplication(application.id, application.name)}
                       />
                     ) : null}
                   </td>

@@ -287,6 +287,7 @@ export function ObjectManager({
 
             <div className="settings-modal__actions">
               <button className="settings-secondary-button" type="button" onClick={closeUploadModal}>
+                <X size={16} aria-hidden="true" />
                 {t("setup.common.cancel")}
               </button>
               <Button className="settings-modal__primary" data-testid="upload-object-button" type="submit" loading={uploading} disabled={!file} icon={<UploadCloud size={17} aria-hidden="true" />}>

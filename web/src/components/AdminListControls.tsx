@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Trash2, X } from "lucide-react";
 import { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "./Button";
@@ -35,9 +35,10 @@ export function ConfirmDialog({
         </div>
         <div className="settings-modal__actions">
           <button className="settings-secondary-button" type="button" onClick={onCancel}>
+            <X size={16} aria-hidden="true" />
             {t("setup.common.cancel")}
           </button>
-          <Button className="settings-modal__primary button--danger" type="button" onClick={onConfirm}>
+          <Button className="settings-modal__primary button--danger" type="button" onClick={onConfirm} icon={<Trash2 size={17} aria-hidden="true" />}>
             {t("setup.common.confirm")}
           </Button>
         </div>

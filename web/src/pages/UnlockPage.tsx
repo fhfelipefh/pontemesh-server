@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { UnlockKeyhole } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { unlockSetup } from "../api/setupApi";
@@ -44,7 +45,7 @@ export function UnlockPage() {
           required
           autoFocus
         />
-        <Button type="submit" disabled={!token.trim()} loading={submitting}>
+        <Button type="submit" disabled={!token.trim()} loading={submitting} icon={<UnlockKeyhole size={18} aria-hidden="true" />}>
           {submitting ? t("setup.unlock.checking") : t("setup.unlock.continue")}
         </Button>
         <p className="language-hint">{t("setup.unlock.languageHint")}</p>

@@ -9,7 +9,10 @@ import {
   revokeReplica
 } from "../api/replicasApi";
 import { Button } from "../components/Button";
+import { ConfirmDialog } from "../components/AdminListControls";
 import { ErrorMessage } from "../components/ErrorMessage";
+
+type RevokeConfirmation = { id: string; name: string } | null;
 
 export function ReplicasPage() {
   const { t, i18n } = useTranslation();
@@ -20,6 +23,7 @@ export function ReplicasPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [revokeConfirmation, setRevokeConfirmation] = useState<RevokeConfirmation>(null);
   const [error, setError] = useState("");
 
   const refreshReplicas = useCallback(async () => {
@@ -63,6 +67,7 @@ export function ReplicasPage() {
     setError("");
     try {
       await revokeReplica(replicaId);
+      setRevokeConfirmation(null);
       await refreshReplicas();
     } catch (revokeError) {
       setError(revokeError instanceof Error ? revokeError.message : t("setup.replicas.revokeFailed"));
@@ -149,7 +154,7 @@ export function ReplicasPage() {
                     <td>{formatDate(replica.createdAt, i18n.language)}</td>
                     <td className="settings-table__actions">
                       {!replica.revoked ? (
-                        <button className="settings-revoke-button" type="button" title={t("setup.replicas.revoke")} aria-label={t("setup.replicas.revoke")} disabled={revoking === replica.id} onClick={() => handleRevoke(replica.id)}>
+                        <button className="settings-revoke-button" type="button" title={t("setup.replicas.revoke")} aria-label={t("setup.replicas.revoke")} disabled={revoking === replica.id} onClick={() => setRevokeConfirmation({ id: replica.id, name: replica.name })}>
                           <Ban size={16} aria-hidden="true" />
                         </button>
                       ) : null}
@@ -161,6 +166,14 @@ export function ReplicasPage() {
           </div>
         )}
       </section>
+      {revokeConfirmation ? (
+        <ConfirmDialog
+          title={t("setup.replicas.confirmRevokeTitle")}
+          description={t("setup.replicas.confirmRevokeDescription", { name: revokeConfirmation.name })}
+          onCancel={() => setRevokeConfirmation(null)}
+          onConfirm={() => void handleRevoke(revokeConfirmation.id)}
+        />
+      ) : null}
     </div>
   );
 }

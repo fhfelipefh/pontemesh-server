@@ -256,7 +256,7 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
 
     if (path === "/api/admin/mcp/settings") {
       return json(route, {
-        enabled: false,
+        enabled: true,
         endpointPath: "/mcp",
         bindHost: null,
         requireAuth: true,

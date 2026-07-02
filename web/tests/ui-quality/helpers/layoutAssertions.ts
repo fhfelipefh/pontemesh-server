@@ -104,3 +104,8 @@ export async function expectButtonsHaveUsableSize(page: Page) {
     expect(box.width, `button ${i} width should not become a giant bar accidentally`).toBeLessThanOrEqual(UI_LIMITS.buttonMaxWidth);
   }
 }
+
+export async function expectButtonHasIcon(locator: Locator, label: string) {
+  await expect(locator, `${label} should be visible`).toBeVisible();
+  await expect(locator.locator("svg"), `${label} should include a standard action icon`).toHaveCount(1);
+}

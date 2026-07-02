@@ -1,4 +1,4 @@
-import { Ban, ChevronLeft, ChevronRight, KeyRound, Plus, X } from "lucide-react";
+import { Ban, Check, ChevronLeft, ChevronRight, KeyRound, Plus, X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CreatedS3AccessKey, S3AccessKeySummary } from "../../api/s3KeysApi";
@@ -28,7 +28,7 @@ type S3CredentialsCardProps = {
   onCreateKey: () => void;
   onDismissCreatedKey: () => void;
   onPageChange: (page: number) => void;
-  onRevokeKey: (id: string) => void;
+  onRevokeKey: (id: string, name: string) => void;
 };
 
 export function S3CredentialsCard({
@@ -183,6 +183,7 @@ function CreateS3KeyModal({
         </label>
         <div className="settings-modal__actions">
           <button className="settings-secondary-button" type="button" onClick={onClose}>
+            <X size={16} aria-hidden="true" />
             {t("setup.common.cancel")}
           </button>
           <Button
@@ -247,7 +248,7 @@ function S3SecretModal({ createdKey, onClose }: S3SecretModalProps) {
           </div>
         </dl>
         <div className="settings-modal__actions">
-          <Button className="settings-modal__primary" type="button" onClick={onClose}>
+          <Button className="settings-modal__primary" type="button" onClick={onClose} icon={<Check size={17} aria-hidden="true" />}>
             {t("setup.common.ok")}
           </Button>
         </div>
@@ -265,7 +266,7 @@ type S3CredentialsTableProps = {
   totalPages: number;
   revoking: string | null;
   onPageChange: (page: number) => void;
-  onRevokeKey: (id: string) => void;
+  onRevokeKey: (id: string, name: string) => void;
 };
 
 function S3CredentialsTable({
@@ -321,7 +322,7 @@ function S3CredentialsTable({
                       label={t("setup.settings.s3.revoke")}
                       icon={<Ban size={16} aria-hidden="true" />}
                       disabled={revoking === key.id}
-                      onClick={() => onRevokeKey(key.id)}
+                      onClick={() => onRevokeKey(key.id, key.name ?? key.accessKeyId)}
                     />
                   )}
                 </td>

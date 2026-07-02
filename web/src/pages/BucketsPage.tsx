@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import {
   FolderOpen,
   Plus,
+  Save,
   Search,
   Trash2,
   X
@@ -168,7 +169,7 @@ export function BucketsPage() {
                 aria-label={t("setup.buckets.search")}
               />
             </label>
-            <Button type="submit">{t("setup.common.search")}</Button>
+            <Button type="submit" icon={<Search size={17} aria-hidden="true" />}>{t("setup.common.search")}</Button>
           </form>
           <PageSizeSelect
             label={t("setup.common.itemsPerPage")}
@@ -290,9 +291,10 @@ export function BucketsPage() {
             </label>
             <div className="settings-modal__actions">
               <button className="settings-secondary-button" type="button" onClick={() => setCreateModalOpen(false)}>
+                <X size={16} aria-hidden="true" />
                 {t("setup.common.cancel")}
               </button>
-              <Button className="settings-modal__primary" type="submit" loading={submittingBucket} disabled={!bucketName.trim()}>
+              <Button className="settings-modal__primary" type="submit" loading={submittingBucket} disabled={!bucketName.trim()} icon={<Plus size={17} aria-hidden="true" />}>
                 {t("setup.buckets.create")}
               </Button>
             </div>
@@ -440,6 +442,7 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
                 data-testid="hybrid-policy-save-button"
                 type="button"
                 loading={policySaving}
+                icon={<Save size={17} aria-hidden="true" />}
                 onClick={() => void savePolicy(policy)}
               >
                 {t("setup.common.save")}
