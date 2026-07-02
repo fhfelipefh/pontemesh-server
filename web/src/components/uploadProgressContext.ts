@@ -10,6 +10,8 @@ export type UploadTask = {
   percent: number | null;
   status: UploadStatus;
   message?: string;
+  createdAt?: string;
+  finishedAt?: string;
 };
 
 export type UploadProgressContextValue = {

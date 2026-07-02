@@ -587,10 +587,6 @@ fn hex_hmac(key: &[u8], data: &[u8]) -> String {
         .collect()
 }
 
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
 fn replica_root(storage_path: &Path) -> PathBuf {
     storage_path.join("replica")
 }
@@ -827,14 +823,6 @@ mod tests {
         .expect("safe path");
         assert!(path.starts_with(replica_root(&storage)));
         assert!(path.ends_with(format!("7-{}", "a".repeat(64))));
-    }
-
-    #[test]
-    fn sha256_hex_validates_content() {
-        assert_eq!(
-            sha256_hex(b"hello"),
-            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-        );
     }
 
     fn test_fragment() -> SyncFragment {

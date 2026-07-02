@@ -34,6 +34,7 @@ describe("s3KeysApi", () => {
     expect(page.total).toBe(21);
     expect(page.totalPages).toBe(3);
     expect(page.items).toHaveLength(1);
+    expect(page.items[0]).not.toHaveProperty("secretAccessKey");
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/s3/access-keys?page=3&pageSize=10", {
       headers: {
         accept: "application/json"

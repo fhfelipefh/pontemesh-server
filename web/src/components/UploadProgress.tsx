@@ -1,25 +1,48 @@
-import { ReactNode, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, UploadCloud, XCircle, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatBytes } from "../utils/adminFormat";
 import { UploadProgressContext, UploadProgressContextValue, UploadTask } from "./uploadProgressContext";
 
+const RECENT_UPLOADS_STORAGE_KEY = "pontemesh.recentUploads";
+const MAX_RECENT_UPLOADS = 10;
+
 export function UploadProgressProvider({ children }: { children: ReactNode }) {
-  const [uploads, setUploads] = useState<UploadTask[]>([]);
+  const [uploads, setUploads] = useState<UploadTask[]>(() => loadRecentUploads());
+
+  useEffect(() => {
+    // Recent uploads are browser-local UI history, not backend operational history.
+    // Keep only display-safe fields; do not persist backend error messages or paths.
+    const recentUploads = uploads
+      .filter((upload) => upload.status !== "uploading")
+      .map(({ id, fileName, loadedBytes, totalBytes, percent, status, createdAt, finishedAt }) => ({
+        id,
+        fileName,
+        loadedBytes,
+        totalBytes,
+        percent,
+        status,
+        createdAt,
+        finishedAt
+      }))
+      .slice(0, MAX_RECENT_UPLOADS);
+    localStorage.setItem(RECENT_UPLOADS_STORAGE_KEY, JSON.stringify(recentUploads));
+  }, [uploads]);
 
   const value = useMemo<UploadProgressContextValue>(() => ({
     addUpload(fileName) {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       setUploads((current) => [
-        ...current,
         {
           id,
           fileName,
           loadedBytes: 0,
           totalBytes: null,
           percent: null,
-          status: "uploading"
-        }
+          status: "uploading",
+          createdAt: new Date().toISOString()
+        },
+        ...current
       ]);
       return id;
     },
@@ -33,9 +56,15 @@ export function UploadProgressProvider({ children }: { children: ReactNode }) {
     finishUpload(id, status, message) {
       setUploads((current) => current.map((upload) => (
         upload.id === id
-          ? { ...upload, status, percent: status === "complete" ? 100 : upload.percent, message }
+          ? {
+              ...upload,
+              status,
+              percent: status === "complete" ? 100 : upload.percent,
+              message,
+              finishedAt: new Date().toISOString()
+            }
           : upload
-      )));
+      )).slice(0, MAX_RECENT_UPLOADS));
     }
   }), []);
 
@@ -49,6 +78,24 @@ export function UploadProgressProvider({ children }: { children: ReactNode }) {
       <UploadProgressPanel uploads={uploads} onDismiss={dismissUpload} />
     </UploadProgressContext.Provider>
   );
+}
+
+function loadRecentUploads(): UploadTask[] {
+  try {
+    const raw = localStorage.getItem(RECENT_UPLOADS_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw) as UploadTask[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((upload) => upload && upload.status !== "uploading" && typeof upload.id === "string" && typeof upload.fileName === "string")
+      .slice(0, MAX_RECENT_UPLOADS);
+  } catch {
+    return [];
+  }
 }
 
 function UploadProgressPanel({ uploads, onDismiss }: { uploads: UploadTask[]; onDismiss: (id: string) => void }) {

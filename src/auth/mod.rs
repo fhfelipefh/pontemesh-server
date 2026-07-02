@@ -22,6 +22,8 @@ use std::net::IpAddr;
 
 const AUTH_SESSION_COOKIE: &str = "pm_admin_session";
 const REPLICA_SIGNATURE_WINDOW_SECONDS: i64 = 300;
+const LOGIN_RATE_LIMIT_WINDOW_SECONDS: i64 = 300;
+const LOGIN_RATE_LIMIT_MAX_FAILURES: i64 = 10;
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone)]
@@ -70,6 +72,32 @@ pub async fn login(State(state): State<AppState>, headers: HeaderMap, body: Byte
         Err(error) => return bad_request(anyhow::anyhow!("invalid JSON payload: {error}")),
     };
     let username = payload.username.trim();
+
+    match state
+        .catalog
+        .count_recent_login_failures(username, LOGIN_RATE_LIMIT_WINDOW_SECONDS)
+        .await
+    {
+        Ok(count) if count >= LOGIN_RATE_LIMIT_MAX_FAILURES => {
+            record_auth_audit(
+                &state,
+                "login_rate_limited",
+                Some(username),
+                "rejected",
+                "too many recent login failures",
+            )
+            .await;
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ErrorResponse {
+                    error: "too many login attempts; try again later".to_owned(),
+                }),
+            )
+                .into_response();
+        }
+        Ok(_) => {}
+        Err(error) => return internal_error(error),
+    }
 
     let user = match state.catalog.find_active_user_by_username(username).await {
         Ok(Some(user)) => user,

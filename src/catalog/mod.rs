@@ -3844,6 +3844,29 @@ impl Catalog {
         Ok(rows.into_iter().map(audit_event_from_row).collect())
     }
 
+    pub async fn count_recent_login_failures(
+        &self,
+        principal: &str,
+        window_seconds: i64,
+    ) -> anyhow::Result<i64> {
+        let row = query(
+            r#"
+            SELECT COUNT(*)::bigint AS failed_attempts
+            FROM audit_events
+            WHERE event_type = 'login_failed'
+              AND metadata->>'principal' = $1
+              AND created_at > now() - make_interval(secs => $2::double precision)
+            "#,
+        )
+        .bind(principal)
+        .bind(window_seconds.max(1) as f64)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to count recent login failures")?;
+
+        Ok(row.get("failed_attempts"))
+    }
+
     pub async fn record_origin_transfer(
         &self,
         application_id: Option<&str>,

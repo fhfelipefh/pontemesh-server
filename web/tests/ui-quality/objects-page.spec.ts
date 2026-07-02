@@ -48,6 +48,10 @@ test.describe("Objects page", () => {
     await page.getByTestId("upload-object-button").click();
     await expect(page.getByTestId("upload-object-dialog")).toBeHidden();
     await expect(page.getByRole("complementary", { name: /uploads/i })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => {
+      const raw = localStorage.getItem("pontemesh.recentUploads");
+      return raw ? JSON.parse(raw).length : 0;
+    })).toBeGreaterThan(0);
     await page.getByRole("button", { name: /close upload|fechar upload/i }).click();
     await expect(page.getByRole("complementary", { name: /uploads/i })).toBeHidden();
 

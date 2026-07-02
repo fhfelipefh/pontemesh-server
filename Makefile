@@ -1,6 +1,7 @@
-.PHONY: check i18n-check api-contract
+.PHONY: check i18n-check api-contract architecture-check
 
 check:
+	$(MAKE) architecture-check
 	$(MAKE) i18n-check
 	cd web && npm run typecheck
 	cd web && npm run lint
@@ -13,3 +14,6 @@ i18n-check:
 
 api-contract:
 	cargo test api_contract
+
+architecture-check:
+	./scripts/check-architecture.sh

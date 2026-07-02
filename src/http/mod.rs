@@ -2053,6 +2053,134 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_sensitive_credentials_return_secret_only_on_create() {
+        let Some(ctx) = TestContext::new("sensitive-admin-credentials").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let admin_cookie = login_cookie(app.clone()).await;
+
+        let create_application = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/application-credentials")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"name":"sdk-mobile","scopes":["origin:objects:read"]}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_application.status(), StatusCode::CREATED);
+        let application_body = json_body(create_application).await;
+        let application_id = application_body["credential"]["id"]
+            .as_str()
+            .expect("application id");
+        let application_token = application_body["token"]
+            .as_str()
+            .expect("application token");
+        assert!(application_token.starts_with("pm_app_"));
+
+        let list_applications = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/application-credentials")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list_applications.status(), StatusCode::OK);
+        let applications_body = json_body(list_applications).await;
+        let listed_application = applications_body
+            .as_array()
+            .expect("applications array")
+            .iter()
+            .find(|credential| credential["id"] == application_id)
+            .expect("application listed");
+        assert!(listed_application.get("token").is_none());
+        assert!(listed_application.get("tokenHash").is_none());
+
+        let application_hash: String = sqlx_core::query_scalar::query_scalar(
+            "SELECT token_hash FROM application_credentials WHERE id = $1::uuid",
+        )
+        .bind(application_id)
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("application token hash");
+        assert_ne!(application_hash, application_token);
+
+        let create_replica = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/replicas")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"name":"edge-secret-check","allowedBuckets":["media"]}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_replica.status(), StatusCode::CREATED);
+        let replica_body = json_body(create_replica).await;
+        let replica_id = replica_body["replica"]["id"].as_str().expect("replica id");
+        let replica_token = replica_body["token"].as_str().expect("replica token");
+        assert!(replica_token.starts_with("pm_rep_"));
+
+        let list_replicas = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/replicas")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list_replicas.status(), StatusCode::OK);
+        let replicas_body = json_body(list_replicas).await;
+        let listed_replica = replicas_body
+            .as_array()
+            .expect("replicas array")
+            .iter()
+            .find(|replica| replica["id"] == replica_id)
+            .expect("replica listed");
+        assert!(listed_replica.get("token").is_none());
+        assert!(listed_replica.get("tokenHash").is_none());
+
+        let replica_hash: String = sqlx_core::query_scalar::query_scalar(
+            "SELECT token_hash FROM replica_credentials WHERE id = $1::uuid",
+        )
+        .bind(replica_id)
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("replica token hash");
+        assert_ne!(replica_hash, replica_token);
+
+        let leaked_audit_events: i64 = sqlx_core::query_scalar::query_scalar(
+            "SELECT COUNT(*)::bigint FROM audit_events WHERE metadata::text LIKE $1 OR metadata::text LIKE $2",
+        )
+        .bind(format!("%{application_token}%"))
+        .bind(format!("%{replica_token}%"))
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("audit leak count");
+        assert_eq!(leaked_audit_events, 0);
+    }
+
+    #[tokio::test]
     async fn admin_object_routes_require_session_and_handle_multipart_lifecycle() {
         let Some(ctx) = TestContext::new("admin-object-routes").await else {
             return;

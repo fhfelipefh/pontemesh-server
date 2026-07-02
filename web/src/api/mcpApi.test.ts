@@ -127,6 +127,7 @@ describe("mcpApi", () => {
 
     expect(created.secret).toBe("pmcp_abcd1234secret");
     expect(tokens[0].tokenPrefix).toBe("pmcp_abcd1234");
+    expect(tokens[0]).not.toHaveProperty("secret");
     expect(activity[0].method).toBe("tools/list");
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/mcp/tokens", {
       method: "POST",
