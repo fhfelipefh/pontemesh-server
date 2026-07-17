@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod first_run;
 pub mod routes;
 pub mod token;

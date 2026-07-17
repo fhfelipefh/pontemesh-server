@@ -3,6 +3,7 @@ use crate::{
     catalog::{self, AuditEventFilter, BucketPolicyUpdate, NewObject},
     config,
     http::AppState,
+    setup::agent,
     system::storage,
 };
 use anyhow::{Context, bail};
@@ -127,6 +128,12 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             permission: ToolPermission::Read,
         },
         ToolDefinition {
+            name: "pontemesh_get_ai_connection_guide",
+            description: "Retorna endpoints e instrucoes seguras para clientes de IA, sem expor segredos existentes.",
+            schema: json!({"type":"object","properties":{}}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
             name: "pontemesh_create_bucket",
             description: "Cria um bucket usando o servico real.",
             schema: json!({"type":"object","properties":{"bucket":{"type":"string"}},"required":["bucket"]}),
@@ -166,6 +173,24 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             name: "pontemesh_import_configuration",
             description: "Importa backup de configuracao operacional sem segredos.",
             schema: json!({"type":"object","properties":{"configuration":{"type":"object"}},"required":["configuration"]}),
+            permission: ToolPermission::Admin,
+        },
+        ToolDefinition {
+            name: "pontemesh_list_credentials",
+            description: "Lista credenciais administrativas por metadados seguros, sem segredos completos.",
+            schema: json!({"type":"object","properties":{}}),
+            permission: ToolPermission::Admin,
+        },
+        ToolDefinition {
+            name: "pontemesh_create_application_credential",
+            description: "Cria credencial de aplicacao para SDKs. O token e exibido somente nesta resposta.",
+            schema: json!({"type":"object","properties":{"name":{"type":"string"},"scopes":{"type":"array","items":{"type":"string"}}},"required":["name"]}),
+            permission: ToolPermission::Admin,
+        },
+        ToolDefinition {
+            name: "pontemesh_create_s3_access_key",
+            description: "Cria access key S3. O segredo e exibido somente nesta resposta.",
+            schema: json!({"type":"object","properties":{"name":{"type":"string"}}}),
             permission: ToolPermission::Admin,
         },
     ]
@@ -291,6 +316,30 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
                     .await?
             )
         }
+        "pontemesh_get_ai_connection_guide" => {
+            let web_addr = config::load_http_bind_addr(&state.paths)?;
+            let s3_addr = config::default_s3_bind_addr();
+            let mcp_settings = state.catalog.get_mcp_settings().await?;
+            json!({
+                "webUrl": format!("http://127.0.0.1:{}", web_addr.port()),
+                "s3EndpointUrl": format!("http://127.0.0.1:{}", s3_addr.port()),
+                "mcp": {
+                    "enabled": mcp_settings.enabled,
+                    "url": format!("http://127.0.0.1:{}{}", web_addr.port(), mcp_settings.endpoint_path),
+                    "method": "POST",
+                    "authorization": "Bearer <MCP token>",
+                    "localhostOnly": mcp_settings.allow_localhost_only,
+                    "readToolsEnabled": mcp_settings.read_tools_enabled,
+                    "writeToolsEnabled": mcp_settings.write_tools_enabled,
+                    "adminToolsEnabled": mcp_settings.admin_tools_enabled
+                },
+                "security": {
+                    "existingSecretsAreNotReturned": true,
+                    "newSecretsAreReturnedOnce": true,
+                    "dataPlane": "Object transfer remains on S3-compatible and Ponte Mesh endpoints; MCP is administrative."
+                }
+            })
+        }
         "pontemesh_export_configuration" => {
             let mcp_settings = state.catalog.get_mcp_settings().await?;
             json!(ConfigurationBackup {
@@ -384,6 +433,37 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
                 applied += 1;
             }
             json!({"appliedBucketPolicies": applied, "skippedBucketPolicies": skipped})
+        }
+        "pontemesh_list_credentials" => {
+            json!({
+                "mcpTokens": state.catalog.list_mcp_access_tokens().await?,
+                "applicationCredentials": state.catalog.list_application_credentials().await?,
+                "s3AccessKeys": state.catalog.list_s3_access_keys(1, 100).await?,
+                "secretsIncluded": false
+            })
+        }
+        "pontemesh_create_application_credential" => {
+            let name = required_str(&arguments, "name")?;
+            let scopes = optional_string_array(&arguments, "scopes")?
+                .unwrap_or_else(default_application_scopes);
+            let created = state
+                .catalog
+                .create_application_credential(name, scopes)
+                .await?;
+            state
+                .catalog
+                .record_audit_event(
+                    "application_credential_created",
+                    Some("mcp"),
+                    "success",
+                    &format!("application_id={}", created.credential.id),
+                )
+                .await?;
+            json!(created)
+        }
+        "pontemesh_create_s3_access_key" => {
+            let name = arguments.get("name").and_then(Value::as_str);
+            json!(agent::create_s3_key_for_mcp(state, name).await?)
         }
         _ => bail!("unknown MCP tool: {name}"),
     };
@@ -529,4 +609,38 @@ fn required_str<'a>(arguments: &'a Value, name: &str) -> anyhow::Result<&'a str>
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow::anyhow!("{name} is required"))
+}
+
+fn optional_string_array(arguments: &Value, name: &str) -> anyhow::Result<Option<Vec<String>>> {
+    let Some(value) = arguments.get(name) else {
+        return Ok(None);
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("{name} must be an array"))?
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| anyhow::anyhow!("{name} must contain non-empty strings"))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    if values.is_empty() {
+        bail!("{name} must include at least one value");
+    }
+    Ok(Some(values))
+}
+
+fn default_application_scopes() -> Vec<String> {
+    vec![
+        "origin:objects:read".to_owned(),
+        "origin:objects:write".to_owned(),
+        "pontemesh:access-package:create".to_owned(),
+        "pontemesh:manifest:read".to_owned(),
+        "pontemesh:sources:read".to_owned(),
+        "pontemesh:availability:read".to_owned(),
+        "pontemesh:policies:read".to_owned(),
+    ]
 }

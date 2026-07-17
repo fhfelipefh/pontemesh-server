@@ -778,6 +778,28 @@ impl Catalog {
         }))
     }
 
+    pub async fn first_active_admin_user(&self) -> anyhow::Result<Option<UserRecord>> {
+        let row = query(
+            r#"
+            SELECT id::text, username, password_hash, role
+            FROM users
+            WHERE role = 'admin' AND is_active = TRUE
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load active admin user")?;
+
+        Ok(row.map(|row| UserRecord {
+            id: row.get("id"),
+            username: row.get("username"),
+            password_hash: row.get("password_hash"),
+            role: row.get("role"),
+        }))
+    }
+
     pub async fn create_user_session(
         &self,
         user_id: &str,

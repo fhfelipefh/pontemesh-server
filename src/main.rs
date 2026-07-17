@@ -25,6 +25,12 @@ async fn main() -> anyhow::Result<()> {
 
     let paths = config::PontemeshHome::from_env()?;
     paths.ensure_layout()?;
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if args.first().is_some_and(|arg| arg == "setup-agent") {
+        let options = setup::agent::SetupAgentOptions::parse(&args[1..])?;
+        return setup::agent::run(paths, options).await;
+    }
+
     let internal_secrets = security::secrets::load_or_create_internal_secrets(&paths)?;
     let _ = (
         internal_secrets.instance_secret.len(),

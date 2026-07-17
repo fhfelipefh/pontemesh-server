@@ -48,19 +48,19 @@ pub struct SetupStatusResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompleteSetupRequest {
-    instance_name: String,
-    role: String,
-    admin_username: String,
-    admin_password: String,
-    http_port: Option<u16>,
+    pub instance_name: String,
+    pub role: String,
+    pub admin_username: String,
+    pub admin_password: String,
+    pub http_port: Option<u16>,
     #[serde(alias = "storageLocalPath")]
-    internal_storage_path: Option<String>,
-    origin_base_url: Option<String>,
-    replica_id: Option<String>,
-    replica_token: Option<String>,
-    replica_public_endpoint: Option<String>,
-    sync_interval_seconds: Option<u64>,
-    health_interval_seconds: Option<u64>,
+    pub internal_storage_path: Option<String>,
+    pub origin_base_url: Option<String>,
+    pub replica_id: Option<String>,
+    pub replica_token: Option<String>,
+    pub replica_public_endpoint: Option<String>,
+    pub sync_interval_seconds: Option<u64>,
+    pub health_interval_seconds: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -151,7 +151,7 @@ pub async fn complete(State(state): State<AppState>, headers: HeaderMap, body: B
     }
 }
 
-async fn complete_setup(
+pub(crate) async fn complete_setup(
     state: &AppState,
     payload: CompleteSetupRequest,
 ) -> anyhow::Result<Option<crate::catalog::CreatedS3AccessKey>> {

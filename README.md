@@ -135,6 +135,18 @@ Ou, após o build em modo release:
 ./target/release/pontemesh-server
 ```
 
+Para preparar uma instância local para administração por clientes de IA
+compatíveis com MCP, use:
+
+```bash
+./target/release/pontemesh setup-agent
+```
+
+O `setup-agent` conclui o setup Origin quando necessário, habilita MCP com
+autenticação obrigatória, cria um token MCP novo e grava uma configuração de
+conexão em `$PONTEMESH_HOME/secrets/setup-agent-mcp.json` com permissão restrita.
+Por padrão, o MCP gerado fica limitado a localhost.
+
 Por padrão, o servidor utiliza:
 
 ```text
