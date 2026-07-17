@@ -4718,6 +4718,9 @@ pub fn validate_bucket_name(name: &str) -> anyhow::Result<()> {
     if name.contains("..") {
         bail!("bucket name cannot contain consecutive dots");
     }
+    if name.parse::<IpAddr>().is_ok() {
+        bail!("bucket name cannot be formatted as an IP address");
+    }
     Ok(())
 }
 
@@ -4911,6 +4914,35 @@ mod tests {
     }
 
     #[test]
+    fn validate_bucket_name_rejects_confusing_or_hostile_names() {
+        assert!(validate_bucket_name("game-assets").is_ok());
+        assert!(validate_bucket_name("127.0.0.1").is_err());
+        assert!(validate_bucket_name("192.168.1.10").is_err());
+        assert!(validate_bucket_name("UPPERCASE").is_err());
+        assert!(validate_bucket_name("bucket..name").is_err());
+        assert!(validate_bucket_name("-bucket").is_err());
+        assert!(validate_bucket_name("bucket-").is_err());
+    }
+
+    #[test]
+    fn validate_mcp_settings_rejects_disabling_authentication() {
+        let mut update = secure_mcp_settings_update();
+        assert!(validate_mcp_settings_update(&update).is_ok());
+
+        update.require_auth = false;
+        assert!(validate_mcp_settings_update(&update).is_err());
+    }
+
+    #[test]
+    fn validate_mcp_scopes_normalizes_and_rejects_unknown_scopes() {
+        assert_eq!(
+            validate_mcp_scopes(&[" admin ".to_string()]).expect("scopes"),
+            vec!["read".to_string(), "admin".to_string(), "write".to_string()]
+        );
+        assert!(validate_mcp_scopes(&["root".to_string()]).is_err());
+    }
+
+    #[test]
     fn object_manifest_fragments_cover_object_ranges_and_hashes() {
         let manifest = build_object_manifest(b"abcdef", 2).expect("manifest");
 
@@ -4934,6 +4966,21 @@ mod tests {
     fn object_manifest_rejects_invalid_fragment_size() {
         assert!(build_object_manifest(b"abc", 0).is_err());
         assert!(build_object_manifest(b"abc", -1).is_err());
+    }
+
+    fn secure_mcp_settings_update() -> McpSettingsUpdate {
+        McpSettingsUpdate {
+            enabled: true,
+            endpoint_path: "/mcp".to_string(),
+            bind_host: Some("127.0.0.1".to_string()),
+            require_auth: true,
+            read_tools_enabled: true,
+            write_tools_enabled: false,
+            admin_tools_enabled: false,
+            expose_resources: true,
+            expose_prompts: true,
+            allow_localhost_only: true,
+        }
     }
 }
 
