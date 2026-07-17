@@ -95,6 +95,28 @@ jobs:
           Copy-Item "docs/CONFIGURATION.md" "dist/$packageName/"
           Compress-Archive -Path "dist/$packageName/*" -DestinationPath "dist/$packageName.zip" -Force
 
+      - name: Build release manifest
+        shell: pwsh
+        run: |
+          $version = "${{ inputs.version }}"
+          $assetName = "pontemesh-server-v$version-windows-x64.zip"
+          $assetPath = "dist/$assetName"
+          $hash = (Get-FileHash -Algorithm SHA256 $assetPath).Hash.ToLowerInvariant()
+          $hash | Set-Content "$assetPath.sha256"
+          $manifest = [ordered]@{
+            schema = 1
+            product = "server"
+            version = $version
+            assets = @(
+              [ordered]@{
+                name = $assetName
+                size = (Get-Item $assetPath).Length
+                sha256 = $hash
+              }
+            )
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content "dist/pontemesh-server-v$version-manifest.json"
+
       - name: Create and push tag
         shell: pwsh
         run: |
@@ -114,6 +136,8 @@ jobs:
             "create",
             "v${{ inputs.version }}",
             "dist/pontemesh-server-v${{ inputs.version }}-windows-x64.zip",
+            "dist/pontemesh-server-v${{ inputs.version }}-windows-x64.zip.sha256",
+            "dist/pontemesh-server-v${{ inputs.version }}-manifest.json",
             "--title",
             "Ponte Mesh Server v${{ inputs.version }}",
             "--generate-notes"
