@@ -197,6 +197,13 @@ fn tool_definitions() -> Vec<ToolDefinition> {
 }
 
 pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow::Result<Value> {
+    if matches!(
+        tool_permission(name),
+        Some(ToolPermission::Write | ToolPermission::Admin)
+    ) {
+        config::require_instance_role(&state.paths, config::InstanceRole::Origin)?;
+    }
+
     let result = match name {
         "pontemesh_create_bucket" => {
             let bucket = required_str(&arguments, "bucket")?;

@@ -24,6 +24,7 @@ use tokio::{
 };
 
 type HmacSha256 = Hmac<Sha256>;
+const DEGRADED_ACCESS_GRACE_SECONDS: i64 = 300;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,13 +88,15 @@ pub struct ErrorResponse {
     error: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReplicaLocalState {
     objects: HashMap<String, LocalObjectState>,
+    #[serde(default)]
+    last_policy_update_at: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalObjectState {
     bucket: String,
@@ -103,9 +106,37 @@ struct LocalObjectState {
     size_bytes: i64,
     content_type: String,
     fragments: HashMap<String, LocalFragmentState>,
+    #[serde(default)]
+    synced_at: String,
+    #[serde(default)]
+    election_epoch: String,
+    #[serde(default)]
+    election_leader_id: Option<String>,
+    #[serde(default)]
+    replica_set: Vec<ReplicaSyncMember>,
+    #[serde(default)]
+    access_packages: HashMap<String, CachedAccessPackage>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplicaSyncMember {
+    replica_id: String,
+    replica_name: String,
+    endpoint: Option<String>,
+    last_seen_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedAccessPackage {
+    package_token_hash: String,
+    manifest_id: String,
+    validated_at: String,
+    offline_until: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalFragmentState {
     index: i64,
@@ -119,6 +150,9 @@ struct ServedLocalObject {
     sha256: String,
     content_type: String,
     bytes: Vec<u8>,
+    election_leader_id: Option<String>,
+    replica_set: Vec<ReplicaSyncMember>,
+    access_packages: HashMap<String, CachedAccessPackage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +160,12 @@ struct ServedLocalObject {
 struct RevalidateResponse {
     valid: bool,
     manifest_id: String,
+}
+
+enum RevalidationOutcome {
+    Valid(RevalidateResponse),
+    Denied,
+    OriginUnavailable(anyhow::Error),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -200,6 +240,13 @@ async fn serve_access_package_object_inner(
         Err(error) => return internal_error(anyhow::Error::new(error)),
     };
 
+    let storage_path = match config::configured_storage_dir(&state.paths) {
+        Ok(path) => path,
+        Err(error) => return internal_error(error),
+    };
+    let package_token_hash = hash_access_package_token(&package_token);
+
+    let mut degraded_serve = false;
     let revalidation = match revalidate_with_origin(
         &client,
         &replica_config.origin_base_url,
@@ -210,8 +257,8 @@ async fn serve_access_package_object_inner(
     )
     .await
     {
-        Ok(revalidation) if revalidation.valid => revalidation,
-        Ok(_) => {
+        RevalidationOutcome::Valid(revalidation) => Some(revalidation),
+        RevalidationOutcome::Denied => {
             record_local_audit(
                 &state,
                 "replica_access_denied",
@@ -222,23 +269,19 @@ async fn serve_access_package_object_inner(
             .await;
             return forbidden("access package is invalid, expired or revoked");
         }
-        Err(error) => {
-            record_local_audit(
-                &state,
-                "replica_access_denied",
-                Some(&package_id),
-                "failure",
-                &format!("bucket={bucket_name}; key={object_key}; reason={error}"),
-            )
-            .await;
-            return forbidden("access package could not be revalidated");
+        RevalidationOutcome::OriginUnavailable(error) => {
+            degraded_serve = true;
+            tracing::warn!(
+                package_id = %package_id,
+                bucket = %bucket_name,
+                key = %object_key,
+                error = %error,
+                "Origin unavailable during replica access-package revalidation; trying degraded data-plane leadership"
+            );
+            None
         }
     };
 
-    let storage_path = match config::configured_storage_dir(&state.paths) {
-        Ok(path) => path,
-        Err(error) => return internal_error(error),
-    };
     let object = match load_local_object(&storage_path, &bucket_name, &object_key).await {
         Ok(Some(object)) => object,
         Ok(None) => {
@@ -277,16 +320,57 @@ async fn serve_access_package_object_inner(
         }
     };
 
-    if object.manifest_id != revalidation.manifest_id {
+    if let Some(revalidation) = &revalidation {
+        if object.manifest_id != revalidation.manifest_id {
+            record_local_audit(
+                &state,
+                "replica_access_denied",
+                Some(&package_id),
+                "failure",
+                &format!("bucket={bucket_name}; key={object_key}; reason=manifest_mismatch"),
+            )
+            .await;
+            return forbidden("local replica object does not match authorized manifest");
+        }
+        if let Err(error) = cache_access_package_validation(
+            &storage_path,
+            &bucket_name,
+            &object_key,
+            &package_id,
+            &package_token_hash,
+            &revalidation.manifest_id,
+        )
+        .await
+        {
+            tracing::warn!(
+                package_id = %package_id,
+                bucket = %bucket_name,
+                key = %object_key,
+                error = %error,
+                "failed to persist access-package validation for degraded replica continuity"
+            );
+        }
+    } else if let Err(error) = authorize_degraded_replica_serve(
+        &replica_config.replica_id,
+        &object,
+        &package_id,
+        &package_token_hash,
+    ) {
         record_local_audit(
             &state,
             "replica_access_denied",
             Some(&package_id),
             "failure",
-            &format!("bucket={bucket_name}; key={object_key}; reason=manifest_mismatch"),
+            &format!("bucket={bucket_name}; key={object_key}; reason=degraded_{error}"),
         )
         .await;
-        return forbidden("local replica object does not match authorized manifest");
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: format!("replica degraded leadership is not authorized: {error}"),
+            }),
+        )
+            .into_response();
     }
 
     let total_size = object.bytes.len() as u64;
@@ -322,6 +406,11 @@ async fn serve_access_package_object_inner(
         &package_id,
         total_size,
         range,
+        degraded_serve,
+        object
+            .election_leader_id
+            .as_deref()
+            .unwrap_or(&replica_config.replica_id),
         if include_body { body } else { Vec::new() },
         bytes_served,
     );
@@ -357,26 +446,47 @@ async fn revalidate_with_origin(
     package_token: &str,
     bucket_name: &str,
     object_key: &str,
-) -> anyhow::Result<RevalidateResponse> {
+) -> RevalidationOutcome {
     let path = format!(
         "/pontemesh/access-packages/{}/revalidate/{}/{}",
         percent_encode_path_component(package_id),
         percent_encode_path_component(bucket_name),
         object_path(object_key)
     );
-    let response = client
+    let response = match client
         .post(format!("{}{}", origin_base_url.trim_end_matches('/'), path))
         .bearer_auth(package_token)
         .send()
         .await
-        .context("failed to revalidate access package with Origin")?;
-    if !response.status().is_success() {
-        bail!("Origin rejected access package revalidation");
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return RevalidationOutcome::OriginUnavailable(
+                anyhow::Error::new(error)
+                    .context("failed to revalidate access package with Origin"),
+            );
+        }
+    };
+    let status = response.status();
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return RevalidationOutcome::Denied;
     }
-    response
-        .json::<RevalidateResponse>()
-        .await
-        .context("failed to decode Origin revalidation response")
+    if status.is_client_error() {
+        return RevalidationOutcome::Denied;
+    }
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return RevalidationOutcome::OriginUnavailable(anyhow::anyhow!(
+            "Origin revalidation failed with {status}: {body}"
+        ));
+    }
+    match response.json::<RevalidateResponse>().await {
+        Ok(revalidation) if revalidation.valid => RevalidationOutcome::Valid(revalidation),
+        Ok(_) => RevalidationOutcome::Denied,
+        Err(error) => RevalidationOutcome::OriginUnavailable(
+            anyhow::Error::new(error).context("failed to decode Origin revalidation response"),
+        ),
+    }
 }
 
 async fn load_local_object(
@@ -384,7 +494,7 @@ async fn load_local_object(
     bucket_name: &str,
     object_key: &str,
 ) -> anyhow::Result<Option<ServedLocalObject>> {
-    let state_path = storage_path.join("replica").join("state.json");
+    let state_path = replica_state_path(storage_path);
     if !state_path.exists() {
         return Ok(None);
     }
@@ -440,7 +550,103 @@ async fn load_local_object(
         sha256: local.sha256.clone(),
         content_type: local.content_type.clone(),
         bytes: object_bytes,
+        election_leader_id: local.election_leader_id.clone(),
+        replica_set: local.replica_set.clone(),
+        access_packages: local.access_packages.clone(),
     }))
+}
+
+async fn cache_access_package_validation(
+    storage_path: &std::path::Path,
+    bucket_name: &str,
+    object_key: &str,
+    package_id: &str,
+    package_token_hash: &str,
+    manifest_id: &str,
+) -> anyhow::Result<()> {
+    let state_path = replica_state_path(storage_path);
+    let bytes = tokio_fs::read(&state_path)
+        .await
+        .with_context(|| format!("failed to read {}", state_path.display()))?;
+    let mut state: ReplicaLocalState =
+        serde_json::from_slice(&bytes).context("failed to parse replica local state")?;
+    let object_id = format!("{bucket_name}/{object_key}");
+    let Some(local) = state.objects.get_mut(&object_id) else {
+        bail!("replica local state does not contain requested object");
+    };
+    if local.manifest_id != manifest_id {
+        bail!("validated manifest does not match local object");
+    }
+    let now = chrono::Utc::now();
+    local.access_packages.insert(
+        package_id.to_owned(),
+        CachedAccessPackage {
+            package_token_hash: package_token_hash.to_owned(),
+            manifest_id: manifest_id.to_owned(),
+            validated_at: now.to_rfc3339(),
+            offline_until: (now + chrono::Duration::seconds(DEGRADED_ACCESS_GRACE_SECONDS))
+                .to_rfc3339(),
+        },
+    );
+    save_replica_state(&state_path, &state).await
+}
+
+async fn save_replica_state(
+    state_path: &std::path::Path,
+    state: &ReplicaLocalState,
+) -> anyhow::Result<()> {
+    let bytes =
+        serde_json::to_vec_pretty(state).context("failed to serialize replica local state")?;
+    tokio_fs::write(state_path, bytes)
+        .await
+        .with_context(|| format!("failed to write {}", state_path.display()))
+}
+
+fn authorize_degraded_replica_serve(
+    replica_id: &str,
+    object: &ServedLocalObject,
+    package_id: &str,
+    package_token_hash: &str,
+) -> anyhow::Result<()> {
+    if !is_degraded_replica_leader(replica_id, object) {
+        bail!("not_elected_leader");
+    }
+    let Some(cached) = object.access_packages.get(package_id) else {
+        bail!("package_not_previously_revalidated");
+    };
+    if cached.package_token_hash != package_token_hash {
+        bail!("package_token_mismatch");
+    }
+    if cached.manifest_id != object.manifest_id {
+        bail!("manifest_mismatch");
+    }
+    let offline_until = chrono::DateTime::parse_from_rfc3339(&cached.offline_until)
+        .context("cached access package offline expiry is invalid")?
+        .with_timezone(&chrono::Utc);
+    if offline_until <= chrono::Utc::now() {
+        bail!("cached_authorization_expired");
+    }
+    Ok(())
+}
+
+fn is_degraded_replica_leader(replica_id: &str, object: &ServedLocalObject) -> bool {
+    if let Some(leader_id) = &object.election_leader_id {
+        return leader_id == replica_id;
+    }
+    object
+        .replica_set
+        .iter()
+        .map(|member| member.replica_id.as_str())
+        .min()
+        .is_none_or(|leader_id| leader_id == replica_id)
+}
+
+fn hash_access_package_token(token: &str) -> String {
+    format!("{:x}", Sha256::digest(token.as_bytes()))
+}
+
+fn replica_state_path(storage_path: &std::path::Path) -> PathBuf {
+    storage_path.join("replica").join("state.json")
 }
 
 fn replica_object_response(
@@ -450,6 +656,8 @@ fn replica_object_response(
     package_id: &str,
     total_size: u64,
     range: Option<ResolvedRange>,
+    degraded_serve: bool,
+    election_leader_id: &str,
     body: Vec<u8>,
     content_length: usize,
 ) -> Response {
@@ -460,7 +668,13 @@ fn replica_object_response(
         .header(header::ETAG, format!("\"{sha256}\""))
         .header(header::ACCEPT_RANGES, "bytes")
         .header("x-pontemesh-source", "replica-edge")
-        .header("x-pontemesh-package-id", package_id);
+        .header("x-pontemesh-package-id", package_id)
+        .header("x-pontemesh-election-leader-id", election_leader_id);
+    if degraded_serve {
+        builder = builder
+            .header("x-pontemesh-origin-revalidation", "unavailable")
+            .header("x-pontemesh-degraded-leader", "true");
+    }
     if let Some(range) = range {
         builder = builder.header(
             header::CONTENT_RANGE,
@@ -584,6 +798,9 @@ pub async fn sync_object(
     if replica_id != replica.id {
         return forbidden("replica credential does not match requested replica id");
     }
+    if replica.revoked {
+        return forbidden("replica credential is revoked");
+    }
 
     match sync_object_inner(
         &state,
@@ -606,6 +823,9 @@ pub async fn sync_fragment(
 ) -> Response {
     if replica_id != replica.id {
         return forbidden("replica credential does not match requested replica id");
+    }
+    if replica.revoked {
+        return forbidden("replica credential is revoked");
     }
 
     match sync_fragment_inner(&state, &replica, &manifest_id, &fragment_id).await {
@@ -729,6 +949,9 @@ pub async fn report_health(
     if replica_id != replica.id {
         return forbidden("replica credential does not match requested replica id");
     }
+    if replica.revoked {
+        return forbidden("replica credential is revoked");
+    }
 
     match state
         .catalog
@@ -757,6 +980,9 @@ pub async fn report_metrics(
 ) -> Response {
     if replica_id != replica.id {
         return forbidden("replica credential does not match requested replica id");
+    }
+    if replica.revoked {
+        return forbidden("replica credential is revoked");
     }
 
     match state
@@ -1065,4 +1291,124 @@ fn forbidden(message: &str) -> Response {
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn served_object_with_cache(
+        leader_id: Option<&str>,
+        replica_set: Vec<&str>,
+        package_token: &str,
+        offline_until: chrono::DateTime<chrono::Utc>,
+    ) -> ServedLocalObject {
+        let mut access_packages = HashMap::new();
+        access_packages.insert(
+            "pkg-1".to_owned(),
+            CachedAccessPackage {
+                package_token_hash: hash_access_package_token(package_token),
+                manifest_id: "manifest-1".to_owned(),
+                validated_at: chrono::Utc::now().to_rfc3339(),
+                offline_until: offline_until.to_rfc3339(),
+            },
+        );
+        ServedLocalObject {
+            manifest_id: "manifest-1".to_owned(),
+            sha256: "hash".to_owned(),
+            content_type: "application/octet-stream".to_owned(),
+            bytes: b"ok".to_vec(),
+            election_leader_id: leader_id.map(str::to_owned),
+            replica_set: replica_set
+                .into_iter()
+                .map(|replica_id| ReplicaSyncMember {
+                    replica_id: replica_id.to_owned(),
+                    replica_name: replica_id.to_owned(),
+                    endpoint: None,
+                    last_seen_at: None,
+                })
+                .collect(),
+            access_packages,
+        }
+    }
+
+    #[test]
+    fn degraded_serve_allows_only_elected_replica_with_cached_token() {
+        let object = served_object_with_cache(
+            Some("replica-a"),
+            vec!["replica-a", "replica-b"],
+            "token-1",
+            chrono::Utc::now() + chrono::Duration::minutes(1),
+        );
+
+        assert!(
+            authorize_degraded_replica_serve(
+                "replica-a",
+                &object,
+                "pkg-1",
+                &hash_access_package_token("token-1")
+            )
+            .is_ok()
+        );
+        assert!(
+            authorize_degraded_replica_serve(
+                "replica-b",
+                &object,
+                "pkg-1",
+                &hash_access_package_token("token-1")
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn degraded_serve_rejects_unknown_or_expired_cached_authorization() {
+        let object = served_object_with_cache(
+            Some("replica-a"),
+            vec!["replica-a"],
+            "token-1",
+            chrono::Utc::now() - chrono::Duration::seconds(1),
+        );
+
+        assert!(
+            authorize_degraded_replica_serve(
+                "replica-a",
+                &object,
+                "pkg-1",
+                &hash_access_package_token("token-1")
+            )
+            .is_err()
+        );
+        assert!(
+            authorize_degraded_replica_serve(
+                "replica-a",
+                &object,
+                "pkg-unknown",
+                &hash_access_package_token("token-1")
+            )
+            .is_err()
+        );
+        assert!(
+            authorize_degraded_replica_serve(
+                "replica-a",
+                &object,
+                "pkg-1",
+                &hash_access_package_token("other-token")
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn degraded_leader_falls_back_to_deterministic_replica_set_order() {
+        let object = served_object_with_cache(
+            None,
+            vec!["replica-c", "replica-a", "replica-b"],
+            "token-1",
+            chrono::Utc::now() + chrono::Duration::minutes(1),
+        );
+
+        assert!(is_degraded_replica_leader("replica-a", &object));
+        assert!(!is_degraded_replica_leader("replica-b", &object));
+    }
 }

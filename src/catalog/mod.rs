@@ -193,6 +193,8 @@ pub struct ObjectManifest {
     pub fragment_size_bytes: i64,
     pub availability_state: String,
     pub created_at: String,
+    pub signature_algorithm: Option<String>,
+    pub signature: Option<String>,
     pub fragments: Vec<ObjectManifestFragment>,
 }
 
@@ -309,6 +311,7 @@ pub struct ReplicaCredential {
     pub id: String,
     pub name: String,
     pub allowed_buckets: Vec<String>,
+    pub revoked: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -337,7 +340,27 @@ pub struct ReplicaSyncObject {
     pub content_type: String,
     pub sha256: String,
     pub state: String,
+    pub election_epoch: String,
+    pub election_leader_id: Option<String>,
+    pub replica_set: Vec<ReplicaSyncMember>,
     pub fragments: Vec<ReplicaSyncFragment>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplicaSyncMember {
+    pub replica_id: String,
+    pub replica_name: String,
+    pub endpoint: Option<String>,
+    pub last_seen_at: Option<String>,
+}
+
+fn elected_replica_leader(replica_set: &[ReplicaSyncMember]) -> Option<String> {
+    replica_set
+        .iter()
+        .map(|member| member.replica_id.as_str())
+        .min()
+        .map(str::to_owned)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -504,6 +527,10 @@ pub struct BucketTrafficMetric {
     pub fallback_events: i64,
     pub integrity_failures: i64,
     pub origin_offload_bytes: i64,
+    pub source_attempts: i64,
+    pub fallback_rate: f64,
+    pub integrity_failure_rate: f64,
+    pub avg_auxiliary_latency_ms: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -519,6 +546,10 @@ pub struct ObjectTrafficMetric {
     pub fallback_events: i64,
     pub integrity_failures: i64,
     pub origin_offload_bytes: i64,
+    pub source_attempts: i64,
+    pub fallback_rate: f64,
+    pub integrity_failure_rate: f64,
+    pub avg_auxiliary_latency_ms: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -556,6 +587,8 @@ pub struct AccessPackageRecord {
     pub manifest_id: String,
     pub expires_at: String,
     pub created_at: String,
+    pub signature_algorithm: Option<String>,
+    pub signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -662,6 +695,9 @@ pub struct OriginTrafficSummary {
     pub full_object_requests: i64,
     pub range_requests: i64,
     pub total_bytes_served: i64,
+    pub fallback_events: i64,
+    pub integrity_failures: i64,
+    pub origin_offload_bytes: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -1704,7 +1740,9 @@ impl Catalog {
                 m.object_hash_algorithm,
                 m.fragment_size_bytes,
                 o.state,
-                m.created_at
+                m.created_at,
+                m.signature_algorithm,
+                m.signature
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.id = o.current_version_id
@@ -1754,6 +1792,8 @@ impl Catalog {
             fragment_size_bytes: row.get("fragment_size_bytes"),
             availability_state: row.get("state"),
             created_at: format_datetime(row.get("created_at")),
+            signature_algorithm: row.get("signature_algorithm"),
+            signature: row.get("signature"),
             fragments: fragments
                 .into_iter()
                 .map(|fragment| {
@@ -2736,6 +2776,37 @@ impl Catalog {
             .begin()
             .await
             .context("failed to begin replica revocation transaction")?;
+        let target = query(
+            r#"
+            SELECT id, allowed_buckets
+            FROM replica_credentials
+            WHERE id = $1::uuid AND revoked_at IS NULL
+            "#,
+        )
+        .bind(replica_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .context("failed to load replica before revocation")?;
+        let Some(target) = target else {
+            bail!("replica not found or already revoked: {replica_id}");
+        };
+        let allowed_buckets = parse_string_vec(target.get("allowed_buckets"))?;
+        query(
+            r#"
+            INSERT INTO replica_policy_updates (
+                replica_id, update_type, bucket_id, object_id, detail
+            )
+            VALUES ($1::uuid, 'replica_revoked', NULL, NULL, $2)
+            "#,
+        )
+        .bind(replica_id)
+        .bind(serde_json::json!({
+            "reason": "replica credential revoked",
+            "allowedBuckets": allowed_buckets
+        }))
+        .execute(&mut *tx)
+        .await
+        .context("failed to record replica revocation policy update")?;
         let result = query(
             "UPDATE replica_credentials SET revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL",
         )
@@ -2763,9 +2834,9 @@ impl Catalog {
     ) -> anyhow::Result<Option<ReplicaCredential>> {
         let row = query(
             r#"
-            SELECT id::text, name, allowed_buckets
+            SELECT id::text, name, allowed_buckets, revoked_at IS NOT NULL AS revoked
             FROM replica_credentials
-            WHERE token_hash = $1 AND revoked_at IS NULL
+            WHERE token_hash = $1
             "#,
         )
         .bind(token_hash)
@@ -2778,6 +2849,7 @@ impl Catalog {
                 id: row.get("id"),
                 name: row.get("name"),
                 allowed_buckets: parse_string_vec(row.get("allowed_buckets"))?,
+                revoked: row.get("revoked"),
             })
         })
         .transpose()
@@ -2982,6 +3054,9 @@ impl Catalog {
                         content_type: row.get("content_type"),
                         sha256: row.get("object_hash"),
                         state: row.get("state"),
+                        election_epoch: format!("{}:{manifest_id}", row.get::<String, _>("state")),
+                        election_leader_id: None,
+                        replica_set: Vec::new(),
                         fragments: Vec::new(),
                     });
                     objects.last_mut().expect("object was just pushed")
@@ -2999,7 +3074,67 @@ impl Catalog {
             });
         }
 
+        for object in &mut objects {
+            object.replica_set = self
+                .list_replica_sync_members(&object.bucket, &object.key)
+                .await?;
+            object.election_leader_id = elected_replica_leader(&object.replica_set);
+        }
+
         Ok(objects)
+    }
+
+    async fn list_replica_sync_members(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<Vec<ReplicaSyncMember>> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let rows = query(
+            r#"
+            SELECT
+                r.id::text AS replica_id,
+                r.name AS replica_name,
+                a.endpoint,
+                a.last_seen_at
+            FROM replica_credentials r
+            JOIN buckets b ON b.name = $1
+            JOIN objects o ON o.bucket_id = b.id AND o.object_key = $2
+            JOIN object_versions v ON v.id = o.current_version_id
+            JOIN object_manifests m ON m.object_version_id = v.id
+            JOIN bucket_policies p ON p.bucket_id = b.id
+            LEFT JOIN replica_object_availability a
+              ON a.replica_id = r.id
+             AND a.bucket_id = b.id
+             AND a.object_id = o.id
+             AND a.object_manifest_id = m.id
+            WHERE r.revoked_at IS NULL
+              AND r.allowed_buckets ? b.name
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+              AND p.allow_replica_edge = TRUE
+            ORDER BY r.id ASC
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list replica election members")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| ReplicaSyncMember {
+                replica_id: row.get("replica_id"),
+                replica_name: row.get("replica_name"),
+                endpoint: row.get("endpoint"),
+                last_seen_at: row
+                    .get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_seen_at")
+                    .map(format_datetime),
+            })
+            .collect())
     }
 
     pub async fn record_replica_object_availability(
@@ -3095,6 +3230,15 @@ impl Catalog {
         validate_object_key(object_key)?;
         let rows = query(
             r#"
+            WITH replica_quality AS (
+                SELECT
+                    replica_id,
+                    COALESCE(SUM(sync_failures + auth_failures), 0)::bigint AS recent_failures,
+                    AVG(avg_latency_ms)::float8 AS avg_latency_ms
+                FROM replica_metric_events
+                WHERE reported_at > now() - interval '30 minutes'
+                GROUP BY replica_id
+            )
             SELECT
                 r.id::text AS replica_id,
                 r.name AS replica_name,
@@ -3110,6 +3254,7 @@ impl Catalog {
             JOIN object_versions v ON v.id = o.current_version_id
             JOIN object_manifests m ON m.object_version_id = v.id
             JOIN bucket_policies p ON p.bucket_id = b.id
+            LEFT JOIN replica_quality q ON q.replica_id = r.id
             WHERE b.name = $1
               AND o.object_key = $2
               AND a.object_manifest_id = m.id
@@ -3120,7 +3265,10 @@ impl Catalog {
               AND o.state = 'AVAILABLE'
               AND p.allow_replica_edge = TRUE
               AND a.last_seen_at > now() - interval '10 minutes'
-            ORDER BY a.last_seen_at DESC, r.name ASC
+            ORDER BY COALESCE(q.recent_failures, 0) ASC,
+                     q.avg_latency_ms ASC NULLS LAST,
+                     a.last_seen_at DESC,
+                     r.name ASC
             "#,
         )
         .bind(bucket_name)
@@ -3240,6 +3388,16 @@ impl Catalog {
         validate_object_key(object_key)?;
         let rows = query(
             r#"
+            WITH peer_quality AS (
+                SELECT
+                    peer_id,
+                    SUM(CASE WHEN outcome <> 'SUCCESS' THEN 1 ELSE 0 END)::bigint AS recent_failures,
+                    AVG(latency_ms)::float8 AS avg_latency_ms
+                FROM fragment_transfer_events
+                WHERE peer_id IS NOT NULL
+                  AND created_at > now() - interval '30 minutes'
+                GROUP BY peer_id
+            )
             SELECT
                 pfa.id::text,
                 pfa.peer_id,
@@ -3257,6 +3415,7 @@ impl Catalog {
             JOIN object_versions v ON v.id = o.current_version_id
             JOIN object_manifests m ON m.object_version_id = v.id
             JOIN bucket_policies bp ON bp.bucket_id = b.id
+            LEFT JOIN peer_quality q ON q.peer_id = pfa.id
             WHERE b.name = $1
               AND o.object_key = $2
               AND pfa.object_manifest_id = m.id
@@ -3268,7 +3427,10 @@ impl Catalog {
               AND o.deleted_at IS NULL
               AND o.state = 'AVAILABLE'
               AND bp.allow_peer_sharing = TRUE
-            ORDER BY pfa.last_seen_at DESC, pfa.peer_id ASC
+            ORDER BY COALESCE(q.recent_failures, 0) ASC,
+                     q.avg_latency_ms ASC NULLS LAST,
+                     pfa.last_seen_at DESC,
+                     pfa.peer_id ASC
             LIMIT 50
             "#,
         )
@@ -3634,7 +3796,7 @@ impl Catalog {
             LEFT JOIN buckets b ON b.id = u.bucket_id
             LEFT JOIN objects o ON o.id = u.object_id
             WHERE u.replica_id = $1::uuid
-              AND r.revoked_at IS NULL
+              AND (r.revoked_at IS NULL OR u.update_type = 'replica_revoked')
               AND ($2::timestamptz IS NULL OR u.created_at > $2)
             ORDER BY u.created_at ASC
             LIMIT 200
@@ -3748,7 +3910,53 @@ impl Catalog {
             manifest_id: row.get("object_manifest_id"),
             expires_at: format_datetime(row.get("expires_at")),
             created_at: format_datetime(row.get("created_at")),
+            signature_algorithm: None,
+            signature: None,
         })
+    }
+
+    pub async fn store_object_manifest_signature(
+        &self,
+        manifest_id: &str,
+        algorithm: &str,
+        signature: &str,
+    ) -> anyhow::Result<()> {
+        query(
+            r#"
+            UPDATE object_manifests
+            SET signature_algorithm = $2, signature = $3
+            WHERE id = $1::uuid
+            "#,
+        )
+        .bind(manifest_id)
+        .bind(algorithm)
+        .bind(signature)
+        .execute(&self.pool)
+        .await
+        .context("failed to store object manifest signature")?;
+        Ok(())
+    }
+
+    pub async fn store_access_package_signature(
+        &self,
+        package_id: &str,
+        algorithm: &str,
+        signature: &str,
+    ) -> anyhow::Result<()> {
+        query(
+            r#"
+            UPDATE access_packages
+            SET signature_algorithm = $2, signature = $3
+            WHERE id = $1::uuid
+            "#,
+        )
+        .bind(package_id)
+        .bind(algorithm)
+        .bind(signature)
+        .execute(&self.pool)
+        .await
+        .context("failed to store access package signature")?;
+        Ok(())
     }
 
     pub async fn authorize_access_package(
@@ -3958,7 +4166,19 @@ impl Catalog {
                 COUNT(*)::bigint AS total_requests,
                 COALESCE(SUM(CASE WHEN range_start IS NULL THEN 1 ELSE 0 END), 0)::bigint AS full_object_requests,
                 COALESCE(SUM(CASE WHEN range_start IS NOT NULL THEN 1 ELSE 0 END), 0)::bigint AS range_requests,
-                COALESCE(SUM(bytes_served), 0)::bigint AS total_bytes_served
+                COALESCE(SUM(bytes_served), 0)::bigint AS total_bytes_served,
+                (
+                    SELECT COALESCE(SUM(CASE WHEN event_type = 'FALLBACK_DECISION' THEN 1 ELSE 0 END), 0)::bigint
+                    FROM fragment_transfer_events
+                ) AS fallback_events,
+                (
+                    SELECT COALESCE(SUM(CASE WHEN event_type = 'HASH_MISMATCH' OR outcome = 'REJECTED' THEN 1 ELSE 0 END), 0)::bigint
+                    FROM fragment_transfer_events
+                ) AS integrity_failures,
+                (
+                    SELECT COALESCE(SUM(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') AND outcome = 'SUCCESS' AND event_type <> 'FRAGMENT_SYNCED' THEN bytes_transferred ELSE 0 END), 0)::bigint
+                    FROM fragment_transfer_events
+                ) AS origin_offload_bytes
             FROM origin_transfer_events
             "#,
         )
@@ -3971,6 +4191,9 @@ impl Catalog {
             full_object_requests: row.get("full_object_requests"),
             range_requests: row.get("range_requests"),
             total_bytes_served: row.get("total_bytes_served"),
+            fallback_events: row.get("fallback_events"),
+            integrity_failures: row.get("integrity_failures"),
+            origin_offload_bytes: row.get("origin_offload_bytes"),
         })
     }
 
@@ -3986,10 +4209,12 @@ impl Catalog {
             fragments AS (
                 SELECT bucket_id,
                        SUM(CASE WHEN source_type = 'REPLICA_EDGE' THEN bytes_transferred ELSE 0 END)::bigint AS replica_bytes_synced,
-                       SUM(CASE WHEN source_type = 'PEER' THEN bytes_transferred ELSE 0 END)::bigint AS peer_bytes_served,
+                       SUM(CASE WHEN source_type = 'PEER' AND outcome = 'SUCCESS' THEN bytes_transferred ELSE 0 END)::bigint AS peer_bytes_served,
                        SUM(CASE WHEN event_type = 'FALLBACK_DECISION' THEN 1 ELSE 0 END)::bigint AS fallback_events,
                        SUM(CASE WHEN event_type = 'HASH_MISMATCH' OR outcome = 'REJECTED' THEN 1 ELSE 0 END)::bigint AS integrity_failures,
-                       SUM(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') AND outcome = 'SUCCESS' THEN bytes_transferred ELSE 0 END)::bigint AS origin_offload_bytes,
+                       SUM(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') AND outcome = 'SUCCESS' AND event_type <> 'FRAGMENT_SYNCED' THEN bytes_transferred ELSE 0 END)::bigint AS origin_offload_bytes,
+                       SUM(CASE WHEN event_type IN ('FRAGMENT_ATTEMPTED', 'FRAGMENT_SYNCED', 'FRAGMENT_SERVED', 'FALLBACK_DECISION', 'HASH_MISMATCH') THEN 1 ELSE 0 END)::bigint AS source_attempts,
+                       AVG(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') THEN latency_ms ELSE NULL END)::float8 AS avg_auxiliary_latency_ms,
                        COUNT(*)::bigint AS fragment_events
                 FROM fragment_transfer_events
                 GROUP BY bucket_id
@@ -4003,7 +4228,17 @@ impl Catalog {
                 COALESCE(fragments.fragment_events, 0)::bigint AS fragment_events,
                 COALESCE(fragments.fallback_events, 0)::bigint AS fallback_events,
                 COALESCE(fragments.integrity_failures, 0)::bigint AS integrity_failures,
-                COALESCE(fragments.origin_offload_bytes, 0)::bigint AS origin_offload_bytes
+                COALESCE(fragments.origin_offload_bytes, 0)::bigint AS origin_offload_bytes,
+                COALESCE(fragments.source_attempts, 0)::bigint AS source_attempts,
+                CASE
+                    WHEN COALESCE(fragments.source_attempts, 0) = 0 THEN 0::float8
+                    ELSE fragments.fallback_events::float8 / fragments.source_attempts::float8
+                END AS fallback_rate,
+                CASE
+                    WHEN COALESCE(fragments.source_attempts, 0) = 0 THEN 0::float8
+                    ELSE fragments.integrity_failures::float8 / fragments.source_attempts::float8
+                END AS integrity_failure_rate,
+                fragments.avg_auxiliary_latency_ms
             FROM buckets b
             LEFT JOIN origin ON origin.bucket_id = b.id
             LEFT JOIN fragments ON fragments.bucket_id = b.id
@@ -4027,6 +4262,10 @@ impl Catalog {
                 fallback_events: row.get("fallback_events"),
                 integrity_failures: row.get("integrity_failures"),
                 origin_offload_bytes: row.get("origin_offload_bytes"),
+                source_attempts: row.get("source_attempts"),
+                fallback_rate: row.get("fallback_rate"),
+                integrity_failure_rate: row.get("integrity_failure_rate"),
+                avg_auxiliary_latency_ms: row.get("avg_auxiliary_latency_ms"),
             })
             .collect())
     }
@@ -4043,10 +4282,12 @@ impl Catalog {
             fragments AS (
                 SELECT object_id,
                        SUM(CASE WHEN source_type = 'REPLICA_EDGE' THEN bytes_transferred ELSE 0 END)::bigint AS replica_bytes_synced,
-                       SUM(CASE WHEN source_type = 'PEER' THEN bytes_transferred ELSE 0 END)::bigint AS peer_bytes_served,
+                       SUM(CASE WHEN source_type = 'PEER' AND outcome = 'SUCCESS' THEN bytes_transferred ELSE 0 END)::bigint AS peer_bytes_served,
                        SUM(CASE WHEN event_type = 'FALLBACK_DECISION' THEN 1 ELSE 0 END)::bigint AS fallback_events,
                        SUM(CASE WHEN event_type = 'HASH_MISMATCH' OR outcome = 'REJECTED' THEN 1 ELSE 0 END)::bigint AS integrity_failures,
-                       SUM(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') AND outcome = 'SUCCESS' THEN bytes_transferred ELSE 0 END)::bigint AS origin_offload_bytes,
+                       SUM(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') AND outcome = 'SUCCESS' AND event_type <> 'FRAGMENT_SYNCED' THEN bytes_transferred ELSE 0 END)::bigint AS origin_offload_bytes,
+                       SUM(CASE WHEN event_type IN ('FRAGMENT_ATTEMPTED', 'FRAGMENT_SYNCED', 'FRAGMENT_SERVED', 'FALLBACK_DECISION', 'HASH_MISMATCH') THEN 1 ELSE 0 END)::bigint AS source_attempts,
+                       AVG(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') THEN latency_ms ELSE NULL END)::float8 AS avg_auxiliary_latency_ms,
                        COUNT(*)::bigint AS fragment_events
                 FROM fragment_transfer_events
                 GROUP BY object_id
@@ -4061,7 +4302,17 @@ impl Catalog {
                 COALESCE(fragments.fragment_events, 0)::bigint AS fragment_events,
                 COALESCE(fragments.fallback_events, 0)::bigint AS fallback_events,
                 COALESCE(fragments.integrity_failures, 0)::bigint AS integrity_failures,
-                COALESCE(fragments.origin_offload_bytes, 0)::bigint AS origin_offload_bytes
+                COALESCE(fragments.origin_offload_bytes, 0)::bigint AS origin_offload_bytes,
+                COALESCE(fragments.source_attempts, 0)::bigint AS source_attempts,
+                CASE
+                    WHEN COALESCE(fragments.source_attempts, 0) = 0 THEN 0::float8
+                    ELSE fragments.fallback_events::float8 / fragments.source_attempts::float8
+                END AS fallback_rate,
+                CASE
+                    WHEN COALESCE(fragments.source_attempts, 0) = 0 THEN 0::float8
+                    ELSE fragments.integrity_failures::float8 / fragments.source_attempts::float8
+                END AS integrity_failure_rate,
+                fragments.avg_auxiliary_latency_ms
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             LEFT JOIN origin ON origin.object_id = o.id
@@ -4089,6 +4340,10 @@ impl Catalog {
                 fallback_events: row.get("fallback_events"),
                 integrity_failures: row.get("integrity_failures"),
                 origin_offload_bytes: row.get("origin_offload_bytes"),
+                source_attempts: row.get("source_attempts"),
+                fallback_rate: row.get("fallback_rate"),
+                integrity_failure_rate: row.get("integrity_failure_rate"),
+                avg_auxiliary_latency_ms: row.get("avg_auxiliary_latency_ms"),
             })
             .collect())
     }

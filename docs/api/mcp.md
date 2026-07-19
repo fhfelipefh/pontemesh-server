@@ -46,6 +46,9 @@ Controles aplicados:
 * auditoria de chamadas, erros e rejeições;
 * ferramentas de escrita desabilitadas por padrão;
 * ferramentas administrativas desabilitadas por padrão;
+* recursos MCP respeitam os mesmos escopos e flags de leitura dos tokens;
+* ferramentas de escrita e administração só executam em instância Origin;
+* corpo JSON-RPC possui limite próprio antes do parse;
 * segredos existentes nunca são retornados por ferramentas de listagem ou exportação.
 
 Segredos novos podem aparecer somente na resposta da operação que os criou, como
@@ -125,8 +128,10 @@ pontemesh_put_base64_object
 pontemesh_delete_object
 ```
 
-Uploads via MCP são limitados a objetos pequenos. Arquivos grandes continuam sendo
-responsabilidade da API S3-compatible.
+Uploads via MCP são operações administrativas para objetos pequenos, protegidas
+por escopo `write` e pelo papel Origin. Transferência de dados grandes,
+sincronização de fragmentos, fallback e entrega para clientes continuam sendo
+responsabilidade dos endpoints S3-compatible e Ponte Mesh.
 
 ## Ferramentas administrativas
 
@@ -163,5 +168,6 @@ pontemesh://audit/recent
 
 ## Limites
 
-MCP é uma superfície administrativa. Operações de download, upload, sincronização de
-fragmentos e tráfego de objeto continuam nos endpoints S3-compatible e Ponte Mesh.
+MCP é uma superfície administrativa. Ele pode acionar mutações administrativas
+pequenas quando `writeToolsEnabled` está ativo, mas não participa de download,
+sincronização de fragmentos, fallback ou tráfego distribuído de objeto.

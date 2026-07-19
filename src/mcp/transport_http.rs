@@ -5,18 +5,18 @@ use crate::{
 };
 use axum::{
     Json,
-    body::Body,
+    body::{Body, to_bytes},
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use std::time::Instant;
 use tracing::{info, warn};
 
 const MCP_RATE_LIMIT_WINDOW_SECONDS: i64 = 60;
 const MCP_RATE_LIMIT_MAX_REQUESTS: i64 = 120;
+const MCP_MAX_JSON_RPC_BYTES: usize = 2 * 1024 * 1024;
 
 pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: Body) -> Response {
     let request_id = uuid::Uuid::new_v4().to_string();
@@ -125,8 +125,8 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
         }
     }
 
-    let bytes = match body.collect().await {
-        Ok(body) => body.to_bytes(),
+    let bytes = match to_bytes(body, MCP_MAX_JSON_RPC_BYTES).await {
+        Ok(body) => body,
         Err(error) => {
             return protocol::http_json_rpc_error(
                 StatusCode::BAD_REQUEST,
@@ -241,7 +241,10 @@ async fn handle_json_rpc(
             if !settings.expose_resources {
                 anyhow::bail!("MCP resources are disabled");
             }
-            Ok(Some(resources::list_resources()))
+            Ok(Some(resources::list_resources(
+                settings,
+                &authorization.scopes,
+            )))
         }
         "resources/read" => {
             if !settings.expose_resources {
@@ -252,7 +255,9 @@ async fn handle_json_rpc(
                 .get("uri")
                 .and_then(Value::as_str)
                 .ok_or_else(|| anyhow::anyhow!("resource uri is required"))?;
-            Ok(Some(resources::read_resource(state, uri).await?))
+            Ok(Some(
+                resources::read_resource(state, settings, &authorization.scopes, uri).await?,
+            ))
         }
         "prompts/list" => {
             if !settings.expose_prompts {

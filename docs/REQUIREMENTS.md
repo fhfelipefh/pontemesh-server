@@ -109,6 +109,8 @@ O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a
 * **RF75:** O Replica/Edge deve respeitar mudanças de política emitidas pelo Origin.
 * **RF76:** O Replica/Edge não deve aceitar upload arbitrário de clientes.
 * **RF77:** O Replica/Edge não deve emitir autorização própria de acesso.
+* **RF77-A:** O Origin deve emitir no plano de sincronização o conjunto de réplicas elegíveis e o líder determinístico por objeto quando houver Replica/Edge autorizada.
+* **RF77-B:** O Replica/Edge pode servir dados já sincronizados em modo degradado quando o Origin estiver temporariamente indisponível, desde que o pacote de acesso e token já tenham sido revalidados pelo Origin e a réplica seja líder no último conjunto de eleição recebido.
 * **RF78:** O Origin deve remover réplicas revogadas, expiradas ou inválidas da lista de fontes elegíveis.
 
 ### SDK e Client
@@ -166,6 +168,7 @@ O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a
 * **RNF16:** O fallback deve evitar reinício desnecessário da obtenção completa.
 * **RNF17:** O sistema deve lidar com peers instáveis, indisponíveis ou atrás de NAT e firewalls.
 * **RNF18:** Replica/Edge deve reforçar disponibilidade, mas não deve ser dependência obrigatória para o funcionamento do Origin.
+* **RNF18-A:** Liderança degradada de Replica/Edge deve preservar continuidade do plano de dados sem promover a réplica a autoridade de controle.
 
 ### Contratos e interoperabilidade
 

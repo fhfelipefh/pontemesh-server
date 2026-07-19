@@ -45,6 +45,7 @@ pub struct ReplicaIdentity {
     pub id: String,
     pub name: String,
     pub allowed_buckets: Vec<String>,
+    pub revoked: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -344,6 +345,28 @@ pub async fn require_replica_credential(
     let token_hash = hash_bearer_token(&token);
     match state.catalog.find_replica_by_token_hash(&token_hash).await {
         Ok(Some(replica)) => {
+            if replica.revoked && !is_replica_policy_update_request(&request) {
+                audit::failure(
+                    "replica_auth_failed",
+                    Some(&replica.name),
+                    "revoked replica credential",
+                );
+                record_auth_audit(
+                    &state,
+                    "replica_auth_failed",
+                    Some(&replica.name),
+                    "failure",
+                    "revoked replica credential",
+                )
+                .await;
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(ErrorResponse {
+                        error: "replica credential is revoked".to_owned(),
+                    }),
+                )
+                    .into_response();
+            }
             if let Err(message) = validate_replica_request_signature(&headers, &request, &token) {
                 audit::failure("replica_auth_failed", Some(&replica.name), &message);
                 record_auth_audit(
@@ -389,6 +412,7 @@ pub async fn require_replica_credential(
                 id: replica.id,
                 name: replica.name,
                 allowed_buckets: replica.allowed_buckets,
+                revoked: replica.revoked,
             });
             next.run(request).await
         }
@@ -451,6 +475,16 @@ fn validate_replica_request_signature(
         return Err("replica request signature could not be verified".to_owned());
     }
     Ok(())
+}
+
+fn is_replica_policy_update_request(request: &Request) -> bool {
+    request.method() == axum::http::Method::GET
+        && request
+            .extensions()
+            .get::<OriginalUri>()
+            .map(|original| original.0.path())
+            .unwrap_or_else(|| request.uri().path())
+            .ends_with("/policy-updates")
 }
 
 fn required_header<'a>(headers: &'a HeaderMap, name: &'static str) -> Result<&'a str, String> {
@@ -524,7 +558,7 @@ fn read_bearer_token(headers: &HeaderMap) -> Option<String> {
 }
 
 fn session_cookie(headers: &HeaderMap, token: &str) -> HeaderValue {
-    let secure = request_is_https(headers);
+    let secure = request_is_https(headers) || !request_is_localhost(headers);
     let cookie = format!(
         "{AUTH_SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax{}",
         if secure { "; Secure" } else { "" }
@@ -542,6 +576,20 @@ fn request_is_https(headers: &HeaderMap) -> bool {
         .and_then(|value| value.to_str().ok())
         .map(|value| value.eq_ignore_ascii_case("https"))
         .unwrap_or(false)
+}
+
+fn request_is_localhost(headers: &HeaderMap) -> bool {
+    let Some(host) = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(':').next().unwrap_or(value))
+    else {
+        return false;
+    };
+    host.eq_ignore_ascii_case("localhost")
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host == "[::1]"
 }
 
 fn user_agent(headers: &HeaderMap) -> Option<&str> {

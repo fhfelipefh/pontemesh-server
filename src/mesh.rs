@@ -6,7 +6,10 @@ use crate::{
         ReplicaAvailabilityRecord, SdkFragmentEventInput, SdkFragmentEventRecord,
     },
     http::AppState,
-    security::token::hash_bearer_token,
+    security::{
+        secrets::load_or_create_internal_secrets, signing::hmac_sha256_hex,
+        token::hash_bearer_token,
+    },
 };
 use anyhow::bail;
 use axum::{
@@ -42,6 +45,8 @@ pub struct AccessPackageResponse {
     source_selection: SourceSelectionContract,
     fallback: FallbackContract,
     manifest: ManifestResponse,
+    signature_algorithm: String,
+    signature: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -132,6 +137,8 @@ pub struct ManifestResponse {
     fragments: Vec<FragmentDescriptor>,
     availability_state: String,
     created_at: String,
+    signature_algorithm: String,
+    signature: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -569,7 +576,7 @@ async fn create_access_package_inner(
         object_path(&payload.key)
     ));
 
-    Ok(AccessPackageResponse {
+    let mut package = AccessPackageResponse {
         id: record.id,
         package_token: record.package_token,
         bucket: payload.bucket,
@@ -586,7 +593,19 @@ async fn create_access_package_inner(
         source_selection: source_selection_contract(&policy),
         fallback: fallback_contract(&object_endpoint, &policy, revalidate_endpoint),
         manifest,
-    })
+        signature_algorithm: "HMAC-SHA256".to_owned(),
+        signature: String::new(),
+    };
+    package.signature = sign_access_package_response(state, &package).await?;
+    state
+        .catalog
+        .store_access_package_signature(
+            &package.id,
+            &package.signature_algorithm,
+            &package.signature,
+        )
+        .await?;
+    Ok(package)
 }
 
 async fn get_sources_inner(
@@ -1064,7 +1083,7 @@ async fn load_manifest(
     }
 
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
-    build_manifest_with_policy(bucket_name, object_key, manifest, &policy)
+    build_signed_manifest_with_policy(state, bucket_name, object_key, manifest, &policy).await
 }
 
 async fn load_manifest_with_policy(
@@ -1082,7 +1101,36 @@ async fn load_manifest_with_policy(
         bail!("object is not available");
     }
 
-    build_manifest_with_policy(bucket_name, object_key, manifest, policy)
+    build_signed_manifest_with_policy(state, bucket_name, object_key, manifest, policy).await
+}
+
+async fn build_signed_manifest_with_policy(
+    state: &AppState,
+    bucket_name: &str,
+    object_key: &str,
+    manifest: ObjectManifest,
+    policy: &BucketPolicy,
+) -> anyhow::Result<ManifestResponse> {
+    let stored_algorithm = manifest.signature_algorithm.clone();
+    let stored_signature = manifest.signature.clone();
+    let manifest_id = manifest.manifest_id.clone();
+    let mut response = build_manifest_with_policy(bucket_name, object_key, manifest, policy)?;
+    let signature = sign_manifest_response(state, &response).await?;
+    response.signature_algorithm = "HMAC-SHA256".to_owned();
+    response.signature = signature;
+    if stored_algorithm.as_deref() != Some(response.signature_algorithm.as_str())
+        || stored_signature.as_deref() != Some(response.signature.as_str())
+    {
+        state
+            .catalog
+            .store_object_manifest_signature(
+                &manifest_id,
+                &response.signature_algorithm,
+                &response.signature,
+            )
+            .await?;
+    }
+    Ok(response)
 }
 
 fn build_manifest_with_policy(
@@ -1129,7 +1177,59 @@ fn build_manifest_with_policy(
             .collect::<anyhow::Result<Vec<_>>>()?,
         availability_state: manifest.availability_state,
         created_at: manifest.created_at,
+        signature_algorithm: "HMAC-SHA256".to_owned(),
+        signature: String::new(),
     })
+}
+
+async fn sign_manifest_response(
+    state: &AppState,
+    manifest: &ManifestResponse,
+) -> anyhow::Result<String> {
+    let payload = serde_json::json!({
+        "kind": "pontemesh.object-manifest.v1",
+        "manifestId": manifest.manifest_id,
+        "objectId": manifest.object_id,
+        "bucket": manifest.bucket,
+        "key": manifest.key,
+        "version": manifest.version,
+        "totalSizeBytes": manifest.total_size_bytes,
+        "contentType": manifest.content_type,
+        "objectHashAlgorithm": manifest.object_hash_algorithm,
+        "objectSha256": manifest.object_sha256,
+        "fragmentSizeBytes": manifest.fragment_size_bytes,
+        "fragments": manifest.fragments,
+        "availabilityState": manifest.availability_state,
+        "createdAt": manifest.created_at,
+    });
+    sign_payload(state, &payload).await
+}
+
+async fn sign_access_package_response(
+    state: &AppState,
+    package: &AccessPackageResponse,
+) -> anyhow::Result<String> {
+    let payload = serde_json::json!({
+        "kind": "pontemesh.access-package.v1",
+        "id": package.id,
+        "bucket": package.bucket,
+        "key": package.key,
+        "version": package.version,
+        "manifestId": package.manifest_id,
+        "expiresAt": package.expires_at,
+        "scope": package.scope,
+        "authorizedSources": package.authorized_sources,
+        "sourceSelection": package.source_selection,
+        "fallback": package.fallback,
+        "manifestSignature": package.manifest.signature,
+    });
+    sign_payload(state, &payload).await
+}
+
+async fn sign_payload(state: &AppState, payload: &serde_json::Value) -> anyhow::Result<String> {
+    let secrets = load_or_create_internal_secrets(&state.paths)?;
+    let bytes = serde_json::to_vec(payload)?;
+    Ok(hmac_sha256_hex(&secrets.instance_secret, &bytes))
 }
 
 fn request_base_url(headers: &HeaderMap) -> String {

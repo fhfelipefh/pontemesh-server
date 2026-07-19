@@ -1,20 +1,35 @@
-use crate::{catalog::AuditEventFilter, config, http::AppState, system::storage};
+use crate::{
+    catalog::{AuditEventFilter, McpSettings},
+    config,
+    http::AppState,
+    mcp::tools::{self, ToolPermission},
+    system::storage,
+};
 use anyhow::bail;
 use serde_json::{Value, json};
 
-pub fn list_resources() -> Value {
+pub fn list_resources(settings: &McpSettings, scopes: &[String]) -> Value {
+    let resources = resource_definitions()
+        .into_iter()
+        .filter(|definition| tools::is_allowed(definition.permission, settings, scopes))
+        .map(|definition| resource(definition.uri, definition.name))
+        .collect::<Vec<_>>();
     json!({
-        "resources": [
-            resource("pontemesh://instance/status", "Instance status"),
-            resource("pontemesh://instance/health", "Instance health"),
-            resource("pontemesh://storage/summary", "Storage summary"),
-            resource("pontemesh://buckets", "Buckets"),
-            resource("pontemesh://audit/recent", "Recent audit events")
-        ]
+        "resources": resources
     })
 }
 
-pub async fn read_resource(state: &AppState, uri: &str) -> anyhow::Result<Value> {
+pub async fn read_resource(
+    state: &AppState,
+    settings: &McpSettings,
+    scopes: &[String],
+    uri: &str,
+) -> anyhow::Result<Value> {
+    let permission =
+        resource_permission(uri).ok_or_else(|| anyhow::anyhow!("unknown MCP resource: {uri}"))?;
+    if !tools::is_allowed(permission, settings, scopes) {
+        bail!("MCP token is not allowed to read resource {uri}");
+    }
     let value = match uri {
         "pontemesh://instance/status" => json!({
             "name": config::load_instance_config(&state.paths).map(|config| config.instance.name).unwrap_or_else(|_| "Ponte Mesh".to_owned()),
@@ -80,4 +95,52 @@ fn resource(uri: &str, name: &str) -> Value {
         "name": name,
         "mimeType": "application/json"
     })
+}
+
+struct ResourceDefinition {
+    uri: &'static str,
+    name: &'static str,
+    permission: ToolPermission,
+}
+
+fn resource_definitions() -> Vec<ResourceDefinition> {
+    vec![
+        ResourceDefinition {
+            uri: "pontemesh://instance/status",
+            name: "Instance status",
+            permission: ToolPermission::Read,
+        },
+        ResourceDefinition {
+            uri: "pontemesh://instance/health",
+            name: "Instance health",
+            permission: ToolPermission::Read,
+        },
+        ResourceDefinition {
+            uri: "pontemesh://storage/summary",
+            name: "Storage summary",
+            permission: ToolPermission::Read,
+        },
+        ResourceDefinition {
+            uri: "pontemesh://buckets",
+            name: "Buckets",
+            permission: ToolPermission::Read,
+        },
+        ResourceDefinition {
+            uri: "pontemesh://audit/recent",
+            name: "Recent audit events",
+            permission: ToolPermission::Read,
+        },
+    ]
+}
+
+fn resource_permission(uri: &str) -> Option<ToolPermission> {
+    if resource_definitions()
+        .into_iter()
+        .any(|definition| definition.uri == uri)
+        || uri.starts_with("pontemesh://buckets/")
+    {
+        Some(ToolPermission::Read)
+    } else {
+        None
+    }
 }

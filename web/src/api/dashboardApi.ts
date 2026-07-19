@@ -61,6 +61,9 @@ export type OriginTrafficMetrics = {
   fullObjectRequests: number;
   rangeRequests: number;
   totalBytesServed: number;
+  fallbackEvents: number;
+  integrityFailures: number;
+  originOffloadBytes: number;
 };
 
 export type ReplicaTrafficMetrics = {
@@ -84,6 +87,10 @@ export type BucketTrafficMetric = {
   fallbackEvents: number;
   integrityFailures: number;
   originOffloadBytes: number;
+  sourceAttempts: number;
+  fallbackRate: number;
+  integrityFailureRate: number;
+  avgAuxiliaryLatencyMs: number | null;
 };
 
 export type ObjectTrafficMetric = {
@@ -97,6 +104,10 @@ export type ObjectTrafficMetric = {
   fallbackEvents: number;
   integrityFailures: number;
   originOffloadBytes: number;
+  sourceAttempts: number;
+  fallbackRate: number;
+  integrityFailureRate: number;
+  avgAuxiliaryLatencyMs: number | null;
 };
 
 export type ReplicaDetailMetric = {

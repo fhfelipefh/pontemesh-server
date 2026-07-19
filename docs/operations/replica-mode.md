@@ -115,6 +115,35 @@ O plano de sincronização pode conter:
 
 Replica/Edge não deve decidir autonomamente quais objetos ou fragmentos pode replicar.
 
+## Liderança degradada do plano de dados
+
+Quando houver múltiplas réplicas autorizadas para o mesmo objeto, o Origin pode
+incluir no plano de sincronização um conjunto de eleição por objeto. Esse conjunto
+contém as réplicas elegíveis, o líder determinístico e a época de eleição.
+
+Essa liderança é restrita ao plano de dados. Ela não transforma Replica/Edge em
+Origin, não permite emissão de novos pacotes de acesso, não altera políticas, não
+administra usuários e não substitui o catálogo central.
+
+Se a Replica/Edge perder temporariamente comunicação com o Origin, ela pode servir
+conteúdo local em modo degradado somente quando todas as condições forem verdadeiras:
+
+* o objeto já foi sincronizado e validado por hash;
+* a réplica consta no último conjunto de eleição emitido pelo Origin;
+* a réplica é o líder eleito para aquele objeto;
+* o pacote de acesso e o token apresentados já foram revalidados antes pelo Origin;
+* a autorização local ainda está dentro da janela curta de continuidade;
+* não há revogação ou mudança de política já recebida para aquele conteúdo.
+
+Respostas servidas nesse modo devem ser marcadas como degradadas. Quando o Origin
+voltar, a réplica deve retornar ao fluxo normal de revalidação, aplicar políticas
+pendentes e reportar métricas novamente.
+
+Enquanto o Origin estiver indisponível, usuários e integrações podem manter a
+obtenção de dados já autorizados, mas funcionalidades completas de controle,
+administração, emissão de novas autorizações, alteração de políticas e ingestão
+continuam dependendo do Origin.
+
 ## Sincronização
 
 Durante a sincronização, Replica/Edge deve:

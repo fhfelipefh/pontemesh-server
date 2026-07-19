@@ -500,6 +500,7 @@ mod tests {
             &dashboard_body["mcp"],
             &[
                 "activeSessionsCount",
+                "adminToolsEnabled",
                 "authRequired",
                 "enabled",
                 "endpoint",
@@ -585,7 +586,10 @@ mod tests {
         assert_json_object_keys(
             &origin_metrics_body,
             &[
+                "fallbackEvents",
                 "fullObjectRequests",
+                "integrityFailures",
+                "originOffloadBytes",
                 "rangeRequests",
                 "totalBytesServed",
                 "totalRequests",
@@ -710,8 +714,11 @@ mod tests {
         assert_eq!(create_token.status(), StatusCode::CREATED);
         let created_token = json_body(create_token).await;
         let secret = created_token["secret"].as_str().expect("MCP secret");
-        assert!(secret.starts_with("pmcp_"));
-        assert_eq!(created_token["token"]["tokenPrefix"], &secret[..12]);
+        assert!(secret.starts_with("pm_mcp_"));
+        let token_prefix = created_token["token"]["tokenPrefix"]
+            .as_str()
+            .expect("token prefix");
+        assert!(secret.starts_with(token_prefix));
 
         let initialize = mcp_call(
             app.clone(),
@@ -843,6 +850,187 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(revoked.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn mcp_resources_require_read_tools_and_scopes() {
+        let Some(ctx) = TestContext::new("mcp-resource-scope").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let cookie = login_cookie(app.clone()).await;
+
+        let enable = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/mcp/settings")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"enabled":true,"endpointPath":"/mcp","bindHost":null,"requireAuth":true,"readToolsEnabled":false,"writeToolsEnabled":false,"adminToolsEnabled":false,"exposeResources":true,"exposePrompts":false,"allowLocalhostOnly":true}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(enable.status(), StatusCode::OK);
+
+        let create_token = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/mcp/tokens")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"name":"resource-client","scopes":["read"]}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_token.status(), StatusCode::CREATED);
+        let created_token = json_body(create_token).await;
+        let secret = created_token["secret"].as_str().expect("MCP secret");
+
+        let resources =
+            mcp_call(app.clone(), secret, "resources/list", serde_json::json!({})).await;
+        assert_eq!(
+            resources["result"]["resources"]
+                .as_array()
+                .expect("resources")
+                .len(),
+            0
+        );
+
+        let denied_resource = mcp_call(
+            app,
+            secret,
+            "resources/read",
+            serde_json::json!({ "uri": "pontemesh://storage/summary" }),
+        )
+        .await;
+        assert_eq!(denied_resource["error"]["code"], -32603);
+    }
+
+    #[tokio::test]
+    async fn mcp_write_tools_are_origin_only_and_json_body_is_limited() {
+        let Some(ctx) =
+            TestContext::new_with_role("mcp-replica-safety", InstanceRole::ReplicaEdge).await
+        else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let cookie = login_cookie(app.clone()).await;
+
+        let enable = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/mcp/settings")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"enabled":true,"endpointPath":"/mcp","bindHost":null,"requireAuth":true,"readToolsEnabled":true,"writeToolsEnabled":true,"adminToolsEnabled":true,"exposeResources":false,"exposePrompts":false,"allowLocalhostOnly":true}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(enable.status(), StatusCode::OK);
+
+        let create_token = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/mcp/tokens")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"name":"writer","scopes":["read","write","admin"]}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_token.status(), StatusCode::CREATED);
+        let created_token = json_body(create_token).await;
+        let secret = created_token["secret"].as_str().expect("MCP secret");
+
+        let denied_write = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_create_bucket",
+                "arguments": { "bucket": "replica-must-not-mutate" }
+            }),
+        )
+        .await;
+        assert_eq!(denied_write["error"]["code"], -32603);
+        assert!(
+            denied_write["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("operation requires instance role origin")
+        );
+
+        let oversized = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"ping","params":{{"padding":"{}"}}}}"#,
+            "x".repeat(2 * 1024 * 1024)
+        );
+        let limited = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(oversized))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(limited.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn admin_cookie_is_secure_for_non_local_hosts_without_forwarded_proto() {
+        let Some(ctx) = TestContext::new("secure-cookie-host").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let response = ctx
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/auth/login")
+                    .header(header::HOST, "admin.example.test")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"username":"admin","password":"correct-password"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let cookie = response
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("login must set cookie")
+            .to_str()
+            .expect("cookie must be valid header text");
+        assert!(cookie.contains("; Secure"));
     }
 
     #[tokio::test]
@@ -1321,7 +1509,7 @@ mod tests {
             )
             .await
             .expect("router response");
-        assert_eq!(get_batch_deleted.status(), StatusCode::FORBIDDEN);
+        assert_eq!(get_batch_deleted.status(), StatusCode::NOT_FOUND);
 
         let get_deleted_object = s3_app
             .clone()
@@ -1336,12 +1524,28 @@ mod tests {
             )
             .await
             .expect("router response");
-        assert_eq!(get_deleted_object.status(), StatusCode::FORBIDDEN);
+        assert_eq!(get_deleted_object.status(), StatusCode::NOT_FOUND);
         assert!(
             response_text(get_deleted_object)
                 .await
-                .contains("<Code>InvalidObjectState</Code>")
+                .contains("<Code>NoSuchKey</Code>")
         );
+
+        let delete_default_object = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::DELETE)
+                        .uri("/compat-bucket/default.bin")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid delete default object request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(delete_default_object.status(), StatusCode::NO_CONTENT);
 
         let delete_empty_bucket = s3_app
             .oneshot(
@@ -2451,6 +2655,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replica_edge_serves_cached_authorized_object_when_origin_is_unavailable() {
+        let Some(ctx) =
+            TestContext::new_with_role("replica-edge-degraded-serve", InstanceRole::ReplicaEdge)
+                .await
+        else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let storage_path = ctx.paths.storage_dir();
+        let object_bytes = b"degraded replica data";
+        let object_hash = sha256_hex(object_bytes);
+        let package_token = "package-token-1";
+        let package_token_hash = sha256_hex(package_token.as_bytes());
+        write_replica_local_state(
+            &storage_path,
+            "replica-test",
+            "pkg-1",
+            &package_token_hash,
+            "manifest-1",
+            object_bytes,
+            &object_hash,
+        );
+
+        let degraded = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/pontemesh/replica/access-packages/pkg-1/objects/test-bucket/folder/hello.txt")
+                    .header(header::AUTHORIZATION, format!("Bearer {package_token}"))
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(degraded.status(), StatusCode::OK);
+        assert_eq!(
+            header_value(&degraded, "x-pontemesh-degraded-leader"),
+            "true"
+        );
+        assert_eq!(
+            header_value(&degraded, "x-pontemesh-origin-revalidation"),
+            "unavailable"
+        );
+        assert_eq!(
+            header_value(&degraded, "x-pontemesh-election-leader-id"),
+            "replica-test"
+        );
+        assert_eq!(response_bytes(degraded).await.as_ref(), object_bytes);
+
+        write_replica_local_state(
+            &storage_path,
+            "replica-other",
+            "pkg-1",
+            &package_token_hash,
+            "manifest-1",
+            object_bytes,
+            &object_hash,
+        );
+        let not_leader = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/pontemesh/replica/access-packages/pkg-1/objects/test-bucket/folder/hello.txt")
+                    .header(header::AUTHORIZATION, format!("Bearer {package_token}"))
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(not_leader.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let not_leader_body = json_body(not_leader).await;
+        assert!(
+            not_leader_body["error"]
+                .as_str()
+                .expect("error text")
+                .contains("not_elected_leader")
+        );
+    }
+
+    #[tokio::test]
     async fn postgres_origin_catalog_policy_metrics_revocation_and_replica_flow() {
         let Some(ctx) = TestContext::new("postgres-origin-flow").await else {
             return;
@@ -2576,6 +2862,14 @@ mod tests {
         let manifest_body: serde_json::Value =
             serde_json::from_str(&response_text(manifest).await).expect("manifest JSON");
         assert_eq!(manifest_body["fragmentSizeBytes"], 1024);
+        assert_eq!(manifest_body["signatureAlgorithm"], "HMAC-SHA256");
+        assert_eq!(
+            manifest_body["signature"]
+                .as_str()
+                .expect("manifest signature")
+                .len(),
+            64
+        );
         let manifest_id = manifest_body["manifestId"]
             .as_str()
             .expect("manifest id")
@@ -2607,6 +2901,18 @@ mod tests {
             package_body["manifest"]["manifestId"].as_str(),
             Some(manifest_id.as_str())
         );
+        assert_eq!(package_body["signatureAlgorithm"], "HMAC-SHA256");
+        assert_eq!(
+            package_body["signature"]
+                .as_str()
+                .expect("package signature")
+                .len(),
+            64
+        );
+        assert_eq!(
+            package_body["manifest"]["signature"].as_str(),
+            manifest_body["signature"].as_str()
+        );
         let package_manifest_id: Option<String> = sqlx_core::query_scalar::query_scalar(
             "SELECT object_manifest_id::text FROM access_packages WHERE id = $1::uuid",
         )
@@ -2615,6 +2921,28 @@ mod tests {
         .await
         .expect("access package manifest id");
         assert_eq!(package_manifest_id.as_deref(), Some(manifest_id.as_str()));
+        let persisted_signature_algorithm: Option<String> = sqlx_core::query_scalar::query_scalar(
+            "SELECT signature_algorithm FROM access_packages WHERE id = $1::uuid",
+        )
+        .bind(package_body["id"].as_str().expect("access package id"))
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("access package signature algorithm");
+        let persisted_signature: Option<String> = sqlx_core::query_scalar::query_scalar(
+            "SELECT signature FROM access_packages WHERE id = $1::uuid",
+        )
+        .bind(package_body["id"].as_str().expect("access package id"))
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("access package signature");
+        assert_eq!(
+            persisted_signature_algorithm.as_deref(),
+            Some("HMAC-SHA256")
+        );
+        assert_eq!(
+            persisted_signature.as_deref(),
+            package_body["signature"].as_str()
+        );
 
         let package_id = package_body["id"].as_str().expect("access package id");
         let package_token = package_body["packageToken"]
@@ -2741,6 +3069,14 @@ mod tests {
         assert_eq!(
             sync_plan_body["objects"][0]["manifestId"].as_str(),
             Some(manifest_id.as_str())
+        );
+        assert_eq!(
+            sync_plan_body["objects"][0]["electionLeaderId"].as_str(),
+            Some(replica_id)
+        );
+        assert_eq!(
+            sync_plan_body["objects"][0]["replicaSet"][0]["replicaId"].as_str(),
+            Some(replica_id)
         );
         assert_eq!(
             sync_plan_body["objects"][0]["fragments"][0]["fragmentId"].as_str(),
@@ -3618,6 +3954,32 @@ mod tests {
             .expect("router response");
         assert_eq!(revoke_replica.status(), StatusCode::OK);
 
+        let revocation_update = app
+            .clone()
+            .oneshot(
+                signed_replica_request(
+                    Request::builder()
+                        .uri(format!("/pontemesh/replicas/{replica_id}/policy-updates"))
+                        .body(Body::empty()),
+                    replica_token,
+                    "nonce-revoked-policy-0004",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(revocation_update.status(), StatusCode::OK);
+        let revocation_updates: serde_json::Value =
+            serde_json::from_str(&response_text(revocation_update).await)
+                .expect("policy update JSON");
+        assert!(
+            revocation_updates
+                .as_array()
+                .expect("policy updates")
+                .iter()
+                .any(|update| update["updateType"] == "replica_revoked")
+        );
+
         let sync_plan_after_replica_revoke = app
             .oneshot(
                 signed_replica_request(
@@ -3642,6 +4004,7 @@ mod tests {
         app: Router,
         s3_app: Router,
         catalog: Catalog,
+        paths: PontemeshHome,
     }
 
     impl TestContext {
@@ -3691,12 +4054,13 @@ mod tests {
                 .expect("admin user");
             let setup = setup::SetupState::new();
             let app = web_router(paths.clone(), setup.clone(), catalog.clone());
-            let s3_app = s3_router(paths, setup, catalog.clone());
+            let s3_app = s3_router(paths.clone(), setup, catalog.clone());
             Some(Self {
                 guard,
                 app,
                 s3_app,
                 catalog,
+                paths,
             })
         }
     }
@@ -3705,7 +4069,7 @@ mod tests {
         let pool = PgPool::connect(database_url)
             .await
             .expect("connect test database");
-        sqlx_core::query::query("DROP SCHEMA public CASCADE")
+        sqlx_core::query::query("DROP SCHEMA IF EXISTS public CASCADE")
             .execute(&pool)
             .await
             .expect("drop public schema");
@@ -4089,6 +4453,75 @@ mod tests {
         body.extend_from_slice(b"\r\n");
         body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
         body
+    }
+
+    fn write_replica_local_state(
+        storage_path: &std::path::Path,
+        election_leader_id: &str,
+        package_id: &str,
+        package_token_hash: &str,
+        manifest_id: &str,
+        object_bytes: &[u8],
+        object_hash: &str,
+    ) {
+        let replica_root = storage_path.join("replica");
+        let fragments_dir = replica_root.join("fragments");
+        fs::create_dir_all(&fragments_dir).expect("replica fragments dir");
+        let fragment_path = fragments_dir.join("fragment-1.bin");
+        fs::write(&fragment_path, object_bytes).expect("replica fragment file");
+        let now = chrono::Utc::now();
+        let state = serde_json::json!({
+            "objects": {
+                "test-bucket/folder/hello.txt": {
+                    "bucket": "test-bucket",
+                    "key": "folder/hello.txt",
+                    "manifestId": manifest_id,
+                    "sha256": object_hash,
+                    "sizeBytes": object_bytes.len() as i64,
+                    "contentType": "application/octet-stream",
+                    "syncedAt": now.to_rfc3339(),
+                    "electionEpoch": format!("AVAILABLE:{manifest_id}"),
+                    "electionLeaderId": election_leader_id,
+                    "replicaSet": [
+                        {
+                            "replicaId": "replica-test",
+                            "replicaName": "replica-test",
+                            "endpoint": "https://edge.example.com",
+                            "lastSeenAt": now.to_rfc3339()
+                        },
+                        {
+                            "replicaId": "replica-other",
+                            "replicaName": "replica-other",
+                            "endpoint": "https://edge-other.example.com",
+                            "lastSeenAt": now.to_rfc3339()
+                        }
+                    ],
+                    "accessPackages": {
+                        package_id: {
+                            "packageTokenHash": package_token_hash,
+                            "manifestId": manifest_id,
+                            "validatedAt": now.to_rfc3339(),
+                            "offlineUntil": (now + chrono::Duration::minutes(1)).to_rfc3339()
+                        }
+                    },
+                    "fragments": {
+                        "fragment-1": {
+                            "index": 0,
+                            "sha256": object_hash,
+                            "sizeBytes": object_bytes.len() as i64,
+                            "path": fragment_path,
+                            "syncedAt": now.to_rfc3339()
+                        }
+                    }
+                }
+            },
+            "lastPolicyUpdateAt": null
+        });
+        fs::write(
+            replica_root.join("state.json"),
+            serde_json::to_vec_pretty(&state).expect("replica local state JSON"),
+        )
+        .expect("replica local state file");
     }
 
     fn test_home(name: &str) -> PontemeshHome {

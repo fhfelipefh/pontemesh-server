@@ -30,7 +30,22 @@ struct SyncObject {
     content_type: String,
     sha256: String,
     state: String,
+    #[serde(default)]
+    election_epoch: String,
+    #[serde(default)]
+    election_leader_id: Option<String>,
+    #[serde(default)]
+    replica_set: Vec<ReplicaSyncMember>,
     fragments: Vec<SyncFragment>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplicaSyncMember {
+    replica_id: String,
+    replica_name: String,
+    endpoint: Option<String>,
+    last_seen_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -72,6 +87,23 @@ struct LocalObjectState {
     content_type: String,
     fragments: HashMap<String, LocalFragmentState>,
     synced_at: String,
+    #[serde(default)]
+    election_epoch: String,
+    #[serde(default)]
+    election_leader_id: Option<String>,
+    #[serde(default)]
+    replica_set: Vec<ReplicaSyncMember>,
+    #[serde(default)]
+    access_packages: HashMap<String, CachedAccessPackage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedAccessPackage {
+    package_token_hash: String,
+    manifest_id: String,
+    validated_at: String,
+    offline_until: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -156,9 +188,10 @@ async fn sync_once(
         let object_id = object_key_id(&object.bucket, &object.key);
         active.insert(object_id.clone());
         if object_is_complete(state.objects.get(&object_id), &object) {
-            if let Some(local) = state.objects.get(&object_id) {
-                announce_availability(client, config, &object, available_fragment_indexes(local))
-                    .await?;
+            if let Some(local) = state.objects.get_mut(&object_id) {
+                refresh_election_metadata(local, &object);
+                let available_fragments = available_fragment_indexes(local);
+                announce_availability(client, config, &object, available_fragments).await?;
             }
             continue;
         }
@@ -218,6 +251,10 @@ async fn sync_object_fragments(
             content_type: object.content_type.clone(),
             fragments: HashMap::new(),
             synced_at: chrono::Utc::now().to_rfc3339(),
+            election_epoch: object.election_epoch.clone(),
+            election_leader_id: object.election_leader_id.clone(),
+            replica_set: object.replica_set.clone(),
+            access_packages: HashMap::new(),
         });
 
     let mut bytes_synced = 0;
@@ -271,7 +308,14 @@ async fn sync_object_fragments(
     }
 
     local.synced_at = chrono::Utc::now().to_rfc3339();
+    refresh_election_metadata(&mut local, object);
     Ok((bytes_synced, fragments_synced, sync_failures, local))
+}
+
+fn refresh_election_metadata(local: &mut LocalObjectState, object: &SyncObject) {
+    local.election_epoch = object.election_epoch.clone();
+    local.election_leader_id = object.election_leader_id.clone();
+    local.replica_set = object.replica_set.clone();
 }
 
 async fn sync_fragment(
@@ -432,6 +476,16 @@ async fn apply_policy_updates(
     let updates =
         signed_json::<Vec<PolicyUpdate>>(client, config, Method::GET, &path, None).await?;
     for update in updates {
+        if update.update_type == "replica_revoked" {
+            remove_matching_objects(config, state, None, None).await?;
+            state.last_policy_update_at = Some(update.created_at);
+            save_state(&config.storage_path, state).await?;
+            warn!(
+                update_id = %update.id,
+                "replica credential was revoked by Origin; local synchronized objects were removed"
+            );
+            bail!("replica credential was revoked by Origin");
+        }
         if update.update_type.contains("revoked") || update.update_type.contains("policy") {
             remove_matching_objects(
                 config,
