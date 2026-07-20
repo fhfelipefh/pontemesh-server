@@ -1578,6 +1578,21 @@
   gap: 14px;
 }
 
+.bucket-policy-advanced {
+  display: grid;
+  gap: var(--pm-gap-md);
+  padding-top: var(--pm-gap-sm);
+  border-top: 1px solid var(--pm-border);
+}
+
+.bucket-policy-advanced h4 {
+  margin: 0;
+  color: var(--pm-deep-navy);
+  font-size: 0.92rem;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
 .buckets-search {
   display: flex;
   align-items: center;

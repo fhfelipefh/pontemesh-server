@@ -73,21 +73,36 @@
 }
 
 .form-field input:not([type="checkbox"]):not([type="radio"]),
-.form-field select {
+.form-field select,
+.form-field textarea {
   width: 100%;
   min-width: 0;
-  height: var(--pm-control-height);
   border: 1px solid var(--pm-border-medium);
   border-radius: var(--pm-control-radius);
-  padding: 0 12px;
   color: var(--pm-text, var(--pm-deep-navy));
   background: var(--pm-surface);
   font-size: 0.9rem;
   font-weight: 650;
 }
 
+.form-field input:not([type="checkbox"]):not([type="radio"]),
+.form-field select {
+  height: var(--pm-control-height);
+  padding: 0 12px;
+}
+
+.form-field textarea {
+  min-height: 132px;
+  resize: vertical;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .form-field input:not([type="checkbox"]):not([type="radio"]):focus,
-.form-field select:focus {
+.form-field select:focus,
+.form-field textarea:focus {
   border-color: var(--pm-accent-cyan-blue);
   box-shadow: 0 0 0 4px var(--pm-cyan-focus);
   outline: none;

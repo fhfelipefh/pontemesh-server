@@ -104,6 +104,14 @@ pub struct UpdateBucketPolicyRequest {
     s3_object_tagging_enabled: Option<bool>,
     s3_checksum_algorithm: Option<String>,
     s3_multipart_abort_days: Option<i64>,
+    s3_default_encryption_algorithm: Option<String>,
+    s3_default_encryption_key_id: Option<String>,
+    s3_object_lock_enabled: Option<bool>,
+    s3_object_lock_default_mode: Option<String>,
+    s3_object_lock_default_retain_days: Option<i64>,
+    s3_lifecycle_rules: Option<serde_json::Value>,
+    s3_resource_policy: Option<serde_json::Value>,
+    s3_event_notifications: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -658,14 +666,26 @@ pub async fn update_bucket_policy(
             .s3_checksum_algorithm
             .unwrap_or_else(|| "SHA256".to_owned()),
         s3_multipart_abort_days: payload.s3_multipart_abort_days.unwrap_or(7),
-        s3_default_encryption_algorithm: current.s3_default_encryption_algorithm,
-        s3_default_encryption_key_id: current.s3_default_encryption_key_id,
-        s3_object_lock_enabled: current.s3_object_lock_enabled,
-        s3_object_lock_default_mode: current.s3_object_lock_default_mode,
-        s3_object_lock_default_retain_days: current.s3_object_lock_default_retain_days,
-        s3_lifecycle_rules: current.s3_lifecycle_rules,
-        s3_resource_policy: current.s3_resource_policy,
-        s3_event_notifications: current.s3_event_notifications,
+        s3_default_encryption_algorithm: payload
+            .s3_default_encryption_algorithm
+            .unwrap_or(current.s3_default_encryption_algorithm),
+        s3_default_encryption_key_id: payload
+            .s3_default_encryption_key_id
+            .or(current.s3_default_encryption_key_id),
+        s3_object_lock_enabled: payload
+            .s3_object_lock_enabled
+            .unwrap_or(current.s3_object_lock_enabled),
+        s3_object_lock_default_mode: payload
+            .s3_object_lock_default_mode
+            .or(current.s3_object_lock_default_mode),
+        s3_object_lock_default_retain_days: payload
+            .s3_object_lock_default_retain_days
+            .or(current.s3_object_lock_default_retain_days),
+        s3_lifecycle_rules: payload.s3_lifecycle_rules.unwrap_or(current.s3_lifecycle_rules),
+        s3_resource_policy: payload.s3_resource_policy.unwrap_or(current.s3_resource_policy),
+        s3_event_notifications: payload
+            .s3_event_notifications
+            .unwrap_or(current.s3_event_notifications),
     };
     match state
         .catalog

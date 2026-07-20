@@ -107,7 +107,15 @@ const bucketPolicy = {
   s3VersioningEnabled: false,
   s3ObjectTaggingEnabled: true,
   s3ChecksumAlgorithm: "SHA256",
-  s3MultipartAbortDays: 7
+  s3MultipartAbortDays: 7,
+  s3DefaultEncryptionAlgorithm: "NONE",
+  s3DefaultEncryptionKeyId: null,
+  s3ObjectLockEnabled: false,
+  s3ObjectLockDefaultMode: null,
+  s3ObjectLockDefaultRetainDays: null,
+  s3LifecycleRules: [],
+  s3ResourcePolicy: { Version: "2012-10-17", Statement: [] },
+  s3EventNotifications: { EventBridgeEnabled: false, Rules: [] }
 };
 
 type AdminFixtureOptions = {

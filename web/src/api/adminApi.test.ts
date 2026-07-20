@@ -27,6 +27,17 @@ import { createReplicaCredential, listReplicas, revokeReplica } from "./replicas
 import { getStorageStatus } from "./storageApi";
 
 describe("admin API clients", () => {
+  const s3AdvancedPolicy = {
+    s3DefaultEncryptionAlgorithm: "NONE",
+    s3DefaultEncryptionKeyId: null,
+    s3ObjectLockEnabled: false,
+    s3ObjectLockDefaultMode: null,
+    s3ObjectLockDefaultRetainDays: null,
+    s3LifecycleRules: [],
+    s3ResourcePolicy: { Version: "2012-10-17", Statement: [] },
+    s3EventNotifications: { EventBridgeEnabled: false, Rules: [] }
+  };
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -158,6 +169,7 @@ describe("admin API clients", () => {
       s3ObjectTaggingEnabled: true,
       s3ChecksumAlgorithm: "SHA256",
       s3MultipartAbortDays: 7,
+      ...s3AdvancedPolicy,
       updatedAt: "2026-07-01T12:00:00Z"
     };
     const fetchMock = vi.spyOn(globalThis, "fetch")
@@ -180,7 +192,8 @@ describe("admin API clients", () => {
       s3VersioningEnabled: false,
       s3ObjectTaggingEnabled: true,
       s3ChecksumAlgorithm: "SHA256",
-      s3MultipartAbortDays: 7
+      s3MultipartAbortDays: 7,
+      ...s3AdvancedPolicy
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/buckets/media/policy", {
@@ -206,7 +219,8 @@ describe("admin API clients", () => {
         s3VersioningEnabled: false,
         s3ObjectTaggingEnabled: true,
         s3ChecksumAlgorithm: "SHA256",
-        s3MultipartAbortDays: 7
+        s3MultipartAbortDays: 7,
+        ...s3AdvancedPolicy
       })
     });
   });

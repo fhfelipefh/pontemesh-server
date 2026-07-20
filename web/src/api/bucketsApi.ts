@@ -24,6 +24,14 @@ export type BucketPolicy = {
   s3ObjectTaggingEnabled: boolean;
   s3ChecksumAlgorithm: "SHA256" | "ETAG_MD5_COMPATIBLE" | "NONE" | string;
   s3MultipartAbortDays: number;
+  s3DefaultEncryptionAlgorithm: "NONE" | "AES256" | "aws:kms" | string;
+  s3DefaultEncryptionKeyId: string | null;
+  s3ObjectLockEnabled: boolean;
+  s3ObjectLockDefaultMode: "GOVERNANCE" | "COMPLIANCE" | string | null;
+  s3ObjectLockDefaultRetainDays: number | null;
+  s3LifecycleRules: unknown;
+  s3ResourcePolicy: unknown;
+  s3EventNotifications: unknown;
   updatedAt: string;
 };
 
@@ -43,6 +51,14 @@ export type UpdateBucketPolicyInput = {
   s3ObjectTaggingEnabled: boolean;
   s3ChecksumAlgorithm: string;
   s3MultipartAbortDays: number;
+  s3DefaultEncryptionAlgorithm: string;
+  s3DefaultEncryptionKeyId: string | null;
+  s3ObjectLockEnabled: boolean;
+  s3ObjectLockDefaultMode: string | null;
+  s3ObjectLockDefaultRetainDays: number | null;
+  s3LifecycleRules: unknown;
+  s3ResourcePolicy: unknown;
+  s3EventNotifications: unknown;
 };
 
 export type ObjectSummary = {

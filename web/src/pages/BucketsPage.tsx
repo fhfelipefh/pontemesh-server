@@ -350,6 +350,11 @@ type BucketDrawerProps = {
 function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError, onConfirmDeleteObject }: BucketDrawerProps) {
   const { t } = useTranslation();
   const [policy, setPolicy] = useState<BucketPolicy | null>(null);
+  const [s3Json, setS3Json] = useState({
+    lifecycle: "",
+    resourcePolicy: "",
+    notifications: ""
+  });
   const [policyError, setPolicyError] = useState("");
   const [policySaving, setPolicySaving] = useState(false);
 
@@ -372,6 +377,7 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
       .then((nextPolicy) => {
         if (active) {
           setPolicy(nextPolicy);
+          setS3Json(policyJsonState(nextPolicy));
         }
       })
       .catch((loadError) => {
@@ -387,6 +393,12 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
   async function savePolicy(nextPolicy: BucketPolicy) {
     setPolicySaving(true);
     setPolicyError("");
+    const parsedJson = parseAdvancedS3Json(s3Json, t);
+    if ("error" in parsedJson) {
+      setPolicySaving(false);
+      setPolicyError(parsedJson.error);
+      return;
+    }
     try {
       const saved = await updateBucketPolicy(bucket.name, {
         accessPackageTtlSeconds: nextPolicy.accessPackageTtlSeconds,
@@ -403,9 +415,18 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
         s3VersioningEnabled: nextPolicy.s3VersioningEnabled,
         s3ObjectTaggingEnabled: nextPolicy.s3ObjectTaggingEnabled,
         s3ChecksumAlgorithm: nextPolicy.s3ChecksumAlgorithm,
-        s3MultipartAbortDays: nextPolicy.s3MultipartAbortDays
+        s3MultipartAbortDays: nextPolicy.s3MultipartAbortDays,
+        s3DefaultEncryptionAlgorithm: nextPolicy.s3DefaultEncryptionAlgorithm,
+        s3DefaultEncryptionKeyId: emptyStringToNull(nextPolicy.s3DefaultEncryptionKeyId),
+        s3ObjectLockEnabled: nextPolicy.s3ObjectLockEnabled,
+        s3ObjectLockDefaultMode: nextPolicy.s3ObjectLockDefaultMode,
+        s3ObjectLockDefaultRetainDays: nextPolicy.s3ObjectLockDefaultRetainDays,
+        s3LifecycleRules: parsedJson.lifecycle,
+        s3ResourcePolicy: parsedJson.resourcePolicy,
+        s3EventNotifications: parsedJson.notifications
       });
       setPolicy(saved);
+      setS3Json(policyJsonState(saved));
     } catch (saveError) {
       setPolicyError(saveError instanceof Error ? saveError.message : t("setup.buckets.policySaveFailed"));
     } finally {
@@ -598,6 +619,87 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
                   />
                 </CheckboxField>
               </CheckboxGrid>
+              <div className="bucket-policy-advanced" data-testid="s3-advanced-policy-section">
+                <h4>{t("setup.buckets.s3AdvancedTitle")}</h4>
+                <FormGrid columns={4}>
+                  <FormField label={t("setup.buckets.s3DefaultEncryptionAlgorithm")} htmlFor="bucket-policy-s3-encryption">
+                    <select
+                      id="bucket-policy-s3-encryption"
+                      value={policy.s3DefaultEncryptionAlgorithm}
+                      onChange={(event) => setPolicy({ ...policy, s3DefaultEncryptionAlgorithm: event.target.value })}
+                    >
+                      <option value="NONE">{t("setup.common.disabled")}</option>
+                      <option value="AES256">AES256</option>
+                      <option value="aws:kms">aws:kms</option>
+                    </select>
+                  </FormField>
+                  <FormField label={t("setup.buckets.s3DefaultEncryptionKeyId")} htmlFor="bucket-policy-s3-encryption-key">
+                    <input
+                      id="bucket-policy-s3-encryption-key"
+                      value={policy.s3DefaultEncryptionKeyId ?? ""}
+                      onChange={(event) => setPolicy({ ...policy, s3DefaultEncryptionKeyId: event.target.value })}
+                    />
+                  </FormField>
+                  <FormField label={t("setup.buckets.s3ObjectLockDefaultMode")} htmlFor="bucket-policy-s3-object-lock-mode">
+                    <select
+                      id="bucket-policy-s3-object-lock-mode"
+                      value={policy.s3ObjectLockDefaultMode ?? ""}
+                      onChange={(event) => setPolicy({ ...policy, s3ObjectLockDefaultMode: emptyStringToNull(event.target.value) })}
+                    >
+                      <option value="">{t("setup.common.disabled")}</option>
+                      <option value="GOVERNANCE">GOVERNANCE</option>
+                      <option value="COMPLIANCE">COMPLIANCE</option>
+                    </select>
+                  </FormField>
+                  <FormField label={t("setup.buckets.s3ObjectLockDefaultRetainDays")} htmlFor="bucket-policy-s3-object-lock-days">
+                    <input
+                      id="bucket-policy-s3-object-lock-days"
+                      type="number"
+                      min={1}
+                      value={policy.s3ObjectLockDefaultRetainDays ?? ""}
+                      onChange={(event) => setPolicy({ ...policy, s3ObjectLockDefaultRetainDays: event.target.value ? Number(event.target.value) : null })}
+                    />
+                  </FormField>
+                </FormGrid>
+                <CheckboxGrid columns={2}>
+                  <CheckboxField label={t("setup.buckets.s3ObjectLockEnabled")}>
+                    <input
+                      type="checkbox"
+                      checked={policy.s3ObjectLockEnabled}
+                      onChange={(event) => setPolicy({ ...policy, s3ObjectLockEnabled: event.target.checked })}
+                    />
+                  </CheckboxField>
+                </CheckboxGrid>
+                <FormGrid columns={1}>
+                  <FormField label={t("setup.buckets.s3LifecycleRules")} htmlFor="bucket-policy-s3-lifecycle-rules">
+                    <textarea
+                      id="bucket-policy-s3-lifecycle-rules"
+                      rows={5}
+                      spellCheck={false}
+                      value={s3Json.lifecycle}
+                      onChange={(event) => setS3Json({ ...s3Json, lifecycle: event.target.value })}
+                    />
+                  </FormField>
+                  <FormField label={t("setup.buckets.s3ResourcePolicy")} htmlFor="bucket-policy-s3-resource-policy">
+                    <textarea
+                      id="bucket-policy-s3-resource-policy"
+                      rows={5}
+                      spellCheck={false}
+                      value={s3Json.resourcePolicy}
+                      onChange={(event) => setS3Json({ ...s3Json, resourcePolicy: event.target.value })}
+                    />
+                  </FormField>
+                  <FormField label={t("setup.buckets.s3EventNotifications")} htmlFor="bucket-policy-s3-event-notifications">
+                    <textarea
+                      id="bucket-policy-s3-event-notifications"
+                      rows={5}
+                      spellCheck={false}
+                      value={s3Json.notifications}
+                      onChange={(event) => setS3Json({ ...s3Json, notifications: event.target.value })}
+                    />
+                  </FormField>
+                </FormGrid>
+              </div>
             </>
           ) : null}
         </FormSection>
@@ -612,4 +714,54 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
       </aside>
     </div>
   );
+}
+
+function policyJsonState(policy: BucketPolicy) {
+  return {
+    lifecycle: stableJson(policy.s3LifecycleRules ?? []),
+    resourcePolicy: stableJson(policy.s3ResourcePolicy ?? { Version: "2012-10-17", Statement: [] }),
+    notifications: stableJson(policy.s3EventNotifications ?? { EventBridgeEnabled: false, Rules: [] })
+  };
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+function parseAdvancedS3Json(
+  fields: { lifecycle: string; resourcePolicy: string; notifications: string },
+  t: (key: string, options?: Record<string, string>) => string
+):
+  | { lifecycle: unknown; resourcePolicy: unknown; notifications: unknown }
+  | { error: string } {
+  const lifecycle = parseJsonField(fields.lifecycle, t("setup.buckets.s3LifecycleRules"), t("setup.buckets.invalidJson"));
+  if ("error" in lifecycle) {
+    return lifecycle;
+  }
+  const resourcePolicy = parseJsonField(fields.resourcePolicy, t("setup.buckets.s3ResourcePolicy"), t("setup.buckets.invalidJson"));
+  if ("error" in resourcePolicy) {
+    return resourcePolicy;
+  }
+  const notifications = parseJsonField(fields.notifications, t("setup.buckets.s3EventNotifications"), t("setup.buckets.invalidJson"));
+  if ("error" in notifications) {
+    return notifications;
+  }
+  return {
+    lifecycle: lifecycle.value,
+    resourcePolicy: resourcePolicy.value,
+    notifications: notifications.value
+  };
+}
+
+function parseJsonField(value: string, label: string, invalidJson: string): { value: unknown } | { error: string } {
+  try {
+    return { value: JSON.parse(value) };
+  } catch {
+    return { error: `${label}: ${invalidJson}` };
+  }
+}
+
+function emptyStringToNull(value: string | null): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed ? trimmed : null;
 }

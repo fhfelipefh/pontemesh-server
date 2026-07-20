@@ -103,6 +103,21 @@ test.describe("Buckets page layout quality", () => {
 
     await expect(section.getByText(/TTL máximo do pacote|Max package TTL/i)).toBeVisible();
     await expect(section.getByText(/Permitir delimiter S3|Allow S3 delimiter/i)).toBeVisible();
+
+    const s3Advanced = page.getByTestId("s3-advanced-policy-section");
+    await expect(s3Advanced).toBeVisible();
+    await expect(s3Advanced.getByText(/S3 avançado|Advanced S3/i)).toBeVisible();
+    await expect(s3Advanced.getByLabel(/Criptografia padrão|Default encryption/i)).toBeVisible();
+    await expect(s3Advanced.getByLabel(/Object Lock/i)).toBeVisible();
+    await expect(s3Advanced.getByLabel(/Lifecycle rules JSON|Regras lifecycle JSON/i)).toBeVisible();
+    const jsonEditors = s3Advanced.locator("textarea");
+    await expect(jsonEditors).toHaveCount(3);
+    for (let index = 0; index < 3; index++) {
+      await expectElementMinSize(jsonEditors.nth(index), {
+        label: `S3 JSON editor ${index}`,
+        minHeight: 120
+      });
+    }
     await expectNoHorizontalOverflow(page);
   });
 
