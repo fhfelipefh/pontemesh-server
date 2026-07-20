@@ -1,4 +1,4 @@
-.PHONY: check i18n-check api-contract architecture-check migrations-check e2e-origin-replica
+.PHONY: check i18n-check api-contract architecture-check migrations-check e2e-origin-replica e2e-ha-replica-election
 
 check:
 	$(MAKE) architecture-check
@@ -25,3 +25,6 @@ migrations-check:
 e2e-origin-replica:
 	./scripts/start-e2e-origin-replica.sh --reset
 	cd web && npm run test:e2e:origin-replica
+
+e2e-ha-replica-election:
+	./scripts/e2e-ha-replica-election.sh
