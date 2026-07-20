@@ -61,16 +61,33 @@ GET /{bucket}?list-type=2
 GET /{bucket}?location
 GET /{bucket}?versioning
 PUT /{bucket}?versioning
+GET /{bucket}?versions
+GET /{bucket}?lifecycle
+PUT /{bucket}?lifecycle
+POST /{bucket}?lifecycle
+GET /{bucket}?encryption
+PUT /{bucket}?encryption
+GET /{bucket}?object-lock
+PUT /{bucket}?object-lock
+GET /{bucket}?notification
+PUT /{bucket}?notification
+GET /{bucket}?policy
+PUT /{bucket}?policy
 HEAD /{bucket}
 POST /{bucket}?delete
 DELETE /{bucket}
 PUT /{bucket}/{objectKey}
 HEAD /{bucket}/{objectKey}
 GET /{bucket}/{objectKey}
+GET /{bucket}/{objectKey}?versionId={versionId}
 DELETE /{bucket}/{objectKey}
 GET /{bucket}/{objectKey}?tagging
 PUT /{bucket}/{objectKey}?tagging
 DELETE /{bucket}/{objectKey}?tagging
+GET /{bucket}/{objectKey}?retention
+PUT /{bucket}/{objectKey}?retention
+GET /{bucket}/{objectKey}?legal-hold
+PUT /{bucket}/{objectKey}?legal-hold
 POST /{bucket}/{objectKey}?uploads
 PUT /{bucket}/{objectKey}?partNumber={partNumber}&uploadId={uploadId}
 GET /{bucket}/{objectKey}?uploadId={uploadId}
@@ -285,18 +302,50 @@ A política de bucket inclui parâmetros S3-compatible:
 * `s3VersioningEnabled`;
 * `s3ObjectTaggingEnabled`;
 * `s3ChecksumAlgorithm`;
-* `s3MultipartAbortDays`.
+* `s3MultipartAbortDays`;
+* `s3DefaultEncryptionAlgorithm`;
+* `s3DefaultEncryptionKeyId`;
+* `s3ObjectLockEnabled`;
+* `s3ObjectLockDefaultMode`;
+* `s3ObjectLockDefaultRetainDays`;
+* `s3LifecycleRules`;
+* `s3ResourcePolicy`;
+* `s3EventNotifications`.
 
 Esses campos são administrados pelo painel, API administrativa e MCP. Eles não
 incluem segredos e podem participar de exportação/importação de configuração.
 
-`GET/PUT ?versioning` usa `s3VersioningEnabled` na política do bucket. O
-versionamento físico completo de múltiplas versões S3 ainda é evolução futura,
-mas a configuração já é compatível com clientes que consultam ou ajustam o estado
-do recurso.
+`GET/PUT ?versioning` usa `s3VersioningEnabled` na política do bucket. Quando
+habilitado, cada `PUT Object` cria um `versionId`, `DELETE Object` cria delete
+marker e `GET Object` aceita `versionId` para recuperar versões anteriores.
 
 `GET/PUT/DELETE ?tagging` persiste até 10 tags por objeto ativo quando
 `s3ObjectTaggingEnabled` está habilitado para o bucket.
+
+`GET/PUT ?encryption` configura criptografia server-side local para novos
+objetos. A implementação suporta `AES256` e aceita `aws:kms` como contrato de
+compatibilidade, usando envelope local gerenciado pela instância enquanto não
+houver integração com KMS externo.
+
+`GET/PUT ?object-lock`, `GET/PUT ?retention` e `GET/PUT ?legal-hold` aplicam
+retenção WORM e legal hold sobre versões de objeto. Objetos protegidos não podem
+ser removidos ou sobrescritos até a retenção vencer ou o legal hold ser removido.
+
+`GET/PUT ?lifecycle` persiste regras de expiração e abort de multipart
+incompleto. `POST ?lifecycle` executa a aplicação das regras de forma explícita,
+o que torna o comportamento testável e operacionalmente reproduzível.
+
+`GET/PUT ?policy` persiste política de bucket S3-like com `Allow` e `Deny` por
+principal e ação. `Deny` sempre prevalece; quando houver statements `Allow`, a
+ação precisa casar com um deles.
+
+`GET/PUT ?notification` persiste configuração de eventos. Eventos elegíveis são
+gravados em `s3_notification_events` para integração posterior com barramentos
+externos.
+
+Uploads podem enviar `x-amz-checksum-sha256` ou `x-amz-checksum-crc32`; o Origin
+valida esses checksums antes de aceitar o objeto e retorna os checksums nos
+metadados de leitura.
 
 ## Diferença interna
 

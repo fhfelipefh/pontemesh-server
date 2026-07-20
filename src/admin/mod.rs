@@ -362,6 +362,14 @@ pub async fn import_configuration(
             s3_object_tagging_enabled: policy.s3_object_tagging_enabled,
             s3_checksum_algorithm: policy.s3_checksum_algorithm,
             s3_multipart_abort_days: policy.s3_multipart_abort_days,
+            s3_default_encryption_algorithm: policy.s3_default_encryption_algorithm,
+            s3_default_encryption_key_id: policy.s3_default_encryption_key_id,
+            s3_object_lock_enabled: policy.s3_object_lock_enabled,
+            s3_object_lock_default_mode: policy.s3_object_lock_default_mode,
+            s3_object_lock_default_retain_days: policy.s3_object_lock_default_retain_days,
+            s3_lifecycle_rules: policy.s3_lifecycle_rules,
+            s3_resource_policy: policy.s3_resource_policy,
+            s3_event_notifications: policy.s3_event_notifications,
         };
         if let Err(error) = state
             .catalog
@@ -622,6 +630,10 @@ pub async fn update_bucket_policy(
     Path(bucket_name): Path<String>,
     Json(payload): Json<UpdateBucketPolicyRequest>,
 ) -> Response {
+    let current = match state.catalog.get_bucket_policy(&bucket_name).await {
+        Ok(policy) => policy,
+        Err(error) => return bad_request(error),
+    };
     let update = BucketPolicyUpdate {
         access_package_ttl_seconds: payload.access_package_ttl_seconds,
         fragment_size_bytes: payload.fragment_size_bytes,
@@ -646,6 +658,14 @@ pub async fn update_bucket_policy(
             .s3_checksum_algorithm
             .unwrap_or_else(|| "SHA256".to_owned()),
         s3_multipart_abort_days: payload.s3_multipart_abort_days.unwrap_or(7),
+        s3_default_encryption_algorithm: current.s3_default_encryption_algorithm,
+        s3_default_encryption_key_id: current.s3_default_encryption_key_id,
+        s3_object_lock_enabled: current.s3_object_lock_enabled,
+        s3_object_lock_default_mode: current.s3_object_lock_default_mode,
+        s3_object_lock_default_retain_days: current.s3_object_lock_default_retain_days,
+        s3_lifecycle_rules: current.s3_lifecycle_rules,
+        s3_resource_policy: current.s3_resource_policy,
+        s3_event_notifications: current.s3_event_notifications,
     };
     match state
         .catalog
@@ -1278,6 +1298,14 @@ async fn upload_object_inner(
             content_type: uploaded_file.content_type,
             sha256: uploaded_file.sha256,
             storage_path: object_path.display().to_string(),
+            checksum_sha256: None,
+            checksum_crc32: None,
+            encryption_algorithm: None,
+            encryption_key_id: None,
+            encryption_nonce: None,
+            object_lock_mode: None,
+            retain_until: None,
+            legal_hold: false,
             manifest: uploaded_file.manifest,
         })
         .await

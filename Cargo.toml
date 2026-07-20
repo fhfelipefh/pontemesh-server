@@ -13,11 +13,13 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+aes-gcm = "0.10"
 argon2 = "0.5"
 axum = { version = "0.8", features = ["multipart"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 config = "0.15"
+crc32fast = "1"
 dotenvy = "0.15"
 hmac = "0.12"
 hyper = { version = "1", features = ["server", "http1", "http2"] }

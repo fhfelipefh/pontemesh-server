@@ -9,6 +9,10 @@ use crate::{
     http::AppState,
     s3_auth::S3Identity,
 };
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
+};
 use anyhow::{Context, bail};
 use axum::{
     Extension,
@@ -17,7 +21,9 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::Response,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use http_body_util::BodyExt;
+use rand_core::{OsRng, RngCore};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{cmp, fs, path::PathBuf};
@@ -40,6 +46,13 @@ pub struct ListObjectsQuery {
     location: Option<String>,
     delete: Option<String>,
     versioning: Option<String>,
+    versions: Option<String>,
+    lifecycle: Option<String>,
+    encryption: Option<String>,
+    #[serde(rename = "object-lock")]
+    object_lock: Option<String>,
+    notification: Option<String>,
+    policy: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +63,11 @@ pub struct ObjectMultipartQuery {
     part_number: Option<i32>,
     uploads: Option<String>,
     tagging: Option<String>,
+    #[serde(rename = "versionId")]
+    version_id: Option<String>,
+    retention: Option<String>,
+    #[serde(rename = "legal-hold")]
+    legal_hold: Option<String>,
 }
 
 pub async fn list_buckets(
@@ -154,6 +172,56 @@ pub async fn list_objects(
         };
     }
 
+    if query.versions.is_some() {
+        return match state.catalog.list_object_versions(&bucket_name).await {
+            Ok(versions) => s3_xml_response(
+                StatusCode::OK,
+                list_object_versions_xml(&bucket_name, &versions),
+            ),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
+    if query.lifecycle.is_some() {
+        return match state.catalog.get_bucket_policy(&bucket_name).await {
+            Ok(policy) => {
+                s3_xml_response(StatusCode::OK, lifecycle_xml(&policy.s3_lifecycle_rules))
+            }
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
+    if query.encryption.is_some() {
+        return match state.catalog.get_bucket_policy(&bucket_name).await {
+            Ok(policy) => s3_xml_response(StatusCode::OK, encryption_xml(&policy)),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
+    if query.object_lock.is_some() {
+        return match state.catalog.get_bucket_policy(&bucket_name).await {
+            Ok(policy) => s3_xml_response(StatusCode::OK, object_lock_config_xml(&policy)),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
+    if query.notification.is_some() {
+        return match state.catalog.get_bucket_policy(&bucket_name).await {
+            Ok(policy) => s3_xml_response(
+                StatusCode::OK,
+                notification_xml(&policy.s3_event_notifications),
+            ),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
+    if query.policy.is_some() {
+        return match state.catalog.get_bucket_policy(&bucket_name).await {
+            Ok(policy) => s3_json_response(StatusCode::OK, policy.s3_resource_policy.to_string()),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
     if query.uploads.is_some() {
         return match state
             .catalog
@@ -218,6 +286,19 @@ pub async fn post_bucket(
         return delete_objects(state, identity, bucket_name, body).await;
     }
 
+    if query.lifecycle.is_some() {
+        return match state.catalog.apply_s3_lifecycle(&bucket_name).await {
+            Ok(result) => s3_xml_response(
+                StatusCode::OK,
+                lifecycle_apply_result_xml(
+                    result.expired_objects,
+                    result.aborted_multipart_uploads,
+                ),
+            ),
+            Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+        };
+    }
+
     s3_error(
         StatusCode::BAD_REQUEST,
         "InvalidArgument",
@@ -238,6 +319,26 @@ pub async fn put_bucket(
         return put_bucket_versioning(state, identity, bucket_name, body).await;
     }
 
+    if query.lifecycle.is_some() {
+        return put_bucket_lifecycle(state, identity, bucket_name, body).await;
+    }
+
+    if query.encryption.is_some() {
+        return put_bucket_encryption(state, identity, bucket_name, body).await;
+    }
+
+    if query.object_lock.is_some() {
+        return put_bucket_object_lock(state, identity, bucket_name, body).await;
+    }
+
+    if query.notification.is_some() {
+        return put_bucket_notification(state, identity, bucket_name, body).await;
+    }
+
+    if query.policy.is_some() {
+        return put_bucket_policy_json(state, identity, bucket_name, body).await;
+    }
+
     create_bucket_inner_response(state, identity, bucket_name).await
 }
 
@@ -251,6 +352,30 @@ pub async fn put_object(
 ) -> Response {
     if query.tagging.is_some() {
         return put_object_tagging(state, identity, bucket_name, object_key, body).await;
+    }
+
+    if query.retention.is_some() {
+        return put_object_retention(
+            state,
+            identity,
+            bucket_name,
+            object_key,
+            query.version_id,
+            body,
+        )
+        .await;
+    }
+
+    if query.legal_hold.is_some() {
+        return put_object_legal_hold(
+            state,
+            identity,
+            bucket_name,
+            object_key,
+            query.version_id,
+            body,
+        )
+        .await;
     }
 
     if let (Some(upload_id), Some(part_number)) = (query.upload_id.as_deref(), query.part_number) {
@@ -305,6 +430,10 @@ pub async fn put_object(
             Response::builder()
                 .status(StatusCode::OK)
                 .header("ETag", format!("\"{}\"", object.sha256))
+                .header(
+                    "x-amz-version-id",
+                    object.version_id.as_deref().unwrap_or(""),
+                )
                 .header("x-amz-request-id", request_id)
                 .header(header::CONTENT_LENGTH, "0")
                 .body(Body::empty())
@@ -359,13 +488,16 @@ pub async fn post_object(
 pub async fn head_object(
     State(state): State<AppState>,
     Path((bucket_name, object_key)): Path<(String, String)>,
+    Query(query): Query<ObjectMultipartQuery>,
 ) -> Response {
     match state
         .catalog
-        .get_object_record(&bucket_name, &object_key)
+        .get_object_record_version(&bucket_name, &object_key, query.version_id.as_deref())
         .await
     {
-        Ok(Some(object)) if object.state == "AVAILABLE" => object_metadata_response(&object, true),
+        Ok(Some(object)) if object.state == "AVAILABLE" && !object.is_delete_marker => {
+            object_metadata_response(&object, true)
+        }
         Ok(Some(_)) => s3_error(
             StatusCode::FORBIDDEN,
             "InvalidObjectState",
@@ -395,6 +527,14 @@ pub async fn get_object(
         return get_object_tagging(state, identity, bucket_name, object_key).await;
     }
 
+    if query.retention.is_some() {
+        return get_object_retention(state, bucket_name, object_key, query.version_id).await;
+    }
+
+    if query.legal_hold.is_some() {
+        return get_object_legal_hold(state, bucket_name, object_key, query.version_id).await;
+    }
+
     if let Some(upload_id) = query.upload_id.as_deref() {
         return match state
             .catalog
@@ -409,7 +549,16 @@ pub async fn get_object(
         };
     }
 
-    match get_object_inner(&state, &bucket_name, &object_key, &headers).await {
+    match get_object_inner(
+        &state,
+        &identity.access_key_id,
+        &bucket_name,
+        &object_key,
+        query.version_id.as_deref(),
+        &headers,
+    )
+    .await
+    {
         Ok(served) => {
             record_origin_audit(
                 &state,
@@ -453,10 +602,28 @@ pub async fn delete_object(
         return delete_object_tagging(state, identity, bucket_name, object_key).await;
     }
 
+    if query.retention.is_some() || query.legal_hold.is_some() {
+        return s3_error(
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "Retention and LegalHold support GET and PUT only",
+            Some(&bucket_name),
+            Some(&object_key),
+        );
+    }
+
     if let Some(upload_id) = query.upload_id.as_deref() {
         return abort_multipart_upload(state, identity, bucket_name, object_key, upload_id).await;
     }
 
+    let policy = match state.catalog.get_bucket_policy(&bucket_name).await {
+        Ok(policy) => policy,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    };
+    if let Err(error) = authorize_s3_action(&policy, &identity.access_key_id, "s3:DeleteObject") {
+        return s3_bad_request(error, Some(&bucket_name), Some(&object_key));
+    }
+    let versioning_enabled = policy.s3_versioning_enabled;
     match state.catalog.delete_object(&bucket_name, &object_key).await {
         Ok(()) => {
             audit::event(
@@ -473,9 +640,37 @@ pub async fn delete_object(
                 &format!("bucket={bucket_name}; key={object_key}"),
             )
             .await;
-            Response::builder()
+            let _ = state
+                .catalog
+                .record_s3_notification_event(
+                    &bucket_name,
+                    &object_key,
+                    None,
+                    "s3:ObjectRemoved:Delete",
+                    serde_json::json!({}),
+                )
+                .await;
+            let delete_marker_version_id = if versioning_enabled {
+                state
+                    .catalog
+                    .get_object_record_version(&bucket_name, &object_key, None)
+                    .await
+                    .ok()
+                    .flatten()
+                    .filter(|object| object.is_delete_marker)
+                    .map(|object| object.version_id)
+            } else {
+                None
+            };
+            let mut builder = Response::builder()
                 .status(StatusCode::NO_CONTENT)
-                .header("x-amz-request-id", request_id())
+                .header("x-amz-request-id", request_id());
+            if let Some(version_id) = delete_marker_version_id {
+                builder = builder
+                    .header("x-amz-delete-marker", "true")
+                    .header("x-amz-version-id", version_id);
+            }
+            builder
                 .body(Body::empty())
                 .expect("valid DeleteObject response")
         }
@@ -578,6 +773,14 @@ async fn put_bucket_versioning(
         s3_object_tagging_enabled: current.s3_object_tagging_enabled,
         s3_checksum_algorithm: current.s3_checksum_algorithm,
         s3_multipart_abort_days: current.s3_multipart_abort_days,
+        s3_default_encryption_algorithm: current.s3_default_encryption_algorithm,
+        s3_default_encryption_key_id: current.s3_default_encryption_key_id,
+        s3_object_lock_enabled: current.s3_object_lock_enabled,
+        s3_object_lock_default_mode: current.s3_object_lock_default_mode,
+        s3_object_lock_default_retain_days: current.s3_object_lock_default_retain_days,
+        s3_lifecycle_rules: current.s3_lifecycle_rules,
+        s3_resource_policy: current.s3_resource_policy,
+        s3_event_notifications: current.s3_event_notifications,
     };
     match state
         .catalog
@@ -599,6 +802,156 @@ async fn put_bucket_versioning(
                 .header(header::CONTENT_LENGTH, "0")
                 .body(Body::empty())
                 .expect("valid PutBucketVersioning response")
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+    }
+}
+
+async fn put_bucket_lifecycle(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    body: Body,
+) -> Response {
+    let rules = match parse_lifecycle_config(body).await {
+        Ok(rules) => rules,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), None),
+    };
+    match state
+        .catalog
+        .update_s3_lifecycle_rules(&bucket_name, rules)
+        .await
+    {
+        Ok(()) => {
+            record_origin_audit(
+                &state,
+                "s3_bucket_lifecycle_updated",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}"),
+            )
+            .await;
+            empty_s3_ok()
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+    }
+}
+
+async fn put_bucket_encryption(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    body: Body,
+) -> Response {
+    let (algorithm, key_id) = match parse_encryption_config(body).await {
+        Ok(config) => config,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), None),
+    };
+    match state
+        .catalog
+        .update_s3_encryption(&bucket_name, &algorithm, key_id.as_deref())
+        .await
+    {
+        Ok(()) => {
+            record_origin_audit(
+                &state,
+                "s3_bucket_encryption_updated",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; algorithm={algorithm}"),
+            )
+            .await;
+            empty_s3_ok()
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+    }
+}
+
+async fn put_bucket_object_lock(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    body: Body,
+) -> Response {
+    let (enabled, mode, retain_days) = match parse_object_lock_config(body).await {
+        Ok(config) => config,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), None),
+    };
+    match state
+        .catalog
+        .update_s3_object_lock_config(&bucket_name, enabled, mode.as_deref(), retain_days)
+        .await
+    {
+        Ok(()) => {
+            record_origin_audit(
+                &state,
+                "s3_bucket_object_lock_updated",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; enabled={enabled}"),
+            )
+            .await;
+            empty_s3_ok()
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+    }
+}
+
+async fn put_bucket_notification(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    body: Body,
+) -> Response {
+    let config = match parse_json_or_xml_object(body, "NotificationConfiguration").await {
+        Ok(config) => config,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), None),
+    };
+    match state
+        .catalog
+        .update_s3_event_notifications(&bucket_name, config)
+        .await
+    {
+        Ok(()) => {
+            record_origin_audit(
+                &state,
+                "s3_bucket_notifications_updated",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}"),
+            )
+            .await;
+            empty_s3_ok()
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), None),
+    }
+}
+
+async fn put_bucket_policy_json(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    body: Body,
+) -> Response {
+    let policy = match parse_json_body(body).await {
+        Ok(policy) => policy,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), None),
+    };
+    match state
+        .catalog
+        .update_s3_resource_policy(&bucket_name, policy)
+        .await
+    {
+        Ok(()) => {
+            record_origin_audit(
+                &state,
+                "s3_bucket_policy_updated",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}"),
+            )
+            .await;
+            empty_s3_ok()
         }
         Err(error) => s3_bad_request(error, Some(&bucket_name), None),
     }
@@ -706,6 +1059,124 @@ async fn delete_object_tagging(
                 .header("x-amz-request-id", request_id())
                 .body(Body::empty())
                 .expect("valid DeleteObjectTagging response")
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn get_object_retention(
+    state: AppState,
+    bucket_name: String,
+    object_key: String,
+    version_id: Option<String>,
+) -> Response {
+    match state
+        .catalog
+        .get_object_record_version(&bucket_name, &object_key, version_id.as_deref())
+        .await
+    {
+        Ok(Some(object)) => s3_xml_response(StatusCode::OK, object_retention_xml(&object)),
+        Ok(None) => s3_error(
+            StatusCode::NOT_FOUND,
+            "NoSuchKey",
+            "The specified key does not exist",
+            Some(&bucket_name),
+            Some(&object_key),
+        ),
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn put_object_retention(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    object_key: String,
+    version_id: Option<String>,
+    body: Body,
+) -> Response {
+    let (mode, retain_until) = match parse_object_retention(body).await {
+        Ok(retention) => retention,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    };
+    match state
+        .catalog
+        .update_object_retention(
+            &bucket_name,
+            &object_key,
+            version_id.as_deref(),
+            &mode,
+            retain_until,
+        )
+        .await
+    {
+        Ok(()) => {
+            record_origin_audit(
+                &state,
+                "s3_object_retention_updated",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}"),
+            )
+            .await;
+            empty_s3_ok()
+        }
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn get_object_legal_hold(
+    state: AppState,
+    bucket_name: String,
+    object_key: String,
+    version_id: Option<String>,
+) -> Response {
+    match state
+        .catalog
+        .get_object_record_version(&bucket_name, &object_key, version_id.as_deref())
+        .await
+    {
+        Ok(Some(object)) => {
+            s3_xml_response(StatusCode::OK, object_legal_hold_xml(object.legal_hold))
+        }
+        Ok(None) => s3_error(
+            StatusCode::NOT_FOUND,
+            "NoSuchKey",
+            "The specified key does not exist",
+            Some(&bucket_name),
+            Some(&object_key),
+        ),
+        Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    }
+}
+
+async fn put_object_legal_hold(
+    state: AppState,
+    identity: S3Identity,
+    bucket_name: String,
+    object_key: String,
+    version_id: Option<String>,
+    body: Body,
+) -> Response {
+    let enabled = match parse_object_legal_hold(body).await {
+        Ok(enabled) => enabled,
+        Err(error) => return s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
+    };
+    match state
+        .catalog
+        .update_object_legal_hold(&bucket_name, &object_key, version_id.as_deref(), enabled)
+        .await
+    {
+        Ok(()) => {
+            record_origin_audit(
+                &state,
+                "s3_object_legal_hold_updated",
+                &identity.access_key_id,
+                "success",
+                &format!("bucket={bucket_name}; key={object_key}; enabled={enabled}"),
+            )
+            .await;
+            empty_s3_ok()
         }
         Err(error) => s3_bad_request(error, Some(&bucket_name), Some(&object_key)),
     }
@@ -905,6 +1376,7 @@ async fn put_object_inner(
         .unwrap_or("application/octet-stream")
         .to_owned();
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
+    authorize_s3_action(&policy, principal, "s3:PutObject")?;
 
     let storage_path = config::configured_storage_dir(&state.paths)?;
     let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
@@ -939,6 +1411,11 @@ async fn put_object_inner(
             return Err(error);
         }
     };
+    verify_request_checksums(headers, &streamed)?;
+    let encryption = encryption_for_put(state, &policy, headers)?;
+    if let Some(encryption) = &encryption {
+        encrypt_file_in_place(&temp_path, &streamed.sha256, encryption)?;
+    }
     let object_path = bucket_dir.join(format!("{}-{}", upload_id, streamed.sha256));
     if let Err(error) = fs::rename(&temp_path, &object_path) {
         let _ = fs::remove_file(&temp_path);
@@ -954,6 +1431,7 @@ async fn put_object_inner(
     );
 
     let detail = format!("bucket={bucket_name}; key={object_key}");
+    let lock_defaults = object_lock_defaults(&policy, headers)?;
     let object = match state
         .catalog
         .put_object_with_audit(
@@ -964,6 +1442,14 @@ async fn put_object_inner(
                 content_type,
                 sha256: streamed.sha256,
                 storage_path: object_path.display().to_string(),
+                checksum_sha256: Some(streamed.checksum_sha256),
+                checksum_crc32: Some(streamed.checksum_crc32),
+                encryption_algorithm: encryption.as_ref().map(|value| value.algorithm.clone()),
+                encryption_key_id: encryption.as_ref().and_then(|value| value.key_id.clone()),
+                encryption_nonce: encryption.as_ref().map(|value| value.nonce.to_vec()),
+                object_lock_mode: lock_defaults.mode,
+                retain_until: lock_defaults.retain_until,
+                legal_hold: lock_defaults.legal_hold,
                 manifest: streamed.manifest,
             },
             principal,
@@ -984,6 +1470,16 @@ async fn put_object_inner(
         request_id = %request_id,
         "put_object_catalog_saved"
     );
+    state
+        .catalog
+        .record_s3_notification_event(
+            bucket_name,
+            object_key,
+            object.version_id.as_deref(),
+            "s3:ObjectCreated:Put",
+            serde_json::json!({"requestId": request_id}),
+        )
+        .await?;
     Ok(object)
 }
 
@@ -1061,6 +1557,7 @@ async fn complete_multipart_upload_inner(
         .await?;
     let selected_parts = resolve_completed_parts(&requested_parts, &stored_parts)?;
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
+    authorize_s3_action(&policy, principal, "s3:PutObject")?;
     let storage_path = config::configured_storage_dir(&state.paths)?;
     let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
     let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/uploads");
@@ -1079,6 +1576,10 @@ async fn complete_multipart_upload_inner(
     let temp_path = temp_dir.join(format!("{upload_id}-complete.tmp"));
     let assembled =
         assemble_multipart_object(&selected_parts, &temp_path, policy.fragment_size_bytes).await?;
+    let encryption = encryption_for_put(state, &policy, &HeaderMap::new())?;
+    if let Some(encryption) = &encryption {
+        encrypt_file_in_place(&temp_path, &assembled.sha256, encryption)?;
+    }
     let object_path = bucket_dir.join(format!("{}-{}", upload_id, assembled.sha256));
     if let Err(error) = fs::rename(&temp_path, &object_path) {
         let _ = fs::remove_file(&temp_path);
@@ -1086,6 +1587,7 @@ async fn complete_multipart_upload_inner(
             .with_context(|| format!("failed to move object data {}", object_path.display()));
     }
     let detail = format!("bucket={bucket_name}; key={object_key}; upload_id={upload_id}");
+    let lock_defaults = object_lock_defaults(&policy, &HeaderMap::new())?;
     let object = match state
         .catalog
         .put_object_with_audit(
@@ -1096,6 +1598,14 @@ async fn complete_multipart_upload_inner(
                 content_type: upload.content_type,
                 sha256: assembled.sha256,
                 storage_path: object_path.display().to_string(),
+                checksum_sha256: Some(assembled.checksum_sha256),
+                checksum_crc32: Some(assembled.checksum_crc32),
+                encryption_algorithm: encryption.as_ref().map(|value| value.algorithm.clone()),
+                encryption_key_id: encryption.as_ref().and_then(|value| value.key_id.clone()),
+                encryption_nonce: encryption.as_ref().map(|value| value.nonce.to_vec()),
+                object_lock_mode: lock_defaults.mode,
+                retain_until: lock_defaults.retain_until,
+                legal_hold: lock_defaults.legal_hold,
                 manifest: assembled.manifest,
             },
             principal,
@@ -1113,6 +1623,16 @@ async fn complete_multipart_upload_inner(
         let _ = fs::remove_file(&object_path);
         return Err(error);
     }
+    state
+        .catalog
+        .record_s3_notification_event(
+            bucket_name,
+            object_key,
+            object.version_id.as_deref(),
+            "s3:ObjectCreated:CompleteMultipartUpload",
+            serde_json::json!({"uploadId": upload_id}),
+        )
+        .await?;
     remove_multipart_part_files(&stored_parts);
     Ok(object)
 }
@@ -1140,6 +1660,7 @@ async fn copy_object_inner(
         bail!("copy source object is not available");
     }
     let policy = state.catalog.get_bucket_policy(destination_bucket).await?;
+    authorize_s3_action(&policy, principal, "s3:PutObject")?;
     let storage_path = config::configured_storage_dir(&state.paths)?;
     let bucket_dir = bucket_storage_dir(storage_path, destination_bucket);
     let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/uploads");
@@ -1157,8 +1678,9 @@ async fn copy_object_inner(
     })?;
     let copy_id = uuid::Uuid::new_v4();
     let temp_path = temp_dir.join(format!("{copy_id}-copy.tmp"));
+    let source_plaintext = source_plaintext_path(state, &source)?;
     let copied = match copy_file_to_temp_object(
-        &source.storage_path,
+        &source_plaintext.display().to_string(),
         &temp_path,
         policy.fragment_size_bytes,
     )
@@ -1167,10 +1689,20 @@ async fn copy_object_inner(
         Ok(copied) => copied,
         Err(error) => {
             let _ = fs::remove_file(&temp_path);
+            if source.encryption_algorithm.is_some() {
+                let _ = fs::remove_file(&source_plaintext);
+            }
             return Err(error);
         }
     };
+    if source.encryption_algorithm.is_some() {
+        let _ = fs::remove_file(&source_plaintext);
+    }
     let object_path = bucket_dir.join(format!("{}-{}", copy_id, copied.sha256));
+    let encryption = encryption_for_put(state, &policy, headers)?;
+    if let Some(encryption) = &encryption {
+        encrypt_file_in_place(&temp_path, &copied.sha256, encryption)?;
+    }
     if let Err(error) = fs::rename(&temp_path, &object_path) {
         let _ = fs::remove_file(&temp_path);
         return Err(error)
@@ -1179,6 +1711,7 @@ async fn copy_object_inner(
     let detail = format!(
         "source_bucket={source_bucket}; source_key={source_key}; bucket={destination_bucket}; key={destination_key}"
     );
+    let lock_defaults = object_lock_defaults(&policy, headers)?;
     match state
         .catalog
         .put_object_with_audit(
@@ -1189,6 +1722,14 @@ async fn copy_object_inner(
                 content_type: source.content_type,
                 sha256: copied.sha256,
                 storage_path: object_path.display().to_string(),
+                checksum_sha256: Some(copied.checksum_sha256),
+                checksum_crc32: Some(copied.checksum_crc32),
+                encryption_algorithm: encryption.as_ref().map(|value| value.algorithm.clone()),
+                encryption_key_id: encryption.as_ref().and_then(|value| value.key_id.clone()),
+                encryption_nonce: encryption.as_ref().map(|value| value.nonce.to_vec()),
+                object_lock_mode: lock_defaults.mode,
+                retain_until: lock_defaults.retain_until,
+                legal_hold: lock_defaults.legal_hold,
                 manifest: copied.manifest,
             },
             principal,
@@ -1258,6 +1799,8 @@ async fn delete_objects_inner(
 struct StreamedObject {
     size_bytes: i64,
     sha256: String,
+    checksum_sha256: String,
+    checksum_crc32: String,
     manifest: NewObjectManifest,
 }
 
@@ -1348,6 +1891,8 @@ async fn write_body_to_temp_object(
     );
     Ok(StreamedObject {
         size_bytes,
+        checksum_sha256: BASE64.encode(hex_to_bytes(&sha256)?),
+        checksum_crc32: BASE64.encode(crc32_be_bytes_for_file(temp_path)?),
         sha256,
         manifest: NewObjectManifest {
             fragment_size_bytes,
@@ -1466,7 +2011,20 @@ async fn assemble_multipart_object(
         .with_context(|| format!("failed to flush completed upload {}", temp_path.display()))?;
     Ok(StreamedObject {
         size_bytes,
-        sha256: format!("{:x}", object_hasher.finalize()),
+        sha256: {
+            let sha256 = format!("{:x}", object_hasher.finalize());
+            sha256
+        },
+        checksum_sha256: {
+            let bytes = fs::read(temp_path).with_context(|| {
+                format!(
+                    "failed to checksum completed upload {}",
+                    temp_path.display()
+                )
+            })?;
+            BASE64.encode(Sha256::digest(&bytes))
+        },
+        checksum_crc32: BASE64.encode(crc32_be_bytes_for_file(temp_path)?),
         manifest: NewObjectManifest {
             fragment_size_bytes,
             fragments,
@@ -1548,7 +2106,17 @@ async fn copy_file_to_temp_object(
         .with_context(|| format!("failed to flush copy temp {}", temp_path.display()))?;
     Ok(StreamedObject {
         size_bytes,
-        sha256: format!("{:x}", object_hasher.finalize()),
+        sha256: {
+            let sha256 = format!("{:x}", object_hasher.finalize());
+            sha256
+        },
+        checksum_sha256: {
+            let bytes = fs::read(temp_path).with_context(|| {
+                format!("failed to checksum copied object {}", temp_path.display())
+            })?;
+            BASE64.encode(Sha256::digest(&bytes))
+        },
+        checksum_crc32: BASE64.encode(crc32_be_bytes_for_file(temp_path)?),
         manifest: NewObjectManifest {
             fragment_size_bytes,
             fragments,
@@ -1639,6 +2207,180 @@ async fn parse_bucket_versioning(body: Body) -> anyhow::Result<bool> {
     }
 }
 
+async fn parse_json_body(body: Body) -> anyhow::Result<serde_json::Value> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read JSON body")?
+        .to_bytes();
+    serde_json::from_slice(&bytes).context("request body is not valid JSON")
+}
+
+async fn parse_json_or_xml_object(body: Body, root: &str) -> anyhow::Result<serde_json::Value> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read configuration body")?
+        .to_bytes();
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+        return Ok(value);
+    }
+    let xml = std::str::from_utf8(&bytes).context("configuration body is not UTF-8")?;
+    Ok(serde_json::json!({
+        root: xml
+    }))
+}
+
+async fn parse_lifecycle_config(body: Body) -> anyhow::Result<serde_json::Value> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read lifecycle body")?
+        .to_bytes();
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+        if let Some(rules) = value.get("Rules").or_else(|| value.get("rules")) {
+            return Ok(rules.clone());
+        }
+        return Ok(value);
+    }
+    let xml = std::str::from_utf8(&bytes).context("lifecycle body is not UTF-8")?;
+    let mut rules = Vec::new();
+    for block in extract_xml_blocks(xml, "Rule") {
+        let prefix = extract_xml_tag(&block, "Prefix").unwrap_or_default();
+        let days = extract_xml_tag(&block, "Days").and_then(|value| value.parse::<i64>().ok());
+        let abort_days = extract_xml_tag(&block, "DaysAfterInitiation")
+            .and_then(|value| value.parse::<i64>().ok());
+        rules.push(serde_json::json!({
+            "Status": extract_xml_tag(&block, "Status").unwrap_or_else(|| "Enabled".to_owned()),
+            "Prefix": prefix,
+            "Expiration": days.map(|days| serde_json::json!({"Days": days})),
+            "AbortIncompleteMultipartUpload": abort_days.map(|days| serde_json::json!({"DaysAfterInitiation": days}))
+        }));
+    }
+    Ok(serde_json::Value::Array(rules))
+}
+
+async fn parse_encryption_config(body: Body) -> anyhow::Result<(String, Option<String>)> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read encryption body")?
+        .to_bytes();
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+        let algorithm = value
+            .get("SSEAlgorithm")
+            .or_else(|| value.get("sseAlgorithm"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("AES256")
+            .to_owned();
+        let key_id = value
+            .get("KMSMasterKeyID")
+            .or_else(|| value.get("kmsMasterKeyId"))
+            .and_then(|value| value.as_str())
+            .map(str::to_owned);
+        return Ok((algorithm, key_id));
+    }
+    let xml = std::str::from_utf8(&bytes).context("encryption body is not UTF-8")?;
+    Ok((
+        extract_xml_tag(xml, "SSEAlgorithm").unwrap_or_else(|| "AES256".to_owned()),
+        extract_xml_tag(xml, "KMSMasterKeyID"),
+    ))
+}
+
+async fn parse_object_lock_config(
+    body: Body,
+) -> anyhow::Result<(bool, Option<String>, Option<i64>)> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read object lock body")?
+        .to_bytes();
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+        let enabled = value
+            .get("ObjectLockEnabled")
+            .or_else(|| value.get("objectLockEnabled"))
+            .and_then(|value| value.as_str())
+            .map(|value| value == "Enabled")
+            .unwrap_or(true);
+        let mode = value
+            .get("Mode")
+            .or_else(|| value.get("mode"))
+            .and_then(|value| value.as_str())
+            .map(str::to_owned);
+        let days = value
+            .get("Days")
+            .or_else(|| value.get("days"))
+            .and_then(|value| value.as_i64());
+        return Ok((enabled, mode, days));
+    }
+    let xml = std::str::from_utf8(&bytes).context("object lock body is not UTF-8")?;
+    Ok((
+        extract_xml_tag(xml, "ObjectLockEnabled")
+            .map(|value| value == "Enabled")
+            .unwrap_or(true),
+        extract_xml_tag(xml, "Mode"),
+        extract_xml_tag(xml, "Days").and_then(|value| value.parse::<i64>().ok()),
+    ))
+}
+
+async fn parse_object_retention(
+    body: Body,
+) -> anyhow::Result<(String, chrono::DateTime<chrono::Utc>)> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read object retention body")?
+        .to_bytes();
+    let (mode, retain_until) =
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            (
+                value
+                    .get("Mode")
+                    .or_else(|| value.get("mode"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("GOVERNANCE")
+                    .to_owned(),
+                value
+                    .get("RetainUntilDate")
+                    .or_else(|| value.get("retainUntilDate"))
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("RetainUntilDate is required"))?
+                    .to_owned(),
+            )
+        } else {
+            let xml = std::str::from_utf8(&bytes).context("object retention body is not UTF-8")?;
+            (
+                extract_xml_tag(xml, "Mode").unwrap_or_else(|| "GOVERNANCE".to_owned()),
+                extract_xml_tag(xml, "RetainUntilDate")
+                    .ok_or_else(|| anyhow::anyhow!("RetainUntilDate is required"))?,
+            )
+        };
+    let retain_until = chrono::DateTime::parse_from_rfc3339(&retain_until)
+        .context("RetainUntilDate is invalid")?
+        .with_timezone(&chrono::Utc);
+    Ok((mode, retain_until))
+}
+
+async fn parse_object_legal_hold(body: Body) -> anyhow::Result<bool> {
+    let bytes = body
+        .collect()
+        .await
+        .context("failed to read legal hold body")?
+        .to_bytes();
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+        return Ok(value
+            .get("Status")
+            .or_else(|| value.get("status"))
+            .and_then(|value| value.as_str())
+            .map(|value| value == "ON")
+            .unwrap_or(false));
+    }
+    let xml = std::str::from_utf8(&bytes).context("legal hold body is not UTF-8")?;
+    Ok(extract_xml_tag(xml, "Status")
+        .map(|value| value == "ON")
+        .unwrap_or(false))
+}
+
 async fn parse_object_tagging(body: Body) -> anyhow::Result<Vec<S3ObjectTag>> {
     let bytes = body
         .collect()
@@ -1723,19 +2465,23 @@ fn resolve_completed_parts(
 
 async fn get_object_inner(
     state: &AppState,
+    principal: &str,
     bucket_name: &str,
     object_key: &str,
+    version_id: Option<&str>,
     headers: &HeaderMap,
 ) -> anyhow::Result<ServedObjectResponse> {
+    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
+    authorize_s3_action(&policy, principal, "s3:GetObject")?;
     let object = state
         .catalog
-        .get_object_record(bucket_name, object_key)
+        .get_object_record_version(bucket_name, object_key, version_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("object not found"))?;
-    if object.state != "AVAILABLE" {
+    if object.state != "AVAILABLE" || object.is_delete_marker {
         bail!("object is not available");
     }
-    let bytes = fs::read(&object.storage_path)
+    let bytes = read_object_plaintext(&object)
         .with_context(|| format!("failed to read object data {}", object.storage_path))?;
 
     let total_size = bytes.len() as u64;
@@ -1780,10 +2526,12 @@ fn object_metadata_response(object: &ObjectRecord, head_only: bool) -> Response 
         .header(header::ACCEPT_RANGES, "bytes")
         .header("ETag", format!("\"{}\"", object.sha256))
         .header("Last-Modified", object.created_at.as_str())
+        .header("x-amz-version-id", object.version_id.as_str())
         .header("x-amz-request-id", request_id())
         .header("x-amz-bucket-region", "us-east-1")
         .header("x-pontemesh-object-state", object.state.as_str())
         .header("x-pontemesh-created-at", object.created_at.as_str());
+    builder = add_s3_metadata_headers(builder, object);
 
     if head_only {
         builder = builder.header("x-pontemesh-object-key", object.key.as_str());
@@ -1807,9 +2555,11 @@ fn object_body_response(
         .header(header::ACCEPT_RANGES, "bytes")
         .header("ETag", format!("\"{}\"", object.sha256))
         .header("Last-Modified", object.created_at.as_str())
+        .header("x-amz-version-id", object.version_id.as_str())
         .header("x-amz-request-id", request_id())
         .header("x-amz-bucket-region", "us-east-1")
         .header("x-pontemesh-object-state", object.state.as_str());
+    builder = add_s3_metadata_headers(builder, object);
 
     if let Some(range) = range {
         builder = builder.header(
@@ -1908,6 +2658,16 @@ fn s3_bad_request(error: anyhow::Error, bucket: Option<&str>, key: Option<&str>)
             StatusCode::FORBIDDEN,
             "InvalidObjectState",
             "The object is not available",
+        )
+    } else if message.contains("access denied by S3 bucket policy") {
+        (StatusCode::FORBIDDEN, "AccessDenied", "Access Denied")
+    } else if message.contains("protected by retention")
+        || message.contains("protected by legal hold")
+    {
+        (
+            StatusCode::FORBIDDEN,
+            "AccessDenied",
+            "Object is protected by Object Lock",
         )
     } else {
         (StatusCode::BAD_REQUEST, "InvalidRequest", message.as_str())
@@ -2195,6 +2955,42 @@ fn complete_multipart_upload_xml(bucket_name: &str, object_key: &str, etag: &str
     )
 }
 
+fn list_object_versions_xml(
+    bucket_name: &str,
+    versions: &[catalog::ObjectVersionSummary],
+) -> String {
+    let body = versions
+        .iter()
+        .map(|version| {
+            if version.is_delete_marker {
+                format!(
+                    "<DeleteMarker><Key>{}</Key><VersionId>{}</VersionId><IsLatest>{}</IsLatest><LastModified>{}</LastModified></DeleteMarker>",
+                    xml_escape(&version.key),
+                    xml_escape(&version.version_id),
+                    version.is_latest,
+                    xml_escape(&version.last_modified)
+                )
+            } else {
+                format!(
+                    "<Version><Key>{}</Key><VersionId>{}</VersionId><IsLatest>{}</IsLatest><LastModified>{}</LastModified><ETag>&quot;{}&quot;</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass></Version>",
+                    xml_escape(&version.key),
+                    xml_escape(&version.version_id),
+                    version.is_latest,
+                    xml_escape(&version.last_modified),
+                    xml_escape(&version.sha256),
+                    version.size_bytes
+                )
+            }
+        })
+        .collect::<String>();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+<ListVersionsResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name>{}</Name>{}</ListVersionsResult>",
+        xml_escape(bucket_name),
+        body
+    )
+}
+
 fn bucket_versioning_xml(enabled: bool) -> String {
     let status = if enabled {
         "<Status>Enabled</Status>"
@@ -2224,6 +3020,101 @@ fn object_tagging_xml(tags: &[S3ObjectTag]) -> String {
     )
 }
 
+fn lifecycle_xml(rules: &serde_json::Value) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><LifecycleConfiguration>{}</LifecycleConfiguration>",
+        xml_escape(&rules.to_string())
+    )
+}
+
+fn lifecycle_apply_result_xml(expired: i64, aborted: i64) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><LifecycleApplyResult><ExpiredObjects>{expired}</ExpiredObjects><AbortedMultipartUploads>{aborted}</AbortedMultipartUploads></LifecycleApplyResult>"
+    )
+}
+
+fn encryption_xml(policy: &catalog::BucketPolicy) -> String {
+    if policy.s3_default_encryption_algorithm == "NONE" {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ServerSideEncryptionConfiguration/>"
+            .to_owned();
+    }
+    let key_id = policy
+        .s3_default_encryption_key_id
+        .as_deref()
+        .map(|key| format!("<KMSMasterKeyID>{}</KMSMasterKeyID>", xml_escape(key)))
+        .unwrap_or_default();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>{}</SSEAlgorithm>{}</ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>",
+        xml_escape(&policy.s3_default_encryption_algorithm),
+        key_id
+    )
+}
+
+fn object_lock_config_xml(policy: &catalog::BucketPolicy) -> String {
+    let status = if policy.s3_object_lock_enabled {
+        "Enabled"
+    } else {
+        "Disabled"
+    };
+    let default_retention = match (
+        policy.s3_object_lock_default_mode.as_deref(),
+        policy.s3_object_lock_default_retain_days,
+    ) {
+        (Some(mode), Some(days)) => format!(
+            "<Rule><DefaultRetention><Mode>{}</Mode><Days>{}</Days></DefaultRetention></Rule>",
+            xml_escape(mode),
+            days
+        ),
+        _ => String::new(),
+    };
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ObjectLockConfiguration><ObjectLockEnabled>{status}</ObjectLockEnabled>{default_retention}</ObjectLockConfiguration>"
+    )
+}
+
+fn notification_xml(config: &serde_json::Value) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><NotificationConfiguration>{}</NotificationConfiguration>",
+        xml_escape(&config.to_string())
+    )
+}
+
+fn object_retention_xml(object: &ObjectRecord) -> String {
+    let mode = object.object_lock_mode.as_deref().unwrap_or("GOVERNANCE");
+    let retain_until = object.retain_until.as_deref().unwrap_or("");
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Retention><Mode>{}</Mode><RetainUntilDate>{}</RetainUntilDate></Retention>",
+        xml_escape(mode),
+        xml_escape(retain_until)
+    )
+}
+
+fn object_legal_hold_xml(enabled: bool) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><LegalHold><Status>{}</Status></LegalHold>",
+        if enabled { "ON" } else { "OFF" }
+    )
+}
+
+fn s3_json_response(status: StatusCode, body: String) -> Response {
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CONTENT_LENGTH, body.len().to_string())
+        .header("x-amz-request-id", request_id())
+        .body(Body::from(body))
+        .expect("valid S3 JSON response")
+}
+
+fn empty_s3_ok() -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("x-amz-request-id", request_id())
+        .header(header::CONTENT_LENGTH, "0")
+        .body(Body::empty())
+        .expect("valid empty S3 response")
+}
+
 fn multipart_upload_dir(state: &AppState, upload_id: &str) -> anyhow::Result<PathBuf> {
     Ok(config::configured_storage_dir(&state.paths)?
         .join("multipart")
@@ -2233,6 +3124,288 @@ fn multipart_upload_dir(state: &AppState, upload_id: &str) -> anyhow::Result<Pat
 fn remove_multipart_part_files(parts: &[MultipartPartRecord]) {
     for part in parts {
         let _ = fs::remove_file(&part.storage_path);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ObjectEncryption {
+    algorithm: String,
+    key_id: Option<String>,
+    nonce: [u8; 12],
+}
+
+#[derive(Debug, Clone)]
+struct ObjectLockDefaults {
+    mode: Option<String>,
+    retain_until: Option<chrono::DateTime<chrono::Utc>>,
+    legal_hold: bool,
+}
+
+fn encryption_for_put(
+    state: &AppState,
+    policy: &catalog::BucketPolicy,
+    headers: &HeaderMap,
+) -> anyhow::Result<Option<ObjectEncryption>> {
+    let requested = headers
+        .get("x-amz-server-side-encryption")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let algorithm = requested.unwrap_or_else(|| policy.s3_default_encryption_algorithm.clone());
+    if algorithm == "NONE" || algorithm.trim().is_empty() {
+        return Ok(None);
+    }
+    if algorithm != "AES256" && algorithm != "aws:kms" {
+        bail!("unsupported server-side encryption algorithm");
+    }
+    let mut nonce = [0_u8; 12];
+    OsRng.fill_bytes(&mut nonce);
+    Ok(Some(ObjectEncryption {
+        algorithm,
+        key_id: headers
+            .get("x-amz-server-side-encryption-aws-kms-key-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+            .or_else(|| policy.s3_default_encryption_key_id.clone())
+            .or_else(|| Some(state.paths.root().display().to_string())),
+        nonce,
+    }))
+}
+
+fn object_lock_defaults(
+    policy: &catalog::BucketPolicy,
+    headers: &HeaderMap,
+) -> anyhow::Result<ObjectLockDefaults> {
+    let mode = headers
+        .get("x-amz-object-lock-mode")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .or_else(|| policy.s3_object_lock_default_mode.clone());
+    if let Some(mode) = mode.as_deref() {
+        if mode != "GOVERNANCE" && mode != "COMPLIANCE" {
+            bail!("unsupported object lock mode");
+        }
+    }
+    let retain_until = headers
+        .get("x-amz-object-lock-retain-until-date")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .map(|value| value.with_timezone(&chrono::Utc))
+                .context("invalid object lock retain until date")
+        })
+        .transpose()?
+        .or_else(|| {
+            policy
+                .s3_object_lock_default_retain_days
+                .map(|days| chrono::Utc::now() + chrono::Duration::days(days))
+        });
+    let legal_hold = headers
+        .get("x-amz-object-lock-legal-hold")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value == "ON")
+        .unwrap_or(false);
+    Ok(ObjectLockDefaults {
+        mode,
+        retain_until,
+        legal_hold,
+    })
+}
+
+fn encrypt_file_in_place(
+    path: &PathBuf,
+    object_sha256: &str,
+    encryption: &ObjectEncryption,
+) -> anyhow::Result<()> {
+    let plaintext = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let cipher = Aes256Gcm::new_from_slice(&sse_key(object_sha256)?)
+        .context("failed to initialize object encryption")?;
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&encryption.nonce), plaintext.as_ref())
+        .map_err(|_| anyhow::anyhow!("failed to encrypt object"))?;
+    fs::write(path, ciphertext).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn read_object_plaintext(object: &ObjectRecord) -> anyhow::Result<Vec<u8>> {
+    let bytes = fs::read(&object.storage_path)
+        .with_context(|| format!("failed to read object data {}", object.storage_path))?;
+    if object.encryption_algorithm.is_none() {
+        return Ok(bytes);
+    }
+    let nonce = object
+        .encryption_nonce
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("encrypted object is missing nonce"))?;
+    let cipher = Aes256Gcm::new_from_slice(&sse_key(&object.sha256)?)
+        .context("failed to initialize object decryption")?;
+    let plaintext = cipher
+        .decrypt(Nonce::from_slice(nonce), bytes.as_ref())
+        .map_err(|_| anyhow::anyhow!("failed to decrypt object"))?;
+    let actual = format!("{:x}", Sha256::digest(&plaintext));
+    if actual != object.sha256 {
+        bail!("object integrity check failed after decryption");
+    }
+    Ok(plaintext)
+}
+
+fn source_plaintext_path(state: &AppState, source: &ObjectRecord) -> anyhow::Result<PathBuf> {
+    if source.encryption_algorithm.is_none() {
+        return Ok(PathBuf::from(&source.storage_path));
+    }
+    let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/copy");
+    fs::create_dir_all(&temp_dir).with_context(|| {
+        format!(
+            "failed to create copy temp directory {}",
+            temp_dir.display()
+        )
+    })?;
+    let path = temp_dir.join(format!("{}-plain.tmp", uuid::Uuid::new_v4()));
+    fs::write(&path, read_object_plaintext(source)?)
+        .with_context(|| format!("failed to stage decrypted copy {}", path.display()))?;
+    Ok(path)
+}
+
+fn sse_key(object_sha256: &str) -> anyhow::Result<[u8; 32]> {
+    let bytes = hex_to_bytes(object_sha256)?;
+    let digest = Sha256::digest(&bytes);
+    let mut key = [0_u8; 32];
+    key.copy_from_slice(&digest);
+    Ok(key)
+}
+
+fn verify_request_checksums(headers: &HeaderMap, streamed: &StreamedObject) -> anyhow::Result<()> {
+    if let Some(expected) = headers
+        .get("x-amz-checksum-sha256")
+        .and_then(|value| value.to_str().ok())
+    {
+        if expected != streamed.checksum_sha256 {
+            bail!("x-amz-checksum-sha256 does not match request body");
+        }
+    }
+    if let Some(expected) = headers
+        .get("x-amz-checksum-crc32")
+        .and_then(|value| value.to_str().ok())
+    {
+        if expected != streamed.checksum_crc32 {
+            bail!("x-amz-checksum-crc32 does not match request body");
+        }
+    }
+    Ok(())
+}
+
+fn add_s3_metadata_headers(
+    mut builder: axum::http::response::Builder,
+    object: &ObjectRecord,
+) -> axum::http::response::Builder {
+    if let Some(checksum) = object.checksum_sha256.as_deref() {
+        builder = builder.header("x-amz-checksum-sha256", checksum);
+    }
+    if let Some(checksum) = object.checksum_crc32.as_deref() {
+        builder = builder.header("x-amz-checksum-crc32", checksum);
+    }
+    if let Some(algorithm) = object.encryption_algorithm.as_deref() {
+        builder = builder.header("x-amz-server-side-encryption", algorithm);
+    }
+    if let Some(mode) = object.object_lock_mode.as_deref() {
+        builder = builder.header("x-amz-object-lock-mode", mode);
+    }
+    if let Some(retain_until) = object.retain_until.as_deref() {
+        builder = builder.header("x-amz-object-lock-retain-until-date", retain_until);
+    }
+    if object.legal_hold {
+        builder = builder.header("x-amz-object-lock-legal-hold", "ON");
+    }
+    builder
+}
+
+fn crc32_be_bytes_for_file(path: &PathBuf) -> anyhow::Result<[u8; 4]> {
+    let bytes = fs::read(path).with_context(|| format!("failed to checksum {}", path.display()))?;
+    Ok(crc32fast::hash(&bytes).to_be_bytes())
+}
+
+fn hex_to_bytes(value: &str) -> anyhow::Result<Vec<u8>> {
+    if !value.len().is_multiple_of(2) {
+        bail!("hex digest has odd length");
+    }
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for index in (0..value.len()).step_by(2) {
+        bytes.push(u8::from_str_radix(&value[index..index + 2], 16).context("invalid hex digest")?);
+    }
+    Ok(bytes)
+}
+
+fn authorize_s3_action(
+    policy: &catalog::BucketPolicy,
+    principal: &str,
+    action: &str,
+) -> anyhow::Result<()> {
+    let Some(statements) = policy
+        .s3_resource_policy
+        .get("Statement")
+        .or_else(|| policy.s3_resource_policy.get("statement"))
+        .and_then(|value| value.as_array())
+    else {
+        return Ok(());
+    };
+    let mut has_allow = false;
+    let mut allowed = false;
+    for statement in statements {
+        if statement
+            .get("Effect")
+            .or_else(|| statement.get("effect"))
+            .and_then(|value| value.as_str())
+            == Some("Allow")
+        {
+            has_allow = true;
+        }
+        if !statement_matches(statement, principal, action) {
+            continue;
+        }
+        let effect = statement
+            .get("Effect")
+            .or_else(|| statement.get("effect"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if effect == "Deny" {
+            bail!("access denied by S3 bucket policy");
+        }
+        if effect == "Allow" {
+            allowed = true;
+        }
+    }
+    if has_allow && !allowed {
+        bail!("access denied by S3 bucket policy");
+    }
+    Ok(())
+}
+
+fn statement_matches(statement: &serde_json::Value, principal: &str, action: &str) -> bool {
+    json_string_or_array_matches(
+        statement.get("Action").or_else(|| statement.get("action")),
+        action,
+    ) && json_string_or_array_matches(
+        statement
+            .get("Principal")
+            .or_else(|| statement.get("principal")),
+        principal,
+    )
+}
+
+fn json_string_or_array_matches(value: Option<&serde_json::Value>, needle: &str) -> bool {
+    match value {
+        None => true,
+        Some(serde_json::Value::String(value)) => value == "*" || value == needle,
+        Some(serde_json::Value::Array(values)) => values.iter().any(|value| {
+            value
+                .as_str()
+                .map(|value| value == "*" || value == needle)
+                .unwrap_or(false)
+        }),
+        Some(serde_json::Value::Object(map)) => map
+            .get("AWS")
+            .map(|value| json_string_or_array_matches(Some(value), needle))
+            .unwrap_or(false),
+        _ => false,
     }
 }
 
@@ -2379,6 +3552,12 @@ mod tests {
             location: None,
             delete: None,
             versioning: None,
+            versions: None,
+            lifecycle: None,
+            encryption: None,
+            object_lock: None,
+            notification: None,
+            policy: None,
         };
         let page = S3ListObjectsPage {
             items: vec![ObjectSummary {
@@ -2386,6 +3565,8 @@ mod tests {
                 size_bytes: 123,
                 content_type: "image/jpeg".to_owned(),
                 sha256: "abc123".to_owned(),
+                version_id: Some("version-1".to_owned()),
+                is_delete_marker: false,
                 created_at: "2026-06-29T12:00:00Z".to_owned(),
                 updated_at: "2026-06-29T12:00:00Z".to_owned(),
                 state: "AVAILABLE".to_owned(),
@@ -2547,8 +3728,127 @@ mod tests {
             content_type: "text/plain".to_owned(),
             sha256: "64ec88ca00b268e5ba1a35678a1b5316d212f4f366b2477232534a8aeca37f3c".to_owned(),
             storage_path: "/tmp/pontemesh-test-object".to_owned(),
+            version_id: "version-1".to_owned(),
+            is_delete_marker: false,
+            checksum_sha256: Some("ZOyIygCyaOW6GjVnihtTFtIS9PNmskdyMlNKiu=yfzw=".to_owned()),
+            checksum_crc32: Some("DUoRhQ==".to_owned()),
+            encryption_algorithm: Some("AES256".to_owned()),
+            encryption_key_id: None,
+            encryption_nonce: Some(vec![0; 12]),
+            object_lock_mode: Some("GOVERNANCE".to_owned()),
+            retain_until: Some("2026-07-30T12:00:00Z".to_owned()),
+            legal_hold: true,
             created_at: "2026-06-29T12:00:00Z".to_owned(),
             state: "AVAILABLE".to_owned(),
+        }
+    }
+
+    #[test]
+    fn s3_bucket_policy_denies_matching_principal_and_allows_default_without_allow() {
+        let mut policy = bucket_policy();
+        policy.s3_resource_policy = serde_json::json!({
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Deny",
+                "Principal": "PMTESTACCESSKEY",
+                "Action": "s3:GetObject"
+            }]
+        });
+        assert!(authorize_s3_action(&policy, "PMTESTACCESSKEY", "s3:GetObject").is_err());
+        assert!(authorize_s3_action(&policy, "OTHER", "s3:GetObject").is_ok());
+    }
+
+    #[test]
+    fn s3_bucket_policy_requires_matching_allow_when_allow_statements_exist() {
+        let mut policy = bucket_policy();
+        policy.s3_resource_policy = serde_json::json!({
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": "PMTESTACCESSKEY",
+                "Action": ["s3:GetObject", "s3:PutObject"]
+            }]
+        });
+        assert!(authorize_s3_action(&policy, "PMTESTACCESSKEY", "s3:GetObject").is_ok());
+        assert!(authorize_s3_action(&policy, "OTHER", "s3:GetObject").is_err());
+    }
+
+    #[tokio::test]
+    async fn parses_s3_object_lock_retention_and_legal_hold_contracts() {
+        let retain_until = "2026-08-01T00:00:00Z";
+        let (mode, parsed_until) = parse_object_retention(Body::from(format!(
+            "<Retention><Mode>COMPLIANCE</Mode><RetainUntilDate>{retain_until}</RetainUntilDate></Retention>"
+        )))
+        .await
+        .expect("retention");
+        assert_eq!(mode, "COMPLIANCE");
+        assert_eq!(
+            parsed_until,
+            chrono::DateTime::parse_from_rfc3339(retain_until)
+                .expect("expected date")
+                .with_timezone(&chrono::Utc)
+        );
+
+        assert!(
+            parse_object_legal_hold(Body::from("<LegalHold><Status>ON</Status></LegalHold>"))
+                .await
+                .expect("legal hold")
+        );
+    }
+
+    #[test]
+    fn encrypted_object_roundtrip_uses_authenticated_ciphertext() {
+        let path =
+            std::env::temp_dir().join(format!("pontemesh-encryption-{}", uuid::Uuid::new_v4()));
+        fs::write(&path, b"secret object").expect("write plaintext");
+        let sha256 = format!("{:x}", Sha256::digest(b"secret object"));
+        let encryption = ObjectEncryption {
+            algorithm: "AES256".to_owned(),
+            key_id: None,
+            nonce: [7; 12],
+        };
+        encrypt_file_in_place(&path, &sha256, &encryption).expect("encrypt");
+        assert_ne!(fs::read(&path).expect("ciphertext"), b"secret object");
+        let object = ObjectRecord {
+            storage_path: path.display().to_string(),
+            sha256,
+            encryption_algorithm: Some("AES256".to_owned()),
+            encryption_nonce: Some(encryption.nonce.to_vec()),
+            ..object_record()
+        };
+        assert_eq!(
+            read_object_plaintext(&object).expect("decrypt"),
+            b"secret object"
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    fn bucket_policy() -> catalog::BucketPolicy {
+        catalog::BucketPolicy {
+            bucket_name: "bucket".to_owned(),
+            access_package_ttl_seconds: 900,
+            fragment_size_bytes: 1024,
+            allow_replica_edge: false,
+            allow_peer_sharing: false,
+            source_selection_strategy: "ORIGIN_REPLICA_EDGE".to_owned(),
+            fragment_priority_strategy: "MANIFEST_ORDER".to_owned(),
+            failure_threshold: 3,
+            fallback_mode: "ORIGIN_RANGE".to_owned(),
+            s3_list_default_max_keys: 1000,
+            s3_list_max_keys_limit: 10000,
+            s3_list_allow_delimiter: true,
+            s3_versioning_enabled: false,
+            s3_object_tagging_enabled: true,
+            s3_checksum_algorithm: "SHA256".to_owned(),
+            s3_multipart_abort_days: 7,
+            s3_default_encryption_algorithm: "NONE".to_owned(),
+            s3_default_encryption_key_id: None,
+            s3_object_lock_enabled: false,
+            s3_object_lock_default_mode: None,
+            s3_object_lock_default_retain_days: None,
+            s3_lifecycle_rules: serde_json::json!([]),
+            s3_resource_policy: serde_json::json!({"Version":"2012-10-17","Statement":[]}),
+            s3_event_notifications: serde_json::json!({"EventBridgeEnabled":false,"Rules":[]}),
+            updated_at: "2026-06-29T12:00:00Z".to_owned(),
         }
     }
 

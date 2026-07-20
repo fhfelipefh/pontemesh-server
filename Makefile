@@ -1,4 +1,4 @@
-.PHONY: check i18n-check api-contract architecture-check migrations-check e2e-origin-replica e2e-ha-replica-election
+.PHONY: check i18n-check api-contract architecture-check migrations-check test-s3-parity e2e-origin-replica e2e-ha-replica-election
 
 check:
 	$(MAKE) architecture-check
@@ -21,6 +21,10 @@ architecture-check:
 
 migrations-check:
 	./scripts/check-migrations.sh
+
+test-s3-parity:
+	docker compose -p ponte-mesh -f docker/docker-compose.yml -f docker/docker-compose.test-postgres.yml up -d postgres
+	TEST_DATABASE_URL=postgres://pontemesh:pontemesh@127.0.0.1:$${PONTEMESH_TEST_POSTGRES_PORT:-45432}/pontemesh cargo test s3_parity_features_cover_versioning_lifecycle_encryption_lock_policy_notifications_and_checksums -- --nocapture
 
 e2e-origin-replica:
 	./scripts/start-e2e-origin-replica.sh --reset

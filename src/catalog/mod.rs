@@ -41,6 +41,8 @@ pub struct ObjectSummary {
     pub size_bytes: i64,
     pub content_type: String,
     pub sha256: String,
+    pub version_id: Option<String>,
+    pub is_delete_marker: bool,
     pub created_at: String,
     pub updated_at: String,
     pub state: String,
@@ -84,6 +86,16 @@ pub struct ObjectRecord {
     pub content_type: String,
     pub sha256: String,
     pub storage_path: String,
+    pub version_id: String,
+    pub is_delete_marker: bool,
+    pub checksum_sha256: Option<String>,
+    pub checksum_crc32: Option<String>,
+    pub encryption_algorithm: Option<String>,
+    pub encryption_key_id: Option<String>,
+    pub encryption_nonce: Option<Vec<u8>>,
+    pub object_lock_mode: Option<String>,
+    pub retain_until: Option<String>,
+    pub legal_hold: bool,
     pub created_at: String,
     pub state: String,
 }
@@ -122,6 +134,14 @@ pub struct BucketPolicy {
     pub s3_object_tagging_enabled: bool,
     pub s3_checksum_algorithm: String,
     pub s3_multipart_abort_days: i64,
+    pub s3_default_encryption_algorithm: String,
+    pub s3_default_encryption_key_id: Option<String>,
+    pub s3_object_lock_enabled: bool,
+    pub s3_object_lock_default_mode: Option<String>,
+    pub s3_object_lock_default_retain_days: Option<i64>,
+    pub s3_lifecycle_rules: serde_json::Value,
+    pub s3_resource_policy: serde_json::Value,
+    pub s3_event_notifications: serde_json::Value,
     pub updated_at: String,
 }
 
@@ -143,6 +163,14 @@ pub struct BucketPolicyUpdate {
     pub s3_object_tagging_enabled: bool,
     pub s3_checksum_algorithm: String,
     pub s3_multipart_abort_days: i64,
+    pub s3_default_encryption_algorithm: String,
+    pub s3_default_encryption_key_id: Option<String>,
+    pub s3_object_lock_enabled: bool,
+    pub s3_object_lock_default_mode: Option<String>,
+    pub s3_object_lock_default_retain_days: Option<i64>,
+    pub s3_lifecycle_rules: serde_json::Value,
+    pub s3_resource_policy: serde_json::Value,
+    pub s3_event_notifications: serde_json::Value,
 }
 
 #[derive(Debug, Clone)]
@@ -153,7 +181,33 @@ pub struct NewObject {
     pub content_type: String,
     pub sha256: String,
     pub storage_path: String,
+    pub checksum_sha256: Option<String>,
+    pub checksum_crc32: Option<String>,
+    pub encryption_algorithm: Option<String>,
+    pub encryption_key_id: Option<String>,
+    pub encryption_nonce: Option<Vec<u8>>,
+    pub object_lock_mode: Option<String>,
+    pub retain_until: Option<chrono::DateTime<chrono::Utc>>,
+    pub legal_hold: bool,
     pub manifest: NewObjectManifest,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectVersionSummary {
+    pub key: String,
+    pub version_id: String,
+    pub is_latest: bool,
+    pub is_delete_marker: bool,
+    pub size_bytes: i64,
+    pub sha256: String,
+    pub last_modified: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct S3LifecycleResult {
+    pub expired_objects: i64,
+    pub aborted_multipart_uploads: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -1142,6 +1196,14 @@ impl Catalog {
                 p.s3_object_tagging_enabled,
                 p.s3_checksum_algorithm,
                 p.s3_multipart_abort_days,
+                p.s3_default_encryption_algorithm,
+                p.s3_default_encryption_key_id,
+                p.s3_object_lock_enabled,
+                p.s3_object_lock_default_mode,
+                p.s3_object_lock_default_retain_days,
+                p.s3_lifecycle_rules,
+                p.s3_resource_policy,
+                p.s3_event_notifications,
                 p.updated_at
             FROM bucket_policies p
             JOIN buckets b ON b.id = p.bucket_id
@@ -1179,6 +1241,14 @@ impl Catalog {
                 p.s3_object_tagging_enabled,
                 p.s3_checksum_algorithm,
                 p.s3_multipart_abort_days,
+                p.s3_default_encryption_algorithm,
+                p.s3_default_encryption_key_id,
+                p.s3_object_lock_enabled,
+                p.s3_object_lock_default_mode,
+                p.s3_object_lock_default_retain_days,
+                p.s3_lifecycle_rules,
+                p.s3_resource_policy,
+                p.s3_event_notifications,
                 p.updated_at
             FROM bucket_policies p
             JOIN buckets b ON b.id = p.bucket_id
@@ -1215,9 +1285,13 @@ impl Catalog {
                 s3_list_default_max_keys, s3_list_max_keys_limit,
                 s3_list_allow_delimiter, s3_versioning_enabled,
                 s3_object_tagging_enabled, s3_checksum_algorithm,
-                s3_multipart_abort_days, updated_at
+                s3_multipart_abort_days, s3_default_encryption_algorithm,
+                s3_default_encryption_key_id, s3_object_lock_enabled,
+                s3_object_lock_default_mode, s3_object_lock_default_retain_days,
+                s3_lifecycle_rules, s3_resource_policy, s3_event_notifications, updated_at
             )
-            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
+            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                $17, $18, $19, $20, $21, $22, $23, $24, now())
             ON CONFLICT (bucket_id) DO UPDATE SET
                 access_package_ttl_seconds = EXCLUDED.access_package_ttl_seconds,
                 fragment_size_bytes = EXCLUDED.fragment_size_bytes,
@@ -1234,6 +1308,14 @@ impl Catalog {
                 s3_object_tagging_enabled = EXCLUDED.s3_object_tagging_enabled,
                 s3_checksum_algorithm = EXCLUDED.s3_checksum_algorithm,
                 s3_multipart_abort_days = EXCLUDED.s3_multipart_abort_days,
+                s3_default_encryption_algorithm = EXCLUDED.s3_default_encryption_algorithm,
+                s3_default_encryption_key_id = EXCLUDED.s3_default_encryption_key_id,
+                s3_object_lock_enabled = EXCLUDED.s3_object_lock_enabled,
+                s3_object_lock_default_mode = EXCLUDED.s3_object_lock_default_mode,
+                s3_object_lock_default_retain_days = EXCLUDED.s3_object_lock_default_retain_days,
+                s3_lifecycle_rules = EXCLUDED.s3_lifecycle_rules,
+                s3_resource_policy = EXCLUDED.s3_resource_policy,
+                s3_event_notifications = EXCLUDED.s3_event_notifications,
                 updated_at = now()
             RETURNING access_package_ttl_seconds, fragment_size_bytes,
                 allow_replica_edge, allow_peer_sharing,
@@ -1242,7 +1324,10 @@ impl Catalog {
                 s3_list_default_max_keys, s3_list_max_keys_limit,
                 s3_list_allow_delimiter, s3_versioning_enabled,
                 s3_object_tagging_enabled, s3_checksum_algorithm,
-                s3_multipart_abort_days, updated_at
+                s3_multipart_abort_days, s3_default_encryption_algorithm,
+                s3_default_encryption_key_id, s3_object_lock_enabled,
+                s3_object_lock_default_mode, s3_object_lock_default_retain_days,
+                s3_lifecycle_rules, s3_resource_policy, s3_event_notifications, updated_at
             "#,
         )
         .bind(bucket_id)
@@ -1261,6 +1346,14 @@ impl Catalog {
         .bind(update.s3_object_tagging_enabled)
         .bind(&update.s3_checksum_algorithm)
         .bind(update.s3_multipart_abort_days)
+        .bind(&update.s3_default_encryption_algorithm)
+        .bind(update.s3_default_encryption_key_id.as_deref())
+        .bind(update.s3_object_lock_enabled)
+        .bind(update.s3_object_lock_default_mode.as_deref())
+        .bind(update.s3_object_lock_default_retain_days)
+        .bind(&update.s3_lifecycle_rules)
+        .bind(&update.s3_resource_policy)
+        .bind(&update.s3_event_notifications)
         .fetch_one(&mut *tx)
         .await
         .context("failed to update bucket policy")?;
@@ -1285,6 +1378,14 @@ impl Catalog {
             s3_object_tagging_enabled: row.get("s3_object_tagging_enabled"),
             s3_checksum_algorithm: row.get("s3_checksum_algorithm"),
             s3_multipart_abort_days: row.get("s3_multipart_abort_days"),
+            s3_default_encryption_algorithm: row.get("s3_default_encryption_algorithm"),
+            s3_default_encryption_key_id: row.get("s3_default_encryption_key_id"),
+            s3_object_lock_enabled: row.get("s3_object_lock_enabled"),
+            s3_object_lock_default_mode: row.get("s3_object_lock_default_mode"),
+            s3_object_lock_default_retain_days: row.get("s3_object_lock_default_retain_days"),
+            s3_lifecycle_rules: row.get("s3_lifecycle_rules"),
+            s3_resource_policy: row.get("s3_resource_policy"),
+            s3_event_notifications: row.get("s3_event_notifications"),
             updated_at: format_datetime(row.get("updated_at")),
         })
     }
@@ -1300,6 +1401,7 @@ impl Catalog {
         let rows = query(
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
+                v.s3_version_id, v.is_delete_marker,
                 v.created_at, v.created_at AS updated_at, o.state
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
@@ -1409,6 +1511,7 @@ impl Catalog {
         let rows = query(
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
+                v.s3_version_id, v.is_delete_marker,
                 v.created_at, v.created_at AS updated_at, o.state
             FROM objects o
             JOIN object_versions v ON v.id = o.current_version_id
@@ -1475,6 +1578,8 @@ impl Catalog {
         let bucket_id = bucket_id_in_tx(&mut tx, &object.bucket_name).await?;
 
         let object_id = if replace_existing {
+            self.ensure_object_can_be_deleted(&object.bucket_name, &object.key, None)
+                .await?;
             upsert_object_in_tx(&mut tx, &bucket_id, &object.key).await?
         } else {
             insert_object_shell_in_tx(&mut tx, &bucket_id, &object.key).await?
@@ -1488,13 +1593,17 @@ impl Catalog {
         .await
         .context("failed to allocate object version")?;
 
+        let s3_version_id = uuid::Uuid::new_v4().to_string();
         let version_row = query(
             r#"
             INSERT INTO object_versions (
                 object_id, version_number, size_bytes, content_type,
-                hash_algorithm, object_hash, storage_path
+                hash_algorithm, object_hash, storage_path, s3_version_id,
+                checksum_sha256, checksum_crc32, encryption_algorithm,
+                encryption_key_id, encryption_nonce, object_lock_mode,
+                retain_until, legal_hold
             )
-            VALUES ($1::uuid, $2, $3, $4, 'SHA-256', $5, $6)
+            VALUES ($1::uuid, $2, $3, $4, 'SHA-256', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING id::text, created_at
             "#,
         )
@@ -1504,6 +1613,15 @@ impl Catalog {
         .bind(&object.content_type)
         .bind(&object.sha256)
         .bind(&object.storage_path)
+        .bind(&s3_version_id)
+        .bind(object.checksum_sha256.as_deref())
+        .bind(object.checksum_crc32.as_deref())
+        .bind(object.encryption_algorithm.as_deref())
+        .bind(object.encryption_key_id.as_deref())
+        .bind(object.encryption_nonce.as_deref())
+        .bind(object.object_lock_mode.as_deref())
+        .bind(object.retain_until)
+        .bind(object.legal_hold)
         .fetch_one(&mut *tx)
         .await
         .context("failed to register object version")?;
@@ -1586,6 +1704,8 @@ impl Catalog {
             size_bytes: object.size_bytes,
             content_type: object.content_type,
             sha256: object.sha256,
+            version_id: Some(s3_version_id),
+            is_delete_marker: false,
             created_at: format_datetime(version_row.get("created_at")),
             updated_at: format_datetime(version_row.get("created_at")),
             state: "AVAILABLE".to_owned(),
@@ -1597,21 +1717,36 @@ impl Catalog {
         bucket_name: &str,
         object_key: &str,
     ) -> anyhow::Result<Option<ObjectRecord>> {
+        self.get_object_record_version(bucket_name, object_key, None)
+            .await
+    }
+
+    pub async fn get_object_record_version(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        version_id: Option<&str>,
+    ) -> anyhow::Result<Option<ObjectRecord>> {
         validate_bucket_name(bucket_name)?;
         validate_object_key(object_key)?;
         let row = query(
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
-                v.storage_path, v.created_at, o.state
+                v.storage_path, v.s3_version_id, v.is_delete_marker,
+                v.checksum_sha256, v.checksum_crc32, v.encryption_algorithm,
+                v.encryption_key_id, v.encryption_nonce, v.object_lock_mode,
+                v.retain_until, v.legal_hold, v.created_at, o.state
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
-            JOIN object_versions v ON v.id = o.current_version_id
+            JOIN object_versions v ON v.object_id = o.id
             WHERE b.name = $1 AND o.object_key = $2
               AND b.deleted_at IS NULL AND o.deleted_at IS NULL
+              AND (($3::text IS NULL AND v.id = o.current_version_id) OR v.s3_version_id = $3)
             "#,
         )
         .bind(bucket_name)
         .bind(object_key)
+        .bind(version_id)
         .fetch_optional(&self.pool)
         .await
         .context("failed to load object")?;
@@ -2035,6 +2170,13 @@ impl Catalog {
     }
 
     pub async fn delete_object(&self, bucket_name: &str, object_key: &str) -> anyhow::Result<()> {
+        let policy = self.get_bucket_policy(bucket_name).await?;
+        if policy.s3_versioning_enabled {
+            self.insert_delete_marker(bucket_name, object_key).await?;
+            return Ok(());
+        }
+        self.ensure_object_can_be_deleted(bucket_name, object_key, None)
+            .await?;
         self.set_object_state(bucket_name, object_key, "DELETED", true)
             .await
     }
@@ -2087,6 +2229,458 @@ impl Catalog {
             .context("failed to update object state")?;
         tx.commit().await.context("failed to commit object state")?;
         Ok(())
+    }
+
+    pub async fn ensure_object_can_be_deleted(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        version_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        if let Some(object) = self
+            .get_object_record_version(bucket_name, object_key, version_id)
+            .await?
+        {
+            if object.legal_hold {
+                bail!("object version is protected by legal hold");
+            }
+            if let Some(retain_until) = object.retain_until.as_deref() {
+                let retain_until = chrono::DateTime::parse_from_rfc3339(retain_until)
+                    .context("stored retention timestamp is invalid")?
+                    .with_timezone(&chrono::Utc);
+                if retain_until > chrono::Utc::now() {
+                    bail!("object version is protected by retention");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn insert_delete_marker(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+    ) -> anyhow::Result<String> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        self.ensure_object_can_be_deleted(bucket_name, object_key, None)
+            .await?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin delete marker transaction")?;
+        let bucket_id = bucket_id_in_tx(&mut tx, bucket_name).await?;
+        let object_id = upsert_object_in_tx(&mut tx, &bucket_id, object_key).await?;
+        let version_number: i64 = query_scalar(
+            "SELECT COALESCE(MAX(version_number), 0) + 1 FROM object_versions WHERE object_id = $1::uuid",
+        )
+        .bind(&object_id)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to allocate delete marker version")?;
+        let s3_version_id = uuid::Uuid::new_v4().to_string();
+        let row = query(
+            r#"
+            INSERT INTO object_versions (
+                object_id, version_number, size_bytes, content_type,
+                hash_algorithm, object_hash, storage_path, s3_version_id, is_delete_marker
+            )
+            VALUES ($1::uuid, $2, 0, 'application/octet-stream', 'SHA-256', '', '', $3, TRUE)
+            RETURNING id::text
+            "#,
+        )
+        .bind(&object_id)
+        .bind(version_number)
+        .bind(&s3_version_id)
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed to insert delete marker")?;
+        query(
+            r#"
+            UPDATE objects
+            SET current_version_id = $1::uuid, state = 'DELETED', deleted_at = NULL, updated_at = now()
+            WHERE id = $2::uuid
+            "#,
+        )
+        .bind(row.get::<String, _>("id"))
+        .bind(&object_id)
+        .execute(&mut *tx)
+        .await
+        .context("failed to publish delete marker")?;
+        tx.commit()
+            .await
+            .context("failed to commit delete marker")?;
+        Ok(s3_version_id)
+    }
+
+    pub async fn list_object_versions(
+        &self,
+        bucket_name: &str,
+    ) -> anyhow::Result<Vec<ObjectVersionSummary>> {
+        validate_bucket_name(bucket_name)?;
+        let rows = query(
+            r#"
+            SELECT o.object_key, v.s3_version_id, v.is_delete_marker,
+                (o.current_version_id = v.id) AS is_latest,
+                v.size_bytes, v.object_hash, v.created_at
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            JOIN object_versions v ON v.object_id = o.id
+            WHERE b.name = $1
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+            ORDER BY o.object_key ASC, v.created_at DESC
+            "#,
+        )
+        .bind(bucket_name)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list object versions")?;
+        Ok(rows
+            .into_iter()
+            .map(|row| ObjectVersionSummary {
+                key: row.get("object_key"),
+                version_id: row.get("s3_version_id"),
+                is_latest: row.get("is_latest"),
+                is_delete_marker: row.get("is_delete_marker"),
+                size_bytes: row.get("size_bytes"),
+                sha256: row.get("object_hash"),
+                last_modified: format_datetime(row.get("created_at")),
+            })
+            .collect())
+    }
+
+    pub async fn update_s3_lifecycle_rules(
+        &self,
+        bucket_name: &str,
+        rules: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        validate_bucket_name(bucket_name)?;
+        validate_lifecycle_rules(&rules)?;
+        query(
+            r#"
+            UPDATE bucket_policies p
+            SET s3_lifecycle_rules = $2, updated_at = now()
+            FROM buckets b
+            WHERE b.id = p.bucket_id
+              AND b.name = $1
+              AND b.deleted_at IS NULL
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(rules)
+        .execute(&self.pool)
+        .await
+        .context("failed to update S3 lifecycle rules")?;
+        Ok(())
+    }
+
+    pub async fn update_s3_encryption(
+        &self,
+        bucket_name: &str,
+        algorithm: &str,
+        key_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        validate_bucket_name(bucket_name)?;
+        validate_policy_enum(
+            "s3DefaultEncryptionAlgorithm",
+            algorithm,
+            &["NONE", "AES256", "aws:kms"],
+        )?;
+        query(
+            r#"
+            UPDATE bucket_policies p
+            SET s3_default_encryption_algorithm = $2,
+                s3_default_encryption_key_id = $3,
+                updated_at = now()
+            FROM buckets b
+            WHERE b.id = p.bucket_id
+              AND b.name = $1
+              AND b.deleted_at IS NULL
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(algorithm)
+        .bind(key_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to update S3 encryption config")?;
+        Ok(())
+    }
+
+    pub async fn update_s3_object_lock_config(
+        &self,
+        bucket_name: &str,
+        enabled: bool,
+        mode: Option<&str>,
+        retain_days: Option<i64>,
+    ) -> anyhow::Result<()> {
+        validate_bucket_name(bucket_name)?;
+        if let Some(mode) = mode {
+            validate_policy_enum("objectLockMode", mode, &["GOVERNANCE", "COMPLIANCE"])?;
+        }
+        if let Some(days) = retain_days {
+            if days < 1 {
+                bail!("object lock default retention days must be positive");
+            }
+        }
+        query(
+            r#"
+            UPDATE bucket_policies p
+            SET s3_object_lock_enabled = $2,
+                s3_object_lock_default_mode = $3,
+                s3_object_lock_default_retain_days = $4,
+                s3_versioning_enabled = CASE WHEN $2 THEN TRUE ELSE s3_versioning_enabled END,
+                updated_at = now()
+            FROM buckets b
+            WHERE b.id = p.bucket_id
+              AND b.name = $1
+              AND b.deleted_at IS NULL
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(enabled)
+        .bind(mode)
+        .bind(retain_days)
+        .execute(&self.pool)
+        .await
+        .context("failed to update S3 object lock config")?;
+        Ok(())
+    }
+
+    pub async fn update_s3_resource_policy(
+        &self,
+        bucket_name: &str,
+        policy: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        validate_bucket_name(bucket_name)?;
+        validate_s3_resource_policy(&policy)?;
+        query(
+            r#"
+            UPDATE bucket_policies p
+            SET s3_resource_policy = $2, updated_at = now()
+            FROM buckets b
+            WHERE b.id = p.bucket_id
+              AND b.name = $1
+              AND b.deleted_at IS NULL
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(policy)
+        .execute(&self.pool)
+        .await
+        .context("failed to update S3 bucket resource policy")?;
+        Ok(())
+    }
+
+    pub async fn update_s3_event_notifications(
+        &self,
+        bucket_name: &str,
+        config: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        validate_bucket_name(bucket_name)?;
+        query(
+            r#"
+            UPDATE bucket_policies p
+            SET s3_event_notifications = $2, updated_at = now()
+            FROM buckets b
+            WHERE b.id = p.bucket_id
+              AND b.name = $1
+              AND b.deleted_at IS NULL
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(config)
+        .execute(&self.pool)
+        .await
+        .context("failed to update S3 event notification config")?;
+        Ok(())
+    }
+
+    pub async fn update_object_retention(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        version_id: Option<&str>,
+        mode: &str,
+        retain_until: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<()> {
+        validate_policy_enum("objectLockMode", mode, &["GOVERNANCE", "COMPLIANCE"])?;
+        self.update_current_or_version_lock(
+            bucket_name,
+            object_key,
+            version_id,
+            Some(mode),
+            Some(retain_until),
+            None,
+        )
+        .await
+    }
+
+    pub async fn update_object_legal_hold(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        version_id: Option<&str>,
+        enabled: bool,
+    ) -> anyhow::Result<()> {
+        self.update_current_or_version_lock(
+            bucket_name,
+            object_key,
+            version_id,
+            None,
+            None,
+            Some(enabled),
+        )
+        .await
+    }
+
+    async fn update_current_or_version_lock(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        version_id: Option<&str>,
+        mode: Option<&str>,
+        retain_until: Option<chrono::DateTime<chrono::Utc>>,
+        legal_hold: Option<bool>,
+    ) -> anyhow::Result<()> {
+        validate_bucket_name(bucket_name)?;
+        validate_object_key(object_key)?;
+        let result = query(
+            r#"
+            UPDATE object_versions v
+            SET object_lock_mode = COALESCE($4, object_lock_mode),
+                retain_until = COALESCE($5, retain_until),
+                legal_hold = COALESCE($6, legal_hold)
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            WHERE v.object_id = o.id
+              AND b.name = $1
+              AND o.object_key = $2
+              AND b.deleted_at IS NULL
+              AND o.deleted_at IS NULL
+              AND (($3::text IS NULL AND v.id = o.current_version_id) OR v.s3_version_id = $3)
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .bind(version_id)
+        .bind(mode)
+        .bind(retain_until)
+        .bind(legal_hold)
+        .execute(&self.pool)
+        .await
+        .context("failed to update object lock metadata")?;
+        if result.rows_affected() == 0 {
+            bail!("object not found: {object_key}");
+        }
+        Ok(())
+    }
+
+    pub async fn record_s3_notification_event(
+        &self,
+        bucket_name: &str,
+        object_key: &str,
+        version_id: Option<&str>,
+        event_name: &str,
+        detail: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let policy = self.get_bucket_policy(bucket_name).await?;
+        if !notifications_include_event(&policy.s3_event_notifications, event_name) {
+            return Ok(());
+        }
+        query(
+            r#"
+            INSERT INTO s3_notification_events (bucket_id, object_id, event_name, object_key, version_id, detail)
+            SELECT b.id, o.id, $3, $2, $4, $5
+            FROM buckets b
+            LEFT JOIN objects o ON o.bucket_id = b.id AND o.object_key = $2 AND o.deleted_at IS NULL
+            WHERE b.name = $1 AND b.deleted_at IS NULL
+            "#,
+        )
+        .bind(bucket_name)
+        .bind(object_key)
+        .bind(event_name)
+        .bind(version_id)
+        .bind(detail)
+        .execute(&self.pool)
+        .await
+        .context("failed to record S3 notification event")?;
+        Ok(())
+    }
+
+    pub async fn apply_s3_lifecycle(&self, bucket_name: &str) -> anyhow::Result<S3LifecycleResult> {
+        let policy = self.get_bucket_policy(bucket_name).await?;
+        let rules = lifecycle_rules(&policy.s3_lifecycle_rules)?;
+        let mut expired_objects = 0_i64;
+        let mut aborted_multipart_uploads = 0_i64;
+        for rule in rules {
+            if let Some(days) = rule.expire_current_days {
+                let rows = query(
+                    r#"
+                    SELECT o.object_key
+                    FROM objects o
+                    JOIN buckets b ON b.id = o.bucket_id
+                    JOIN object_versions v ON v.id = o.current_version_id
+                    WHERE b.name = $1
+                      AND b.deleted_at IS NULL
+                      AND o.deleted_at IS NULL
+                      AND o.state = 'AVAILABLE'
+                      AND o.object_key LIKE $2 || '%'
+                      AND v.created_at <= now() - ($3::bigint * interval '1 day')
+                    "#,
+                )
+                .bind(bucket_name)
+                .bind(&rule.prefix)
+                .bind(days)
+                .fetch_all(&self.pool)
+                .await
+                .context("failed to find lifecycle-expired objects")?;
+                for row in rows {
+                    let key: String = row.get("object_key");
+                    if self.delete_object(bucket_name, &key).await.is_ok() {
+                        expired_objects += 1;
+                        self.record_s3_notification_event(
+                            bucket_name,
+                            &key,
+                            None,
+                            "s3:LifecycleExpiration:Delete",
+                            serde_json::json!({"reason":"Lifecycle Expiration"}),
+                        )
+                        .await?;
+                    }
+                }
+            }
+            if let Some(days) = rule.abort_incomplete_multipart_days {
+                let result = query(
+                    r#"
+                    UPDATE s3_multipart_uploads u
+                    SET aborted_at = now()
+                    FROM buckets b
+                    WHERE b.id = u.bucket_id
+                      AND b.name = $1
+                      AND b.deleted_at IS NULL
+                      AND u.completed_at IS NULL
+                      AND u.aborted_at IS NULL
+                      AND u.object_key LIKE $2 || '%'
+                      AND u.initiated_at <= now() - ($3::bigint * interval '1 day')
+                    "#,
+                )
+                .bind(bucket_name)
+                .bind(&rule.prefix)
+                .bind(days)
+                .execute(&self.pool)
+                .await
+                .context("failed to abort stale multipart uploads")?;
+                aborted_multipart_uploads +=
+                    i64::try_from(result.rows_affected()).unwrap_or(i64::MAX);
+            }
+        }
+        Ok(S3LifecycleResult {
+            expired_objects,
+            aborted_multipart_uploads,
+        })
     }
 
     pub async fn totals(&self) -> anyhow::Result<ObjectTotals> {
@@ -2906,7 +3500,9 @@ impl Catalog {
         let row = query(
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash, v.storage_path,
-                   v.created_at, o.state
+                   v.s3_version_id, v.is_delete_marker, v.checksum_sha256, v.checksum_crc32,
+                   v.encryption_algorithm, v.encryption_key_id, v.encryption_nonce,
+                   v.object_lock_mode, v.retain_until, v.legal_hold, v.created_at, o.state
             FROM replica_credentials r
             JOIN buckets b ON b.name = $2
             JOIN objects o ON o.bucket_id = b.id AND o.object_key = $3
@@ -2947,7 +3543,7 @@ impl Catalog {
         let row = query(
             r#"
             SELECT b.name AS bucket_name, o.object_key, v.size_bytes, v.content_type,
-                   v.object_hash, v.storage_path, v.created_at, o.state,
+                   v.object_hash, v.storage_path, v.s3_version_id, v.created_at, o.state,
                    m.id::text AS manifest_id,
                    f.fragment_index, f.fragment_hash,
                    f.byte_range_start, f.byte_range_end
@@ -2992,6 +3588,16 @@ impl Catalog {
                     .unwrap_or_else(|| "application/octet-stream".to_owned()),
                 sha256: row.get("object_hash"),
                 storage_path: row.get("storage_path"),
+                version_id: row.get("s3_version_id"),
+                is_delete_marker: false,
+                checksum_sha256: row.get("object_hash"),
+                checksum_crc32: None,
+                encryption_algorithm: None,
+                encryption_key_id: None,
+                encryption_nonce: None,
+                object_lock_mode: None,
+                retain_until: None,
+                legal_hold: false,
                 created_at: format_datetime(row.get("created_at")),
                 state: row.get("state"),
             },
@@ -4541,6 +5147,8 @@ fn object_summary_from_row(row: PgRow) -> ObjectSummary {
             .get::<Option<String>, _>("content_type")
             .unwrap_or_else(|| "application/octet-stream".to_owned()),
         sha256: row.get("object_hash"),
+        version_id: row.try_get("s3_version_id").ok(),
+        is_delete_marker: row.try_get("is_delete_marker").unwrap_or(false),
         created_at: format_datetime(row.get("created_at")),
         updated_at: format_datetime(row.get("updated_at")),
         state: row.get("state"),
@@ -4556,6 +5164,18 @@ fn object_record_from_row(row: PgRow) -> ObjectRecord {
             .unwrap_or_else(|| "application/octet-stream".to_owned()),
         sha256: row.get("object_hash"),
         storage_path: row.get("storage_path"),
+        version_id: row.get("s3_version_id"),
+        is_delete_marker: row.get("is_delete_marker"),
+        checksum_sha256: row.get("checksum_sha256"),
+        checksum_crc32: row.get("checksum_crc32"),
+        encryption_algorithm: row.get("encryption_algorithm"),
+        encryption_key_id: row.get("encryption_key_id"),
+        encryption_nonce: row.get("encryption_nonce"),
+        object_lock_mode: row.get("object_lock_mode"),
+        retain_until: row
+            .get::<Option<chrono::DateTime<chrono::Utc>>, _>("retain_until")
+            .map(format_datetime),
+        legal_hold: row.get("legal_hold"),
         created_at: format_datetime(row.get("created_at")),
         state: row.get("state"),
     }
@@ -4647,6 +5267,14 @@ fn bucket_policy_from_row(row: PgRow) -> BucketPolicy {
         s3_object_tagging_enabled: row.get("s3_object_tagging_enabled"),
         s3_checksum_algorithm: row.get("s3_checksum_algorithm"),
         s3_multipart_abort_days: row.get("s3_multipart_abort_days"),
+        s3_default_encryption_algorithm: row.get("s3_default_encryption_algorithm"),
+        s3_default_encryption_key_id: row.get("s3_default_encryption_key_id"),
+        s3_object_lock_enabled: row.get("s3_object_lock_enabled"),
+        s3_object_lock_default_mode: row.get("s3_object_lock_default_mode"),
+        s3_object_lock_default_retain_days: row.get("s3_object_lock_default_retain_days"),
+        s3_lifecycle_rules: row.get("s3_lifecycle_rules"),
+        s3_resource_policy: row.get("s3_resource_policy"),
+        s3_event_notifications: row.get("s3_event_notifications"),
         updated_at: format_datetime(row.get("updated_at")),
     }
 }
@@ -4880,7 +5508,147 @@ fn validate_bucket_policy(update: &BucketPolicyUpdate) -> anyhow::Result<()> {
     if !(1..=365).contains(&update.s3_multipart_abort_days) {
         bail!("s3MultipartAbortDays must be between 1 and 365");
     }
+    validate_policy_enum(
+        "s3DefaultEncryptionAlgorithm",
+        &update.s3_default_encryption_algorithm,
+        &["NONE", "AES256", "aws:kms"],
+    )?;
+    if let Some(mode) = update.s3_object_lock_default_mode.as_deref() {
+        validate_policy_enum(
+            "s3ObjectLockDefaultMode",
+            mode,
+            &["GOVERNANCE", "COMPLIANCE"],
+        )?;
+    }
+    if let Some(days) = update.s3_object_lock_default_retain_days {
+        if days < 1 {
+            bail!("s3ObjectLockDefaultRetainDays must be positive");
+        }
+    }
+    validate_lifecycle_rules(&update.s3_lifecycle_rules)?;
+    validate_s3_resource_policy(&update.s3_resource_policy)?;
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct LifecycleRule {
+    prefix: String,
+    expire_current_days: Option<i64>,
+    abort_incomplete_multipart_days: Option<i64>,
+}
+
+fn lifecycle_rules(value: &serde_json::Value) -> anyhow::Result<Vec<LifecycleRule>> {
+    let array = value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("S3 lifecycle rules must be an array"))?;
+    array
+        .iter()
+        .map(|rule| {
+            let status = rule
+                .get("Status")
+                .or_else(|| rule.get("status"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("Enabled");
+            if status != "Enabled" {
+                return Ok(LifecycleRule {
+                    prefix: String::new(),
+                    expire_current_days: None,
+                    abort_incomplete_multipart_days: None,
+                });
+            }
+            let prefix = rule
+                .get("Prefix")
+                .or_else(|| rule.get("prefix"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_owned();
+            let expire_current_days = rule
+                .get("Expiration")
+                .or_else(|| rule.get("expiration"))
+                .and_then(|value| value.get("Days").or_else(|| value.get("days")))
+                .and_then(|value| value.as_i64());
+            let abort_incomplete_multipart_days = rule
+                .get("AbortIncompleteMultipartUpload")
+                .or_else(|| rule.get("abortIncompleteMultipartUpload"))
+                .and_then(|value| {
+                    value
+                        .get("DaysAfterInitiation")
+                        .or_else(|| value.get("daysAfterInitiation"))
+                })
+                .and_then(|value| value.as_i64());
+            Ok(LifecycleRule {
+                prefix,
+                expire_current_days,
+                abort_incomplete_multipart_days,
+            })
+        })
+        .collect()
+}
+
+fn validate_lifecycle_rules(value: &serde_json::Value) -> anyhow::Result<()> {
+    for rule in lifecycle_rules(value)? {
+        if matches!(rule.expire_current_days, Some(days) if days < 0) {
+            bail!("Lifecycle Expiration Days cannot be negative");
+        }
+        if matches!(rule.abort_incomplete_multipart_days, Some(days) if days < 0) {
+            bail!("AbortIncompleteMultipartUpload DaysAfterInitiation cannot be negative");
+        }
+    }
+    Ok(())
+}
+
+fn validate_s3_resource_policy(value: &serde_json::Value) -> anyhow::Result<()> {
+    let statements = value
+        .get("Statement")
+        .or_else(|| value.get("statement"))
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| anyhow::anyhow!("S3 bucket policy must include a Statement array"))?;
+    for statement in statements {
+        let effect = statement
+            .get("Effect")
+            .or_else(|| statement.get("effect"))
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| anyhow::anyhow!("S3 bucket policy statements require Effect"))?;
+        validate_policy_enum("Effect", effect, &["Allow", "Deny"])?;
+    }
+    Ok(())
+}
+
+fn notifications_include_event(config: &serde_json::Value, event_name: &str) -> bool {
+    if config
+        .get("EventBridgeEnabled")
+        .or_else(|| config.get("eventBridgeEnabled"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    config
+        .get("Rules")
+        .or_else(|| config.get("rules"))
+        .and_then(|value| value.as_array())
+        .map(|rules| {
+            rules.iter().any(|rule| {
+                rule.get("Events")
+                    .or_else(|| rule.get("events"))
+                    .and_then(|value| value.as_array())
+                    .map(|events| {
+                        events.iter().any(|event| {
+                            event
+                                .as_str()
+                                .map(|event| {
+                                    event == event_name
+                                        || event == "s3:*"
+                                        || (event.ends_with(":*")
+                                            && event_name.starts_with(event.trim_end_matches('*')))
+                                })
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 fn validate_s3_object_tags(tags: &[S3ObjectTag]) -> anyhow::Result<()> {

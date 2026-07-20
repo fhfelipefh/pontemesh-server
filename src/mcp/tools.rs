@@ -434,6 +434,15 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
                             s3_object_tagging_enabled: policy.s3_object_tagging_enabled,
                             s3_checksum_algorithm: policy.s3_checksum_algorithm,
                             s3_multipart_abort_days: policy.s3_multipart_abort_days,
+                            s3_default_encryption_algorithm: policy.s3_default_encryption_algorithm,
+                            s3_default_encryption_key_id: policy.s3_default_encryption_key_id,
+                            s3_object_lock_enabled: policy.s3_object_lock_enabled,
+                            s3_object_lock_default_mode: policy.s3_object_lock_default_mode,
+                            s3_object_lock_default_retain_days: policy
+                                .s3_object_lock_default_retain_days,
+                            s3_lifecycle_rules: policy.s3_lifecycle_rules,
+                            s3_resource_policy: policy.s3_resource_policy,
+                            s3_event_notifications: policy.s3_event_notifications,
                         },
                     )
                     .await?;
@@ -516,6 +525,14 @@ async fn put_small_object(
         content_type: content_type.to_owned(),
         sha256: sha256.clone(),
         storage_path: object_path.display().to_string(),
+        checksum_sha256: None,
+        checksum_crc32: None,
+        encryption_algorithm: None,
+        encryption_key_id: None,
+        encryption_nonce: None,
+        object_lock_mode: None,
+        retain_until: None,
+        legal_hold: false,
         manifest: build_manifest(&bytes, policy.fragment_size_bytes)?,
     };
     match state

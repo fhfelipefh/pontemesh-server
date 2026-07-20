@@ -327,6 +327,7 @@ mod tests {
         body::{Body, to_bytes},
         http::{Method, Request, StatusCode, header},
     };
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
     use hmac::{Hmac, Mac};
     use sha2::{Digest, Sha256};
     use sqlx::PgPool;
@@ -1607,7 +1608,10 @@ mod tests {
             )
             .await
             .expect("router response");
-        assert_eq!(first_put.status(), StatusCode::OK);
+        let first_put_status = first_put.status();
+        if first_put_status != StatusCode::OK {
+            panic!("first put failed: {}", response_text(first_put).await);
+        }
 
         let overwrite_body = b"sobrescrito";
         let overwrite_put = s3_app
@@ -1695,6 +1699,394 @@ mod tests {
             response_bytes(get_recreated).await,
             recreated_body.as_slice()
         );
+    }
+
+    #[tokio::test]
+    async fn s3_parity_features_cover_versioning_lifecycle_encryption_lock_policy_notifications_and_checksums()
+     {
+        let Some(ctx) = TestContext::new("s3-parity-features").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let s3_app = ctx.s3_app.clone();
+
+        let create_bucket = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("create bucket request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_bucket.status(), StatusCode::OK);
+
+        let enable_versioning =
+            "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
+        let versioning = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket?versioning")
+                        .body(Body::from(enable_versioning)),
+                    enable_versioning.as_bytes(),
+                )
+                .expect("versioning request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(versioning.status(), StatusCode::OK);
+
+        let encryption = "<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
+        let put_encryption = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket?encryption")
+                        .body(Body::from(encryption)),
+                    encryption.as_bytes(),
+                )
+                .expect("encryption request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(put_encryption.status(), StatusCode::OK);
+
+        let notifications = r#"{"EventBridgeEnabled":true,"Rules":[{"Events":["s3:ObjectCreated:*","s3:ObjectRemoved:*","s3:LifecycleExpiration:*"]}]}"#;
+        let put_notifications = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket?notification")
+                        .body(Body::from(notifications)),
+                    notifications.as_bytes(),
+                )
+                .expect("notification request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(put_notifications.status(), StatusCode::OK);
+
+        let first_body = b"first encrypted version";
+        let first_checksum = BASE64.encode(Sha256::digest(first_body));
+        let first_put = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket/object.txt")
+                        .header("x-amz-checksum-sha256", &first_checksum)
+                        .body(Body::from(first_body.as_slice())),
+                    first_body,
+                )
+                .expect("first put request"),
+            )
+            .await
+            .expect("router response");
+        let first_put_status = first_put.status();
+        if first_put_status != StatusCode::OK {
+            panic!("first put failed: {}", response_text(first_put).await);
+        }
+        assert!(!header_value(&first_put, "x-amz-version-id").is_empty());
+        let first_version: String = sqlx_core::query_scalar::query_scalar(
+            r#"
+            SELECT v.s3_version_id
+            FROM object_versions v
+            JOIN objects o ON o.id = v.object_id
+            JOIN buckets b ON b.id = o.bucket_id
+            WHERE b.name = 'parity-bucket' AND o.object_key = 'object.txt'
+            ORDER BY v.created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("first version id");
+
+        let stored_path: String = sqlx_core::query_scalar::query_scalar(
+            r#"
+            SELECT v.storage_path
+            FROM object_versions v
+            JOIN objects o ON o.id = v.object_id
+            JOIN buckets b ON b.id = o.bucket_id
+            WHERE b.name = 'parity-bucket' AND o.object_key = 'object.txt' AND v.s3_version_id = $1
+            "#,
+        )
+        .bind(&first_version)
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("stored path");
+        assert_ne!(fs::read(&stored_path).expect("encrypted file"), first_body);
+
+        let second_body = b"second encrypted version";
+        let second_put = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket/object.txt")
+                        .body(Body::from(second_body.as_slice())),
+                    second_body,
+                )
+                .expect("second put request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(second_put.status(), StatusCode::OK);
+        let second_version: String = sqlx_core::query_scalar::query_scalar(
+            r#"
+            SELECT v.s3_version_id
+            FROM object_versions v
+            JOIN objects o ON o.id = v.object_id
+            JOIN buckets b ON b.id = o.bucket_id
+            WHERE b.name = 'parity-bucket' AND o.object_key = 'object.txt'
+            ORDER BY v.created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("second version id");
+        assert_ne!(first_version, second_version);
+
+        let get_first_version = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri(format!(
+                            "/parity-bucket/object.txt?versionId={first_version}"
+                        ))
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("version get request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_first_version.status(), StatusCode::OK);
+        assert_eq!(
+            header_value(&get_first_version, "x-amz-server-side-encryption"),
+            "AES256"
+        );
+        assert_eq!(
+            header_value(&get_first_version, "x-amz-checksum-sha256"),
+            first_checksum
+        );
+        assert_eq!(response_bytes(get_first_version).await.as_ref(), first_body);
+
+        let versions = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/parity-bucket?versions")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("versions request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(versions.status(), StatusCode::OK);
+        let versions_body = response_text(versions).await;
+        assert!(versions_body.contains("<ListVersionsResult"));
+        assert!(versions_body.contains(&first_version));
+        assert!(versions_body.contains(&second_version));
+
+        let object_lock = "<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode><Days>1</Days></DefaultRetention></Rule></ObjectLockConfiguration>";
+        let put_object_lock = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket?object-lock")
+                        .body(Body::from(object_lock)),
+                    object_lock.as_bytes(),
+                )
+                .expect("object lock config request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(put_object_lock.status(), StatusCode::OK);
+
+        let locked_body = b"locked";
+        let locked_put = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket/locked.txt")
+                        .body(Body::from(locked_body.as_slice())),
+                    locked_body,
+                )
+                .expect("locked put request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(locked_put.status(), StatusCode::OK);
+        let delete_locked = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::DELETE)
+                        .uri("/parity-bucket/locked.txt")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("delete locked request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(delete_locked.status(), StatusCode::FORBIDDEN);
+        assert!(
+            response_text(delete_locked)
+                .await
+                .contains("<Code>AccessDenied</Code>")
+        );
+
+        let deny_put_policy = format!(
+            r#"{{"Version":"2012-10-17","Statement":[{{"Effect":"Deny","Principal":"{}","Action":"s3:PutObject"}}]}}"#,
+            TEST_S3_ACCESS_KEY
+        );
+        let put_policy = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket?policy")
+                        .body(Body::from(deny_put_policy.clone())),
+                    deny_put_policy.as_bytes(),
+                )
+                .expect("policy request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(put_policy.status(), StatusCode::OK);
+        let denied_put = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket/denied.txt")
+                        .body(Body::from("denied")),
+                    b"denied",
+                )
+                .expect("denied put request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(denied_put.status(), StatusCode::FORBIDDEN);
+
+        let allow_all_policy = r#"{"Version":"2012-10-17","Statement":[]}"#;
+        let reset_policy = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket?policy")
+                        .body(Body::from(allow_all_policy)),
+                    allow_all_policy.as_bytes(),
+                )
+                .expect("reset policy request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(reset_policy.status(), StatusCode::OK);
+
+        let lifecycle = r#"{"Rules":[{"Status":"Enabled","Prefix":"expire/","Expiration":{"Days":1},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}"#;
+        let put_lifecycle = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket?lifecycle")
+                        .body(Body::from(lifecycle)),
+                    lifecycle.as_bytes(),
+                )
+                .expect("lifecycle request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(put_lifecycle.status(), StatusCode::OK);
+        let expiring_body = b"old";
+        let expiring_put = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/parity-bucket/expire/old.txt")
+                        .body(Body::from(expiring_body.as_slice())),
+                    expiring_body,
+                )
+                .expect("expiring put request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(expiring_put.status(), StatusCode::OK);
+        sqlx_core::query::query(
+            r#"
+            UPDATE object_versions v
+            SET created_at = now() - interval '2 days',
+                retain_until = now() - interval '1 hour',
+                legal_hold = FALSE
+            FROM objects o
+            JOIN buckets b ON b.id = o.bucket_id
+            WHERE v.object_id = o.id AND b.name = 'parity-bucket' AND o.object_key = 'expire/old.txt'
+            "#,
+        )
+        .execute(ctx.catalog.pool())
+        .await
+        .expect("backdate object");
+        let apply_lifecycle = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/parity-bucket?lifecycle")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("apply lifecycle request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(apply_lifecycle.status(), StatusCode::OK);
+        assert!(
+            response_text(apply_lifecycle)
+                .await
+                .contains("<ExpiredObjects>1</ExpiredObjects>")
+        );
+
+        let notification_count: i64 = sqlx_core::query_scalar::query_scalar(
+            "SELECT COUNT(*)::bigint FROM s3_notification_events WHERE event_name IN ('s3:ObjectCreated:Put', 's3:LifecycleExpiration:Delete')",
+        )
+        .fetch_one(ctx.catalog.pool())
+        .await
+        .expect("notification count");
+        assert!(notification_count >= 3);
     }
 
     #[tokio::test]
