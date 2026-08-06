@@ -1,0 +1,4 @@
+services:
+  postgres:
+    ports:
+      - "${PONTEMESH_TEST_POSTGRES_PORT:-45432}:5432"

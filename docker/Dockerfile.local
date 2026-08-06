@@ -1,0 +1,19 @@
+FROM ubuntu:24.04
+
+ENV PONTEMESH_HOME=/var/pontemesh_home
+ENV RUST_LOG=pontemesh_server=info,tower_http=info
+
+RUN useradd --system --create-home --home-dir /nonexistent --shell /usr/sbin/nologin pontemesh \
+    && mkdir -p /var/pontemesh_home \
+    && chown -R pontemesh:pontemesh /var/pontemesh_home
+
+WORKDIR /app
+COPY target/release/pontemesh-server /usr/local/bin/pontemesh-server
+COPY migrations ./migrations
+COPY web/dist ./web/dist
+
+USER pontemesh
+EXPOSE 8080 9000
+VOLUME ["/var/pontemesh_home"]
+
+ENTRYPOINT ["/usr/local/bin/pontemesh-server"]

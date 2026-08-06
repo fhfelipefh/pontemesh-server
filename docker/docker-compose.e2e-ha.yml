@@ -1,0 +1,238 @@
+name: pontemesh-ha-e2e
+
+services:
+  origin-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.local
+    image: pontemesh-server:e2e-ha
+    environment:
+      PONTEMESH_HOME: /var/pontemesh_home
+      PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@origin-postgres:5432/pontemesh
+      PONTEMESH_WEB_PORT: 8080
+      PONTEMESH_S3_PORT: 9000
+      RUST_LOG: pontemesh_server=info,tower_http=info
+    ports:
+      - "18180:8080"
+      - "19180:9000"
+    volumes:
+      - origin_home:/var/pontemesh_home
+    depends_on:
+      origin-postgres:
+        condition: service_healthy
+    networks:
+      - e2e
+
+  origin-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: pontemesh
+      POSTGRES_USER: pontemesh
+      POSTGRES_PASSWORD: pontemesh
+    volumes:
+      - origin_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pontemesh -d pontemesh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - e2e
+
+  replica-1:
+    image: pontemesh-server:e2e-ha
+    environment:
+      PONTEMESH_HOME: /var/pontemesh_home
+      PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@replica-1-postgres:5432/pontemesh
+      PONTEMESH_WEB_PORT: 8080
+      PONTEMESH_S3_PORT: 9000
+      RUST_LOG: pontemesh_server=info,tower_http=info
+    ports:
+      - "18181:8080"
+    volumes:
+      - replica_1_home:/var/pontemesh_home
+    depends_on:
+      replica-1-postgres:
+        condition: service_healthy
+      origin-server:
+        condition: service_started
+    networks:
+      - e2e
+
+  replica-1-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: pontemesh
+      POSTGRES_USER: pontemesh
+      POSTGRES_PASSWORD: pontemesh
+    volumes:
+      - replica_1_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pontemesh -d pontemesh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - e2e
+
+  replica-2:
+    image: pontemesh-server:e2e-ha
+    environment:
+      PONTEMESH_HOME: /var/pontemesh_home
+      PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@replica-2-postgres:5432/pontemesh
+      PONTEMESH_WEB_PORT: 8080
+      PONTEMESH_S3_PORT: 9000
+      RUST_LOG: pontemesh_server=info,tower_http=info
+    ports:
+      - "18182:8080"
+    volumes:
+      - replica_2_home:/var/pontemesh_home
+    depends_on:
+      replica-2-postgres:
+        condition: service_healthy
+      origin-server:
+        condition: service_started
+    networks:
+      - e2e
+
+  replica-2-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: pontemesh
+      POSTGRES_USER: pontemesh
+      POSTGRES_PASSWORD: pontemesh
+    volumes:
+      - replica_2_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pontemesh -d pontemesh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - e2e
+
+  replica-3:
+    image: pontemesh-server:e2e-ha
+    environment:
+      PONTEMESH_HOME: /var/pontemesh_home
+      PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@replica-3-postgres:5432/pontemesh
+      PONTEMESH_WEB_PORT: 8080
+      PONTEMESH_S3_PORT: 9000
+      RUST_LOG: pontemesh_server=info,tower_http=info
+    ports:
+      - "18183:8080"
+    volumes:
+      - replica_3_home:/var/pontemesh_home
+    depends_on:
+      replica-3-postgres:
+        condition: service_healthy
+      origin-server:
+        condition: service_started
+    networks:
+      - e2e
+
+  replica-3-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: pontemesh
+      POSTGRES_USER: pontemesh
+      POSTGRES_PASSWORD: pontemesh
+    volumes:
+      - replica_3_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pontemesh -d pontemesh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - e2e
+
+  replica-4:
+    image: pontemesh-server:e2e-ha
+    environment:
+      PONTEMESH_HOME: /var/pontemesh_home
+      PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@replica-4-postgres:5432/pontemesh
+      PONTEMESH_WEB_PORT: 8080
+      PONTEMESH_S3_PORT: 9000
+      RUST_LOG: pontemesh_server=info,tower_http=info
+    ports:
+      - "18184:8080"
+    volumes:
+      - replica_4_home:/var/pontemesh_home
+    depends_on:
+      replica-4-postgres:
+        condition: service_healthy
+      origin-server:
+        condition: service_started
+    networks:
+      - e2e
+
+  replica-4-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: pontemesh
+      POSTGRES_USER: pontemesh
+      POSTGRES_PASSWORD: pontemesh
+    volumes:
+      - replica_4_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pontemesh -d pontemesh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - e2e
+
+  replica-5:
+    image: pontemesh-server:e2e-ha
+    environment:
+      PONTEMESH_HOME: /var/pontemesh_home
+      PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@replica-5-postgres:5432/pontemesh
+      PONTEMESH_WEB_PORT: 8080
+      PONTEMESH_S3_PORT: 9000
+      RUST_LOG: pontemesh_server=info,tower_http=info
+    ports:
+      - "18185:8080"
+    volumes:
+      - replica_5_home:/var/pontemesh_home
+    depends_on:
+      replica-5-postgres:
+        condition: service_healthy
+      origin-server:
+        condition: service_started
+    networks:
+      - e2e
+
+  replica-5-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: pontemesh
+      POSTGRES_USER: pontemesh
+      POSTGRES_PASSWORD: pontemesh
+    volumes:
+      - replica_5_postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pontemesh -d pontemesh"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - e2e
+
+networks:
+  e2e:
+    driver: bridge
+
+volumes:
+  origin_home:
+  origin_postgres:
+  replica_1_home:
+  replica_1_postgres:
+  replica_2_home:
+  replica_2_postgres:
+  replica_3_home:
+  replica_3_postgres:
+  replica_4_home:
+  replica_4_postgres:
+  replica_5_home:
+  replica_5_postgres:

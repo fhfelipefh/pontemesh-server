@@ -1,0 +1,11 @@
+{
+  "keys": [],
+  "prefixes": [
+    "errors.",
+    "status.",
+    "validation.",
+    "setup.errors.",
+    "setup.status.",
+    "setup.validation."
+  ]
+}

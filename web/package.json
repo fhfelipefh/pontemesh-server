@@ -1,0 +1,48 @@
+{
+  "name": "pontemesh-server-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "i18n:prune": "tsx scripts/prune-i18n.ts --write",
+    "i18n:check": "tsx scripts/prune-i18n.ts --check",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "lint": "eslint . --ext .ts,.tsx",
+    "test": "vitest run src scripts",
+    "test:ui": "playwright test",
+    "test:ui:quality": "playwright test tests/ui-quality",
+    "test:e2e:origin-replica": "playwright test --config playwright.e2e.config.ts tests/e2e/origin-replica-flow.spec.ts",
+    "validate": "npm run i18n:check && npm run typecheck && npm run lint && npm run test && npm run test:ui:quality",
+    "build": "npm run i18n:prune && npm run validate && vite build",
+    "build:ci": "npm run i18n:check && npm run validate && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "i18next": "^26.3.3",
+    "lucide-react": "^1.22.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-i18next": "^17.0.8",
+    "react-router-dom": "7.18.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@typescript-eslint/eslint-plugin": "^8.35.1",
+    "@typescript-eslint/parser": "^8.35.1",
+    "eslint": "^9.30.1",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "tsx": "^4.21.0",
+    "vitest": "^4.1.9"
+  }
+}

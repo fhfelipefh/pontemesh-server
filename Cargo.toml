@@ -1,0 +1,56 @@
+[package]
+name = "pontemesh-server"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/fhfelipefh/pontemesh-server"
+
+[[bin]]
+name = "pontemesh-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "pontemesh"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+aes-gcm = "0.10"
+argon2 = "0.5"
+axum = { version = "0.8", features = ["multipart"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+config = "0.15"
+crc32fast = "1"
+dotenvy = "0.15"
+hmac = "0.12"
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+http-body-util = "0.1"
+include_dir = "0.7"
+mime_guess = "2"
+object_store = "0.11"
+opentelemetry = "0.27"
+prometheus-client = "0.23"
+rand_core = { version = "0.6", features = ["getrandom"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rustls = "0.23"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sqlx = { package = "sqlx-postgres", version = "0.8", default-features = false, features = ["chrono", "uuid", "json", "migrate"] }
+sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio", "_tls-rustls-ring-webpki", "migrate"] }
+subtle = "2"
+sysinfo = "0.33"
+thiserror = "2"
+time = { version = "0.3", features = ["serde"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "fs", "net", "io-util"] }
+tokio-rustls = "0.26"
+toml = "0.8"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace", "compression-full", "cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+postgresql_embedded = { version = "0.21", default-features = false, features = ["theseus", "tls-rustls-ring", "tokio"] }
