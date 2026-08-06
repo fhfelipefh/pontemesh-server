@@ -10,10 +10,10 @@ const originUrl = "http://127.0.0.1:18080";
 const originS3Url = "http://127.0.0.1:19000";
 const replicaUrl = "http://127.0.0.1:18081";
 const replicaS3Url = "http://127.0.0.1:19001";
-const bucket = "tcc-e2e";
+const bucket = "pontemesh-e2e";
 const objectKey = "hello-origin-replica.txt";
 const objectContent = "Ponte Mesh Origin Replica E2E";
-const adminPassword = "TccE2eAdmin123!";
+const adminPassword = "PonteMeshE2eAdmin123!";
 const s3AccessKeyId = "PMKORIGINE2EACCESSKEY";
 const s3SecretAccessKey = "pm-origin-e2e-secret-material-123";
 const region = "us-east-1";
@@ -293,7 +293,7 @@ async function expectDashboardRole(page: Page, role: "origin" | "replica-edge") 
 
 async function createReplicaCredentialViaUi(page: Page): Promise<{ replicaId: string; token: string }> {
   await page.goto(`${originUrl}/replicas`);
-  await page.getByLabel(/replica name|nome da replica|nome da réplica/i).fill("edge-tcc-e2e");
+  await page.getByLabel(/replica name|nome da replica|nome da réplica/i).fill("edge-pontemesh-e2e");
   await page.getByLabel(/allowed buckets|buckets permitidos/i).fill(bucket);
   await page.getByRole("button", { name: /create|criar/i }).click();
   const panel = page.locator(".secret-panel");
@@ -307,7 +307,7 @@ async function createReplicaCredentialViaUi(page: Page): Promise<{ replicaId: st
 
 async function expectReplicaSecretNotListed(page: Page, token: string) {
   await page.reload();
-  await expect(page.locator("table")).toContainText("edge-tcc-e2e");
+  await expect(page.locator("table")).toContainText("edge-pontemesh-e2e");
   await expect(page.locator("table")).not.toContainText(token);
 }
 
@@ -386,7 +386,7 @@ async function expectPolicyPersisted(admin: { baseUrl: string; cookie: string })
 async function createApplicationCredential(admin: { baseUrl: string; cookie: string }): Promise<{ token: string }> {
   const body = await fetchJson<ApplicationCredentialResponse>(admin, "/api/admin/application-credentials", {
     method: "POST",
-    data: { name: "tcc-e2e-sdk" }
+    data: { name: "pontemesh-e2e-sdk" }
   });
   expect(body.token).toBeTruthy();
   return { token: body.token };

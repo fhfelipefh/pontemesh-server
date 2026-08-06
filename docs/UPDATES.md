@@ -7,7 +7,7 @@ restart or rollout.
 
 ## Release publishing
 
-Use the manual `Windows Release` GitHub Actions workflow after the repository is
+Use the manual `Server Release` GitHub Actions workflow after the repository is
 public and the release version is already committed in `Cargo.toml`.
 
 The workflow:
@@ -15,8 +15,9 @@ The workflow:
 - accepts a semver version without the `v` prefix;
 - refuses to publish if the caller is not the repository owner;
 - refuses to publish if `Cargo.toml` does not match the requested version;
-- builds the web panel and server binary;
-- publishes the server package, a SHA-256 file, and
+- builds the web panel once and native server binaries for Linux x64, Windows
+  x64, macOS Intel, and macOS ARM;
+- publishes each server package, its SHA-256 file, and
   `pontemesh-server-v<VERSION>-manifest.json`.
 
 ## Update checking
@@ -40,6 +41,9 @@ Regular background check:
   --asset-pattern '*windows-x64.zip' \
   --background
 ```
+
+Use `*linux-x64.tar.gz`, `*macos-x64.tar.gz`, or
+`*macos-arm64.tar.gz` as the asset pattern on those platforms.
 
 By default, checks are spaced by 24 hours. State and reports are written under
 `target/update-state`; staged downloads are written under
