@@ -86,6 +86,7 @@ describe("mcpApi", () => {
   });
 
   it("creates, lists, revokes tokens, and lists activity through admin routes", async () => {
+    const issuedCredential = "test-token-value";
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse({
         token: {
@@ -97,7 +98,7 @@ describe("mcpApi", () => {
           revokedAt: null,
           lastUsedAt: null
         },
-        secret: "pmcp_abcd1234secret"
+        secret: issuedCredential
       }, 201))
       .mockResolvedValueOnce(jsonResponse([
         {
@@ -127,7 +128,7 @@ describe("mcpApi", () => {
     await revokeMcpToken("token/1");
     const activity = await listMcpActivity();
 
-    expect(created.secret).toBe("pmcp_abcd1234secret");
+    expect(created.secret).toBe(issuedCredential);
     expect(tokens[0].tokenPrefix).toBe("pmcp_abcd1234");
     expect(tokens[0]).not.toHaveProperty("secret");
     expect(activity[0].method).toBe("tools/list");

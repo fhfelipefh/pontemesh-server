@@ -2,16 +2,6 @@ name: Server Release
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Release version, without the v prefix. Must match Cargo.toml."
-        required: true
-        type: string
-      prerelease:
-        description: "Mark the GitHub release as a pre-release."
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -25,31 +15,36 @@ jobs:
     name: Validate release request
     if: github.actor == github.repository_owner
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate version input
+      - name: Resolve release metadata
+        id: release
         shell: bash
         run: |
-          version="${{ inputs.version }}"
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
           if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "Version must use semver format without the v prefix, for example 0.1.0."
-            exit 1
-          fi
-          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
-          if [ "$cargo_version" != "$version" ]; then
-            echo "Input version $version does not match Cargo.toml version $cargo_version."
+            echo "Cargo.toml version must use semver format, for example 0.1.0."
             exit 1
           fi
           if git rev-parse "v$version" >/dev/null 2>&1; then
             echo "Tag v$version already exists."
             exit 1
           fi
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
   web:
     name: Validate and build web panel
@@ -58,12 +53,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "22"
           cache: npm
@@ -77,7 +72,7 @@ jobs:
           npm run build:ci
 
       - name: Upload web panel
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pontemesh-server-web
           path: web/dist
@@ -107,12 +102,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
       - name: Restore web panel
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: pontemesh-server-web
           path: web/dist
@@ -127,7 +122,7 @@ jobs:
         if: matrix.target.archive == 'tar'
         shell: bash
         run: |
-          version="${{ inputs.version }}"
+          version="${{ needs.validate.outputs.version }}"
           target_name="${{ matrix.target.name }}"
           package="pontemesh-server-v${version}-${target_name}"
           test -f target/release/pontemesh-server
@@ -141,7 +136,7 @@ jobs:
         if: matrix.target.archive == 'zip'
         shell: pwsh
         run: |
-          $version = "${{ inputs.version }}"
+          $version = "${{ needs.validate.outputs.version }}"
           $targetName = "${{ matrix.target.name }}"
           $package = "pontemesh-server-v$version-$targetName"
           if (-not (Test-Path "target/release/pontemesh-server.exe")) {
@@ -155,20 +150,20 @@ jobs:
           (Get-FileHash -Algorithm SHA256 "dist/$package.zip").Hash.ToLowerInvariant() | Set-Content "dist/$package.zip.sha256"
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pontemesh-server-${{ matrix.target.name }}
           path: |
-            dist/pontemesh-server-v${{ inputs.version }}-${{ matrix.target.name }}.tar.gz
-            dist/pontemesh-server-v${{ inputs.version }}-${{ matrix.target.name }}.tar.gz.sha256
-            dist/pontemesh-server-v${{ inputs.version }}-${{ matrix.target.name }}.zip
-            dist/pontemesh-server-v${{ inputs.version }}-${{ matrix.target.name }}.zip.sha256
+            dist/pontemesh-server-v${{ needs.validate.outputs.version }}-${{ matrix.target.name }}.tar.gz
+            dist/pontemesh-server-v${{ needs.validate.outputs.version }}-${{ matrix.target.name }}.tar.gz.sha256
+            dist/pontemesh-server-v${{ needs.validate.outputs.version }}-${{ matrix.target.name }}.zip
+            dist/pontemesh-server-v${{ needs.validate.outputs.version }}-${{ matrix.target.name }}.zip.sha256
           if-no-files-found: error
           retention-days: 1
 
   publish:
     name: Publish server release
-    needs: build
+    needs: [validate, build]
     if: github.actor == github.repository_owner
     runs-on: ubuntu-latest
     permissions:
@@ -176,12 +171,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
       - name: Download release artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           path: dist
           merge-multiple: true
@@ -189,7 +184,7 @@ jobs:
       - name: Build release manifest
         shell: bash
         run: |
-          version="${{ inputs.version }}"
+          version="${{ needs.validate.outputs.version }}"
           manifest="dist/pontemesh-server-v${version}-manifest.json"
           python3 - "$version" "$manifest" <<'PY'
           import json
@@ -226,7 +221,7 @@ jobs:
       - name: Create and push tag
         shell: bash
         run: |
-          tag="v${{ inputs.version }}"
+          tag="v${{ needs.validate.outputs.version }}"
           if git rev-parse "$tag" >/dev/null 2>&1; then
             echo "Tag $tag already exists."
             exit 1
@@ -244,13 +239,13 @@ jobs:
           args=(
             release
             create
-            "v${{ inputs.version }}"
-            dist/pontemesh-server-v${{ inputs.version }}-*
+            "v${{ needs.validate.outputs.version }}"
+            dist/pontemesh-server-v${{ needs.validate.outputs.version }}-*
             --title
-            "Ponte Mesh Server v${{ inputs.version }}"
+            "Ponte Mesh Server v${{ needs.validate.outputs.version }}"
             --generate-notes
           )
-          if [ "${{ inputs.prerelease }}" = "true" ]; then
+          if [ "${{ needs.validate.outputs.prerelease }}" = "true" ]; then
             args+=(--prerelease)
           fi
           gh "${args[@]}"
