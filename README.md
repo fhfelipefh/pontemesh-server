@@ -1,88 +1,92 @@
 # Ponte Mesh Server
 
-**Ponte Mesh Server** é o componente de servidor do **Ponte Mesh**, uma proposta open source para distribuição híbrida de objetos digitais com controle centralizado, entrega por fragmentos e fallback automático para o servidor de origem.
+**Ponte Mesh Server** is the server component of **Ponte Mesh**, an open-source framework for hybrid distribution of digital objects with centralized control, fragment-based delivery, and automatic fallback to the origin server.
 
-O projeto tem como objetivo combinar a simplicidade operacional de uma arquitetura cliente-servidor com a eficiência de fontes auxiliares de distribuição, como nós **Replica/Edge** e peers autorizados, mantendo o **Origin** como autoridade central do sistema.
+The project combines the operational simplicity of a client-server architecture with the efficiency of auxiliary distribution sources, such as **Replica/Edge** nodes and authorized peers, while keeping the **Origin** as the system's central authority.
 
-Na arquitetura proposta, o **Origin** permanece responsável por ingestão, catálogo, autenticação, autorização, geração de manifestos, revogação, políticas de expiração, métricas e fallback.
+In this architecture, the **Origin** remains responsible for ingestion, cataloging, authentication, authorization, manifest generation, revocation, expiration policies, metrics, and fallback.
 
-O plano de dados, por sua vez, pode utilizar fontes auxiliares para distribuir fragmentos de conteúdo quando essa estratégia for segura, autorizada e tecnicamente vantajosa.
+The data plane can use auxiliary sources to distribute content fragments whenever that strategy is secure, authorized, and technically advantageous.
 
-O `pontemesh-server` é uma única aplicação. A mesma base de código, o mesmo binário, a mesma imagem Docker e o mesmo painel administrativo operam como **Origin** ou **Replica/Edge** conforme a configuração persistida da instância.
+`pontemesh-server` is a single application. The same codebase, binary, Docker image, and administration panel operate as an **Origin** or **Replica/Edge** according to the instance's persisted configuration.
 
-## Por que este projeto existe
+## Why this project exists
 
-Arquiteturas tradicionais cliente-servidor concentram todo o tráfego no servidor de origem. Essa abordagem simplifica o controle, a segurança e a previsibilidade operacional, mas pode elevar custos de banda, aumentar a carga sobre a infraestrutura central e dificultar a escalabilidade em cenários de múltiplos acessos simultâneos.
+Traditional client-server architectures concentrate all traffic on the origin server. This approach simplifies control, security, and operational predictability, but it can increase bandwidth costs, place additional load on central infrastructure, and make scaling more difficult when many clients access content simultaneously.
 
-O Ponte Mesh busca oferecer um modelo intermediário: preservar o **Origin** como ponto central de controle e, ao mesmo tempo, permitir que a transferência dos dados seja parcialmente descentralizada por meio de fragmentos.
+Ponte Mesh provides an intermediate model: it preserves the **Origin** as the central control point while allowing data transfer to be partially decentralized through fragments.
 
-Dessa forma, o sistema reduz a dependência exclusiva do servidor de origem quando houver fontes auxiliares confiáveis e autorizadas. O **Origin** garante a continuidade da obtenção quando a entrega auxiliar não for aplicável.
+This reduces exclusive dependence on the origin server when trusted and authorized auxiliary sources are available. The **Origin** ensures that retrieval can continue whenever auxiliary delivery is unavailable or unsuitable.
 
-## Componentes principais
+## Main components
 
 ### Origin
 
-Servidor central da arquitetura.
+The central server of the architecture.
 
-É responsável por controlar a publicação, ingestão, armazenamento primário, catálogo de objetos, autenticação, autorização, geração de manifestos, revogação, políticas de expiração, métricas e fallback.
+It controls publishing, ingestion, primary storage, the object catalog, authentication, authorization, manifest generation, revocation, expiration policies, metrics, and fallback.
 
-O Origin é a autoridade do sistema. Nenhuma obtenção de conteúdo deve ocorrer sem autorização prévia emitida por ele.
+The Origin is the system authority. Content retrieval must not occur without prior authorization issued by it.
 
 ### Replica/Edge
 
-Nó auxiliar com maior estabilidade operacional.
+An auxiliary node with greater operational stability.
 
-Seu papel é replicar conteúdos autorizados e auxiliar na entrega de fragmentos, reduzindo a dependência exclusiva do Origin e de peers comuns.
+Its role is to replicate authorized content and assist with fragment delivery, reducing exclusive dependence on the Origin and ordinary peers.
 
-O Replica/Edge opera sob autorização do Origin, com comunicação autenticada, auditável e revogável.
+A Replica/Edge operates under authorization from the Origin, using authenticated, auditable, and revocable communication.
 
 ### SDK
 
-Camada de integração consumida pelas aplicações cliente.
+The integration layer used by client applications.
 
-O SDK abstrai a complexidade da distribuição híbrida, sendo responsável por consultar o Origin, interpretar manifestos, selecionar fontes, obter fragmentos, validar integridade, controlar progresso e executar fallback automático quando necessário.
+The SDK abstracts the complexity of hybrid distribution. It consults the Origin, interprets manifests, selects sources, retrieves fragments, validates integrity, tracks progress, and performs automatic fallback when necessary.
 
 ### Client
 
-Aplicação consumidora dos objetos digitais.
+An application that consumes digital objects.
 
-O Client utiliza o SDK para acessar conteúdos sem precisar lidar diretamente com a complexidade da arquitetura híbrida. Quando permitido pelas políticas do Origin, também pode colaborar temporariamente com fragmentos já obtidos.
+The Client uses the SDK to access content without handling the complexity of the hybrid architecture directly. When allowed by Origin policies, it can also temporarily share fragments it has already retrieved.
 
-## Princípios do projeto
+## Project principles
 
-* Toda obtenção de conteúdo deve começar com autorização do Origin.
-* O Origin é a autoridade central sobre publicação, disponibilidade, autenticação, autorização e revogação.
-* O P2P é mecanismo de aceleração subordinado ao controle central.
-* Nós Replica/Edge reforçam disponibilidade dentro do escopo autorizado pelo Origin.
-* Todo fragmento recebido de qualquer fonte deve ser validado por integridade antes de ser aceito.
-* Fragmentos aceitos precisam corresponder ao manifesto autorizado.
-* Revogação e expiração devem impedir novas autorizações de acesso.
-* O fallback para o Origin deve preservar fragmentos já validados, evitando reiniciar a obtenção completa do objeto.
-* A arquitetura deve manter comportamento previsível mesmo quando peers estiverem indisponíveis, instáveis ou atrás de NAT e firewalls.
-* Sempre que possível, a API deve ser familiar para integrações inspiradas no modelo S3.
+- Every content retrieval must begin with authorization from the Origin.
+- The Origin is the central authority for publishing, availability, authentication, authorization, and revocation.
+- P2P is an acceleration mechanism subordinate to centralized control.
+- Replica/Edge nodes improve availability within the scope authorized by the Origin.
+- Every fragment received from any source must pass integrity validation before it is accepted.
+- Accepted fragments must match the authorized manifest.
+- Revocation and expiration must prevent new access authorizations.
+- Fallback to the Origin must preserve fragments that have already been validated instead of restarting the entire retrieval.
+- The architecture must remain predictable when peers are unavailable, unstable, or behind NAT and firewalls.
+- Whenever possible, the API should be familiar to integrations inspired by the S3 model.
 
-## Objetivos arquiteturais
+## Architectural goals
 
-O Ponte Mesh Server busca viabilizar uma arquitetura em que:
+Ponte Mesh Server is designed so that:
 
-1. O controle permaneça centralizado no Origin.
-2. A transferência de dados possa ocorrer de forma híbrida.
-3. Objetos sejam distribuídos por fragmentos verificáveis.
-4. O SDK oculte a complexidade da obtenção híbrida.
-5. O sistema continue funcional mesmo sem P2P.
-6. A revogação e a expiração sejam respeitadas pelo fluxo de autorização.
-7. O fallback para o Origin seja parte fundamental do comportamento esperado.
-8. A integração com aplicações existentes seja simples e próxima de modelos conhecidos de armazenamento de objetos.
+1. Control remains centralized in the Origin.
+2. Data transfer can occur through a hybrid delivery model.
+3. Objects are distributed as verifiable fragments.
+4. The SDK hides the complexity of hybrid retrieval.
+5. The system remains functional without P2P.
+6. Authorization respects revocation and expiration.
+7. Fallback to the Origin is a fundamental part of the expected behavior.
+8. Integration with existing applications remains simple and close to familiar object-storage models.
 
-## Documentação
+## Documentation
 
-A documentação pública e o site do projeto estão disponíveis no repositório:
+The public documentation and project website are available at:
+
+<https://fhfelipefh.github.io/pontemesh-docs/>
+
+The documentation repository is available at:
 
 <https://github.com/fhfelipefh/pontemesh-docs>
 
-## Construção
+## Build
 
-Para construir o projeto localmente, primeiro gere o build do painel web:
+To build the project locally, first build the web panel:
 
 ```bash
 cd web
@@ -91,254 +95,229 @@ npm run build
 cd ..
 ```
 
-Depois compile o servidor Rust:
+Then compile the Rust server:
 
 ```bash
 cargo build
 ```
 
-O servidor exige PostgreSQL. Defina obrigatoriamente:
+The server requires PostgreSQL. The following variable is mandatory:
 
 ```text
 PONTEMESH_DATABASE_URL=postgres://pontemesh:pontemesh@postgres:5432/pontemesh
 ```
 
-Em Docker, `postgres` é o nome do serviço na rede dedicada. Em execução direta
-fora do Docker, substitua o host da URL pelo endereço do PostgreSQL acessível ao
-processo local.
+In Docker, `postgres` is the service name on the dedicated network. When running directly outside Docker, replace the URL host with an address through which the process can reach PostgreSQL.
 
-O servidor usa PostgreSQL como banco da aplicação e falha na inicialização se a conexão estiver indisponível.
+The application uses PostgreSQL as its database and fails during startup if the connection is unavailable.
 
-Para gerar o binário otimizado:
+To produce an optimized binary:
 
 ```bash
 cargo build --release
 ```
 
-O executável será gerado em:
+The executable is generated at:
 
 ```text
 target/release/pontemesh-server
 ```
 
-## Execução
+## Run
 
-Para executar em ambiente local:
+To run in a local environment:
 
 ```bash
 cargo run
 ```
 
-Ou, após o build em modo release:
+Or, after a release build:
 
 ```bash
 ./target/release/pontemesh-server
 ```
 
-Para preparar uma instância local para administração por clientes de IA
-compatíveis com MCP, use:
+To prepare a local instance for administration by MCP-compatible AI clients, use:
 
 ```bash
 ./target/release/pontemesh setup-agent
 ```
 
-O `setup-agent` conclui o setup Origin quando necessário, habilita MCP com
-autenticação obrigatória, cria um token MCP novo e grava uma configuração de
-conexão em `$PONTEMESH_HOME/secrets/setup-agent-mcp.json` com permissão restrita.
-Por padrão, o MCP gerado fica limitado a localhost.
+`setup-agent` completes Origin setup when necessary, enables MCP with mandatory authentication, creates a new MCP token, and writes the connection configuration to `$PONTEMESH_HOME/secrets/setup-agent-mcp.json` with restricted permissions. By default, the generated MCP endpoint is limited to localhost.
 
-Por padrão, o servidor utiliza:
+The server uses these defaults:
 
 ```text
 PONTEMESH_HOME=/var/pontemesh_home
-PONTEMESH_DATABASE_URL=<obrigatório>
+PONTEMESH_DATABASE_URL=<required>
 PONTEMESH_STORAGE_PATH=/var/pontemesh_home/data/storage
 PONTEMESH_HTTP_HOST=0.0.0.0
 PONTEMESH_WEB_PORT=8080
 PONTEMESH_S3_PORT=9000
 ```
 
-O diretório persistente da instância é `PONTEMESH_HOME`. Em containers, monte um
-volume para `/var/pontemesh_home`; o armazenamento padrão será criado em
-`/var/pontemesh_home/data/storage`. Para usar uma pasta específica do host,
-monte essa pasta como volume em `/var/pontemesh_home`, ou defina
-`PONTEMESH_STORAGE_PATH` para um caminho interno já preparado.
+`PONTEMESH_HOME` is the instance's persistent directory. In containers, mount a volume at `/var/pontemesh_home`; the default storage directory will be created at `/var/pontemesh_home/data/storage`. To use a specific host directory, mount it at `/var/pontemesh_home`, or set `PONTEMESH_STORAGE_PATH` to a prepared internal path.
 
-Também é possível executar com Docker:
+You can also run the server with Docker:
 
 ```bash
 docker compose -p ponte-mesh -f docker/docker-compose.yml up -d --build
 ```
 
-O `docker-compose.yml` sobe o PostgreSQL e passa
-`PONTEMESH_DATABASE_URL=postgres://pontemesh:pontemesh@postgres:5432/pontemesh`
-para o servidor.
+The `docker-compose.yml` file starts PostgreSQL and passes `PONTEMESH_DATABASE_URL=postgres://pontemesh:pontemesh@postgres:5432/pontemesh` to the server.
 
-A imagem Docker é única: `pontemesh-server`. Ambientes com Origin e uma ou mais
-réplicas devem subir múltiplas instâncias da mesma imagem, cada uma com seu
-próprio `PONTEMESH_HOME`, banco/configuração persistente e parâmetros de rede.
+There is a single Docker image: `pontemesh-server`. Environments with an Origin and one or more replicas must run multiple instances of the same image, each with its own `PONTEMESH_HOME`, persisted database and configuration, and network parameters.
 
-O Docker Compose sobe o projeto `ponte-mesh` com os serviços `server` e
-`postgres`, agrupados como uma única aplicação no Docker Desktop. O PostgreSQL
-fica na rede interna do Compose. Com PostgreSQL 18, o volume
-`pontemesh_postgres` é montado em `/var/lib/postgresql`.
+Docker Compose starts the `ponte-mesh` project with `server` and `postgres` services grouped as one application in Docker Desktop. PostgreSQL remains on the internal Compose network. With PostgreSQL 18, the `pontemesh_postgres` volume is mounted at `/var/lib/postgresql`.
 
-O Compose local usa `docker/Dockerfile.local`, que empacota o binário e o build
-web já gerados pelo script. A imagem multi-stage em `docker/Dockerfile` constrói
-frontend e backend dentro do próprio build da imagem.
+The local Compose configuration uses `docker/Dockerfile.local`, which packages the binary and web build already produced by the script. The multi-stage image in `docker/Dockerfile` builds both the frontend and backend inside the image build.
 
-Acesse:
+Access the services at:
 
 ```text
-Painel web: http://localhost:8080
-Endpoint S3-compatible: http://localhost:9000
+Web panel: http://localhost:8080
+S3-compatible endpoint: http://localhost:9000
 ```
 
-## Comando único para construção e execução
+## One-command build and startup
 
-Todos os comandos acima podem ser resumidos em um script único, que prepara o ambiente e abre o painel web:
+The build and startup steps can be run through a single script that prepares the environment and opens the web panel:
 
 ```bash
 ./scripts/start-panel.sh
 ```
 
-Esse comando executa o fluxo local:
+This command:
 
-* instala dependências e constrói o frontend;
-* constrói o backend Rust em modo release;
-* chama Docker Compose com o projeto `ponte-mesh`;
-* constrói a imagem Docker pelo Compose;
-* sobe `server` e `postgres` como serviços do mesmo projeto;
-* aguarda o PostgreSQL saudável;
-* espera o servidor responder;
-* abre uma nova guia do navegador em `http://localhost:8080`.
+- installs dependencies and builds the frontend;
+- builds the Rust backend in release mode;
+- invokes Docker Compose using the `ponte-mesh` project;
+- builds the Docker image through Compose;
+- starts `server` and `postgres` as services in the same project;
+- waits for PostgreSQL to become healthy;
+- waits for the server to respond;
+- opens `http://localhost:8080` in a new browser tab.
 
-O comando usa, por padrão:
+The command uses these defaults:
 
 ```text
-imagem Docker: pontemesh-server:local
-projeto Compose: ponte-mesh
-serviços: server, postgres
-painel web: http://localhost:8080
-endpoint S3-compatible: http://localhost:9000
+Docker image: pontemesh-server:local
+Compose project: ponte-mesh
+Services: server, postgres
+Web panel: http://localhost:8080
+S3-compatible endpoint: http://localhost:9000
 ```
 
-É possível sobrescrever esses valores por variáveis de ambiente:
+You can override these values through environment variables:
 
 ```bash
 PONTEMESH_WEB_HOST_PORT=8081 \
 ./scripts/start-panel.sh
 ```
 
-Nesse exemplo, o navegador será aberto em:
+In this example, the browser opens:
 
 ```text
 http://localhost:8081
 ```
 
-Para reiniciar um ambiente de desenvolvimento sem afetar outros projetos, use:
+To reset a development environment without affecting other projects, use:
 
 ```bash
 ./scripts/start-panel.sh --reset-dev
 ```
 
-Essa opção executa o reset do projeto Compose:
+This option resets the Compose project with:
 
 ```bash
 docker compose -p ponte-mesh -f docker/docker-compose.yml down --volumes --remove-orphans
 ```
 
-Em produção, faça backup ou migração antes de remover volumes.
+Back up or migrate production data before removing volumes.
 
-## Endpoint S3-compatible
+## S3-compatible endpoint
 
-O painel web/admin e a API S3-compatible usam portas separadas:
+The web administration panel and S3-compatible API use separate ports:
 
 ```text
-Painel web/admin: http://localhost:8080
-API S3-compatible: http://localhost:9000
+Web/admin panel: http://localhost:8080
+S3-compatible API: http://localhost:9000
 ```
 
-Clientes S3 usam path-style com:
+S3 clients use path-style addressing with:
 
 ```text
 endpoint_url = http://localhost:9000
 ```
 
-As rotas S3-compatible ficam na raiz do endpoint S3. Clientes S3 devem trocar o
-endpoint para `http://localhost:9000` e usar paths no formato `/{bucket}/{key}`.
+S3-compatible routes are served from the root of the S3 endpoint. S3 clients must use `http://localhost:9000` as the endpoint and paths in the `/{bucket}/{key}` format.
 
-SDKs Ponte Mesh podem usar pacotes de acesso temporários emitidos pelo Origin
-para obter objetos por rotas próprias em `/pontemesh/access-packages/...`,
-mantendo o endpoint S3-compatible separado para clientes S3.
+Ponte Mesh SDKs can use temporary access packages issued by the Origin to retrieve objects through dedicated `/pontemesh/access-packages/...` routes, while the S3-compatible endpoint remains separate for S3 clients.
 
-Na primeira configuração, o painel gera uma access key S3 inicial para o admin e
-mostra o segredo uma única vez. Depois disso, novas chaves podem ser criadas ou
-revogadas em `Settings > S3 Access Keys`.
+During initial setup, the panel generates an initial S3 access key for the administrator and displays its secret once. Additional keys can later be created or revoked under `Settings > S3 Access Keys`.
 
-As variáveis de bootstrap são opcionais e servem apenas para importar uma chave
-externa em cenários avançados:
+Bootstrap variables are optional and are intended only for importing an externally generated key in advanced scenarios:
 
 ```bash
 export PONTEMESH_S3_BOOTSTRAP_ACCESS_KEY_ID=PMKEXTERNALACCESSKEY
-export PONTEMESH_S3_BOOTSTRAP_SECRET_ACCESS_KEY='<secret-gerado-fora-do-pontemesh>'
+export PONTEMESH_S3_BOOTSTRAP_SECRET_ACCESS_KEY='<secret-generated-outside-pontemesh>'
 ./scripts/start-panel.sh
 ```
 
-Exemplos com AWS CLI:
+AWS CLI examples:
 
 ```bash
-AWS_ACCESS_KEY_ID='<access-key-gerada-no-painel>' \
-AWS_SECRET_ACCESS_KEY='<secret-exibido-uma-unica-vez>' \
+AWS_ACCESS_KEY_ID='<access-key-generated-in-the-panel>' \
+AWS_SECRET_ACCESS_KEY='<secret-displayed-once>' \
 aws --endpoint-url http://localhost:9000 s3api list-buckets
 ```
 
 ```bash
-AWS_ACCESS_KEY_ID='<access-key-gerada-no-painel>' \
-AWS_SECRET_ACCESS_KEY='<secret-exibido-uma-unica-vez>' \
+AWS_ACCESS_KEY_ID='<access-key-generated-in-the-panel>' \
+AWS_SECRET_ACCESS_KEY='<secret-displayed-once>' \
 aws --endpoint-url http://localhost:9000 s3api create-bucket --bucket test-bucket
 ```
 
 ```bash
-AWS_ACCESS_KEY_ID='<access-key-gerada-no-painel>' \
-AWS_SECRET_ACCESS_KEY='<secret-exibido-uma-unica-vez>' \
+AWS_ACCESS_KEY_ID='<access-key-generated-in-the-panel>' \
+AWS_SECRET_ACCESS_KEY='<secret-displayed-once>' \
 aws --endpoint-url http://localhost:9000 s3api put-object --bucket test-bucket --key hello.txt --body ./hello.txt
 ```
 
-## Configuração inicial
+## Initial setup
 
-Na primeira execução, o Ponte Mesh Server cria um token administrativo inicial.
+On its first run, Ponte Mesh Server creates an initial administrator token.
 
-O token é salvo em:
+The token is stored at:
 
 ```text
 /var/pontemesh_home/secrets/initialAdminToken
 ```
 
-Ele também aparece nos logs do servidor.
+It also appears in the server logs.
 
-Com Docker Compose, visualize os logs com:
+With Docker Compose, view the logs with:
 
 ```bash
 docker compose -p ponte-mesh -f docker/docker-compose.yml logs server
 ```
 
-Ou leia o token diretamente:
+Or read the token directly:
 
 ```bash
 docker compose -p ponte-mesh -f docker/docker-compose.yml exec server cat /var/pontemesh_home/secrets/initialAdminToken
 ```
 
-Depois, acesse:
+Then open:
 
 ```text
 http://localhost:8080
 ```
 
-Cole o token inicial no painel web e conclua a configuração da instância.
+Paste the initial token into the web panel and complete the instance setup.
 
-## Apoie o projeto
+## Support the project
 
-Se este projeto for útil para você, considere apoiar o desenvolvimento:
+If Ponte Mesh is useful to you, consider supporting its continued development:
 
-[Patrocinar no GitHub Sponsors](https://github.com/sponsors/fhfelipefh)
+[Sponsor on GitHub](https://github.com/sponsors/fhfelipefh)
