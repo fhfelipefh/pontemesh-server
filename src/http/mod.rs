@@ -488,7 +488,7 @@ mod tests {
         let renamed_instance_body = json_body(rename_instance).await;
         assert_eq!(renamed_instance_body["name"], "Contract Origin");
         assert_eq!(
-            config::load_instance_config(&ctx.paths)
+            crate::config::load_instance_config(&ctx.paths)
                 .expect("persisted instance config")
                 .instance
                 .name,
