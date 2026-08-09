@@ -682,8 +682,12 @@ pub async fn update_bucket_policy(
         s3_object_lock_default_retain_days: payload
             .s3_object_lock_default_retain_days
             .or(current.s3_object_lock_default_retain_days),
-        s3_lifecycle_rules: payload.s3_lifecycle_rules.unwrap_or(current.s3_lifecycle_rules),
-        s3_resource_policy: payload.s3_resource_policy.unwrap_or(current.s3_resource_policy),
+        s3_lifecycle_rules: payload
+            .s3_lifecycle_rules
+            .unwrap_or(current.s3_lifecycle_rules),
+        s3_resource_policy: payload
+            .s3_resource_policy
+            .unwrap_or(current.s3_resource_policy),
         s3_event_notifications: payload
             .s3_event_notifications
             .unwrap_or(current.s3_event_notifications),
