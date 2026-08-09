@@ -46,6 +46,8 @@ pub struct SetupStatusResponse {
     server_version: &'static str,
     internal_web_port: u16,
     internal_s3_port: u16,
+    public_web_url: Option<String>,
+    public_s3_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,11 +81,19 @@ pub async fn status(State(state): State<AppState>) -> Response {
         .unwrap_or_else(|_| crate::config::default_web_bind_addr());
     let s3_bind_addr = crate::config::load_s3_bind_addr(&state.paths)
         .unwrap_or_else(|_| crate::config::default_s3_bind_addr());
+    let public_web_url = crate::config::configured_public_web_url(&state.paths)
+        .ok()
+        .flatten();
+    let public_s3_url = crate::config::configured_public_s3_url(&state.paths)
+        .ok()
+        .flatten();
     Json(SetupStatusResponse {
         setup_required: state.setup.is_required(&state.paths),
         server_version: env!("CARGO_PKG_VERSION"),
         internal_web_port: web_bind_addr.port(),
         internal_s3_port: s3_bind_addr.port(),
+        public_web_url,
+        public_s3_url,
     })
     .into_response()
 }
@@ -469,6 +479,8 @@ mod tests {
             server_version: env!("CARGO_PKG_VERSION"),
             internal_web_port: 8080,
             internal_s3_port: 9000,
+            public_web_url: Some("https://origin.example.com".to_owned()),
+            public_s3_url: Some("https://origin.example.com:9443".to_owned()),
         };
 
         assert_eq!(
@@ -477,7 +489,9 @@ mod tests {
                 "setupRequired": true,
                 "serverVersion": env!("CARGO_PKG_VERSION"),
                 "internalWebPort": 8080,
-                "internalS3Port": 9000
+                "internalS3Port": 9000,
+                "publicWebUrl": "https://origin.example.com",
+                "publicS3Url": "https://origin.example.com:9443"
             })
         );
     }

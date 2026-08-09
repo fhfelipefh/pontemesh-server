@@ -23,6 +23,8 @@ export type SetupStatusResponse = {
   serverVersion: string;
   internalWebPort: number;
   internalS3Port: number;
+  publicWebUrl: string | null;
+  publicS3Url: string | null;
 };
 
 export type InitialS3AccessKey = {

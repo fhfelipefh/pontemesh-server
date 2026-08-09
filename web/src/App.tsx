@@ -20,6 +20,8 @@ function SetupRoutes() {
   const [serverVersion, setServerVersion] = useState<string | null>(null);
   const [internalWebPort, setInternalWebPort] = useState(8080);
   const [internalS3Port, setInternalS3Port] = useState(9000);
+  const [publicWebUrl, setPublicWebUrl] = useState<string | null>(null);
+  const [publicS3Url, setPublicS3Url] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoaded, setAuthLoaded] = useState(false);
 
@@ -30,6 +32,8 @@ function SetupRoutes() {
         setServerVersion(status.serverVersion);
         setInternalWebPort(status.internalWebPort);
         setInternalS3Port(status.internalS3Port);
+        setPublicWebUrl(status.publicWebUrl);
+        setPublicS3Url(status.publicS3Url);
       })
       .catch(() => {
         setSetupRequired(false);
@@ -98,6 +102,8 @@ function SetupRoutes() {
             serverVersion={serverVersion}
             internalWebPort={internalWebPort}
             internalS3Port={internalS3Port}
+            configuredPublicWebUrl={publicWebUrl}
+            configuredPublicS3Url={publicS3Url}
           />
         ) : <Navigate to="/" replace />}
       />

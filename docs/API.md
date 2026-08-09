@@ -31,9 +31,11 @@ execução:
 ```json
 {
   "setupRequired": true,
-  "serverVersion": "0.2.1",
+  "serverVersion": "0.2.2",
   "internalWebPort": 8080,
-  "internalS3Port": 9000
+  "internalS3Port": 9000,
+  "publicWebUrl": "https://origin.example.com",
+  "publicS3Url": "https://origin.example.com:9443"
 }
 ```
 
@@ -41,11 +43,15 @@ execução:
 discretamente em todas as etapas da configuração inicial.
 As portas retornadas são listeners internos já usados pelo processo, não portas
 HTTPS públicas que o usuário deva escolher durante o setup.
+Quando o operador definiu os endpoints públicos por variáveis de ambiente, o
+status também os retorna para que o formulário seja preenchido automaticamente.
+Esses valores são endereços públicos e não contêm credenciais.
 
 Ao concluir o setup de um Origin, `publicWebUrl` e `publicS3Url` podem persistir
 os dois endpoints externos. Eles precisam encaminhar, respectivamente, ao
 listener web e ao listener S3-compatible. O endpoint S3 normalmente usa outro
-host ou outra porta TLS quando existe proxy reverso.
+host ou outra porta TLS quando existe proxy reverso. Um Origin precisa anunciar
+um endpoint S3 alcançável para que SDKs e aplicações consigam baixar objetos.
 
 ## API S3-like mínima
 
