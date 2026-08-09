@@ -66,6 +66,7 @@ separados. O painel usa `http://localhost:8080`; o endpoint S3-compatible usa
 ```http
 GET /
 PUT /{bucket}
+GET /{bucket}
 GET /{bucket}?list-type=2
 GET /{bucket}?location
 GET /{bucket}?versioning
@@ -111,11 +112,10 @@ O endpoint S3-compatible também aceita URLs pré-assinadas SigV4 por query
 string (`X-Amz-*`) para acesso temporário. A validação continua usando a chave
 S3 gerenciada no catálogo, respeita revogação da chave e rejeita URLs expiradas.
 
-`ListObjectsV2` usa os parâmetros `prefix`, `delimiter`, `max-keys`,
-`continuation-token` e `start-after`. O limite padrão e o limite máximo aceito
-vêm da política do bucket, não de valores fixos no handler. A resposta inclui
-`KeyCount`, `MaxKeys`, `IsTruncated`, `NextContinuationToken`, `StartAfter` e
-`CommonPrefixes` quando aplicável.
+`ListObjects` v1 usa `prefix`, `delimiter`, `max-keys` e `marker`, mantendo
+compatibilidade com clientes como o WinSCP. `ListObjectsV2` usa `prefix`,
+`delimiter`, `max-keys`, `continuation-token` e `start-after`. Os limites vêm da
+política do bucket. As duas versões retornam paginação e `CommonPrefixes`.
 
 O fluxo Multipart Upload é persistido em PostgreSQL e em arquivos de partes no
 storage configurado. O objeto só entra no catálogo e só recebe manifesto após

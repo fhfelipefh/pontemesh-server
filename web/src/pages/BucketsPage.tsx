@@ -235,7 +235,6 @@ export function BucketsPage() {
           ) : !hasBuckets ? (
             <EmptyState
               title={bucketSearchActive ? t("setup.buckets.noResultsTitle") : t("setup.buckets.emptyTitle")}
-              description={bucketSearchActive ? t("setup.buckets.noResultsDescription") : t("setup.buckets.emptyDescription")}
             />
           ) : (
             <div className="buckets-table" data-testid="bucket-list" role="table" aria-label={t("setup.buckets.title")}>
@@ -355,7 +354,6 @@ export function BucketsPage() {
             <div className="settings-modal__header">
               <div>
                 <h3 id="create-bucket-title">{t("setup.buckets.create")}</h3>
-                <p>{t("setup.buckets.createDescription")}</p>
               </div>
               <button
                 className="settings-modal__close"
@@ -506,7 +504,6 @@ function BucketPolicyManager({ selectedBuckets, onClose, onApplied }: BucketPoli
         <div className="settings-modal__header">
           <div>
             <h3 id="bucket-policy-manager-title">{t("setup.buckets.managePolicies")}</h3>
-            <p>{t("setup.buckets.managePoliciesDescription")}</p>
           </div>
           <button className="settings-modal__close" type="button" aria-label={t("setup.common.close")} onClick={onClose}>
             <X size={18} aria-hidden="true" />

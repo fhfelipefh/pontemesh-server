@@ -91,7 +91,6 @@ export function S3CredentialsCard({
         <EmptyState
           icon={<KeyRound size={22} />}
           title={t("setup.settings.s3.emptyTitle")}
-          description={t("setup.settings.s3.emptyDescription")}
         />
       ) : (
         <S3CredentialsTable
@@ -158,7 +157,6 @@ function CreateS3KeyModal({
         <div className="settings-modal__header">
           <div>
             <h3 id="s3-create-key-title">{t("setup.settings.s3.createModalTitle")}</h3>
-            <p>{t("setup.settings.s3.createModalDescription")}</p>
           </div>
           <button
             className="settings-modal__close"

@@ -2,26 +2,23 @@
   "setup": {
     "unlock": {
       "title": "Desbloquear Ponte Mesh",
-      "description": "Esta instância do Ponte Mesh precisa do token administrativo inicial antes de ser configurada.",
+      "description": "Use o token administrativo inicial.",
       "tokenLabel": "Token administrativo inicial",
       "tokenPlaceholder": "Informe o token administrativo inicial",
       "continue": "Continuar",
       "checking": "Verificando...",
       "invalidToken": "Token administrativo inicial inválido.",
-      "languageHint": "Você pode alterar o idioma a qualquer momento.",
       "showToken": "Mostrar token",
       "hideToken": "Ocultar token"
     },
     "configure": {
       "title": "Configurar Ponte Mesh",
-      "description": "Finalize a configuração inicial desta instância.",
       "instanceName": "Nome da instância",
       "role": "Papel da instância",
       "origin": "Origin",
       "replicaEdge": "Replica/Edge",
       "replica": {
         "title": "Pareamento com Origin",
-        "description": "Configure como esta instância Replica/Edge se conecta ao Origin.",
         "originBaseUrl": "Endereço do Origin",
         "publicEndpoint": "Endereço anunciado da Replica/Edge",
         "replicaId": "ID da réplica",
@@ -31,41 +28,35 @@
       "adminPassword": "Senha do administrador inicial",
       "network": {
         "title": "Endpoints de rede",
-        "description": "O Ponte Mesh escuta em portas internas privadas. Um proxy reverso pode publicar cada serviço com HTTPS em outro endereço ou porta.",
         "internalWebPort": "Porta interna do painel",
         "internalS3Port": "Porta interna S3",
-        "internalPortsHelp": "Esses valores são listeners do processo, não as portas HTTPS públicas. Configure firewall e proxy reverso separadamente.",
+        "internalPortsHelp": "Listeners internos. Configure proxy e firewall separadamente.",
         "publicWebUrl": "URL pública do painel",
         "publicS3Url": "Endpoint público S3 do Origin",
-        "publicEndpointsHelp": "Obrigatório para Origin: SDKs e aplicações usam este endereço para baixar objetos. O valor é preenchido automaticamente quando o ambiente informa PONTEMESH_PUBLIC_S3_URL; caso contrário, use um endereço que alcance o listener S3, como https://servidor.exemplo.com:9443.",
+        "publicEndpointsHelp": "Origin requer um endpoint S3 acessível, como https://servidor.exemplo.com:9443.",
         "copyPublicS3Url": "Copiar endpoint público S3"
       },
       "storage": {
         "title": "Armazenamento da instância",
-        "description": "Objetos, fragmentos e dados da instância serão salvos no volume persistente configurado para o Ponte Mesh.",
         "defaultPathLabel": "Caminho usado pelo servidor",
         "advancedTitle": "Configuração avançada",
-        "advancedDescription": "Altere apenas se você já preparou um volume ou diretório específico para armazenamento.",
         "internalPathLabel": "Caminho interno de armazenamento",
-        "internalPathHelp": "Em Docker, este caminho deve existir dentro do container. Para usar uma pasta da máquina, monte essa pasta como volume.",
+        "internalPathHelp": "No Docker, monte a pasta do host como volume.",
         "internalPathPlaceholder": "/var/pontemesh_home/data/storage"
       },
       "finish": "Finalizar configuração",
       "finishing": "Finalizando...",
       "setupFailed": "Falha ao concluir a configuração.",
       "replicaReadyTitle": "Replica/Edge configurada",
-      "replicaReadyDescription": "Esta instância do Ponte Mesh vai operar com o papel Replica/Edge usando a configuração de pareamento persistida.",
       "s3InitialTitle": "Chave S3",
-      "s3InitialDescription": "Use esta chave com clientes S3-compatible após entrar no painel.",
-      "s3InitialWarning": "Copie sua chave S3 agora. Esse segredo não será exibido novamente.",
+      "s3InitialWarning": "Copie agora. Exibida uma vez.",
       "goToLogin": "Ir para login"
     },
     "ready": {
       "title": "Ponte Mesh Server",
-      "description": "Esta instância concluiu a configuração inicial."
+      "description": "Configuração concluída."
     },
     "help": {
-      "needHelp": "Precisa de ajuda?",
       "readDocs": "Ler a documentação"
     },
     "language": {
@@ -78,7 +69,6 @@
     "auth": {
       "admin": "Administrador",
       "loginTitle": "Entrar no Ponte Mesh",
-      "loginDescription": "",
       "username": "Usuário",
       "password": "Senha",
       "signIn": "Entrar",
@@ -183,14 +173,12 @@
       "namePlaceholder": "documents",
       "search": "Buscar bucket",
       "create": "Criar bucket",
-      "createDescription": "Informe um nome válido para o novo bucket.",
       "managePolicies": "Configurar buckets",
-      "managePoliciesDescription": "Defina padrões do Ponte Mesh para novos buckets ou aplique-os aos buckets existentes.",
       "selectVisible": "Selecionar todos os buckets desta página",
       "selectBucket": "Selecionar bucket {{name}}",
       "loadingDefaults": "Carregando padrões da política",
       "defaultsTitle": "Padrões para novos buckets",
-      "defaultsDescription": "Novos buckets copiam estas configurações do Ponte Mesh. Buckets existentes só mudam quando você aplicar abaixo.",
+      "defaultsDescription": "Usado por novos buckets.",
       "defaultsLoadFailed": "Falha ao carregar os padrões da política de buckets.",
       "defaultsSaveFailed": "Falha ao salvar os padrões da política de buckets.",
       "defaultsSaved": "Padrões salvos para os próximos buckets.",
@@ -247,12 +235,10 @@
       "s3ResourcePolicy": "Bucket policy JSON",
       "s3EventNotifications": "Notificações JSON",
       "invalidJson": "JSON inválido.",
-      "emptyTitle": "Nenhum bucket criado ainda.",
-      "emptyDescription": "Crie seu primeiro bucket para começar a armazenar objetos.",
+      "emptyTitle": "Nenhum bucket.",
       "noResultsTitle": "Nenhum bucket encontrado.",
-      "noResultsDescription": "Ajuste a busca para encontrar outro bucket.",
       "confirmDeleteTitle": "Excluir bucket",
-      "confirmDeleteDescription": "Confirme a exclusão do bucket {{name}}. Buckets com objetos não serão excluídos."
+      "confirmDeleteDescription": "{{name}}"
     },
     "objects": {
       "title": "Objetos",
@@ -284,14 +270,11 @@
       "activeObjectExists": "Já existe um objeto ativo com essa chave neste bucket.",
       "deleteFailed": "Falha ao excluir objeto.",
       "uploadBucket": "Bucket: {{bucket}}",
-      "noBucketsTitle": "Nenhum bucket disponível.",
-      "noBucketsDescription": "Crie um bucket antes de enviar ou listar objetos.",
-      "emptyTitle": "Este bucket ainda não possui objetos.",
-      "emptyDescription": "Envie um objeto para começar.",
+      "noBucketsTitle": "Nenhum bucket.",
+      "emptyTitle": "Nenhum objeto.",
       "noResultsTitle": "Nenhum objeto encontrado.",
-      "noResultsDescription": "Ajuste a busca para encontrar outro objeto.",
       "confirmDeleteTitle": "Excluir objeto",
-      "confirmDeleteDescription": "Confirme a exclusão do objeto {{key}}."
+      "confirmDeleteDescription": "{{key}}"
     },
     "metrics": {
       "title": "Tráfego do Origin",
@@ -327,21 +310,17 @@
       "copyToken": "Copiar token da réplica",
       "revoke": "Revogar réplica",
       "confirmRevokeTitle": "Revogar réplica",
-      "confirmRevokeDescription": "Confirme a revogação da réplica {{name}}. Ela deixará de receber novas autorizações e não será anunciada como fonte elegível.",
+      "confirmRevokeDescription": "{{name}}",
       "loadFailed": "Falha ao carregar réplicas.",
       "createFailed": "Falha ao criar réplica.",
       "revokeFailed": "Falha ao revogar réplica.",
-      "emptyTitle": "Nenhuma réplica registrada ainda.",
-      "emptyDescription": "Crie uma identidade Replica/Edge antes de sincronizar nós auxiliares."
+      "emptyTitle": "Nenhuma réplica."
     },
     "settings": {
       "title": "Configurações",
       "instance": {
-        "title": "Identidade da instância",
-        "description": "Altere o nome exibido no painel administrativo sem modificar o papel ou os endpoints de rede desta instância.",
+        "title": "Instância",
         "name": "Nome da instância",
-        "save": "Salvar nome",
-        "saving": "Salvando...",
         "loadFailed": "Falha ao carregar o nome da instância.",
         "saveFailed": "Falha ao salvar o nome da instância."
       },
@@ -368,16 +347,14 @@
         "scopes": "Escopos",
         "revoke": "Revogar aplicação",
         "confirmRevokeTitle": "Revogar aplicação",
-        "confirmRevokeDescription": "Confirme a revogação da aplicação {{name}}. O token deixará de autorizar novas solicitações.",
+        "confirmRevokeDescription": "{{name}}",
         "loadFailed": "Falha ao carregar credenciais de aplicação.",
         "createFailed": "Falha ao criar credencial de aplicação.",
         "revokeFailed": "Falha ao revogar credencial de aplicação.",
-        "emptyTitle": "Nenhuma credencial de aplicação criada ainda.",
-        "emptyDescription": "Crie uma credencial para SDKs solicitarem pacotes de acesso e manifestos."
+        "emptyTitle": "Nenhuma credencial de aplicação."
       },
       "mcp": {
         "title": "MCP",
-        "subtitle": "Permita que clientes compatíveis com Model Context Protocol observem e operem a instância conforme as permissões configuradas.",
         "status": "Status do MCP",
         "enabled": "Habilitado",
         "disabled": "Desabilitado",
@@ -398,16 +375,15 @@
         "createToken": "Criar token",
         "revokeToken": "Revogar token",
         "tokenCreated": "Token criado",
-        "tokenCreatedHint": "Copie este token agora. Ele não será exibido novamente.",
+        "tokenCreatedHint": "Copie agora. Exibido uma vez.",
         "tokenPrefix": "Prefixo",
         "tokenSecret": "Token",
         "copyToken": "Copiar token MCP",
         "connectionConfig": "Configuração de conexão",
-        "connectionConfigHint": "Copie este JSON para configurar clientes MCP compatíveis sem descobrir cabeçalhos ou endpoint manualmente.",
         "copyConnectionConfig": "Copiar configuração MCP",
         "confirmRevokeTokenTitle": "Revogar token MCP",
-        "confirmRevokeTokenDescription": "Confirme a revogação do token MCP {{name}}. Ele deixará de autorizar novas chamadas.",
-        "noTokens": "Nenhum token MCP criado ainda.",
+        "confirmRevokeTokenDescription": "{{name}}",
+        "noTokens": "Nenhum token MCP.",
         "recentActivity": "Atividade recente",
         "noActivity": "Nenhuma chamada registrada ainda.",
         "loadFailed": "Falha ao carregar configuração MCP.",
@@ -417,17 +393,16 @@
         "adminTools": "Tools administrativas",
         "fullAdmin": "Administração completa",
         "tokenScopes": "Escopos",
-        "permissionWarning": "Tokens com permissão de escrita podem modificar buckets e objetos. Tokens administrativos podem alterar configurações sensíveis da instância."
+        "permissionWarning": "Escopos write e admin alteram dados do servidor."
       },
       "s3": {
         "title": "Credenciais S3",
         "create": "Criar chave",
         "createModalTitle": "Criar credencial S3",
-        "createModalDescription": "Defina um nome para identificar esta chave no painel.",
         "name": "Nome",
         "namePlaceholder": "default-admin-key",
         "createdTitle": "Chave criada",
-        "createdHint": "Copie este segredo agora. Ele não será exibido novamente.",
+        "createdHint": "Copie agora. Exibido uma vez.",
         "accessKeyId": "Access Key",
         "secretAccessKey": "Secret Access Key",
         "copyAccessKeyId": "Copiar Access Key",
@@ -440,7 +415,7 @@
         "createdAt": "Criada em",
         "revoke": "Revogar chave",
         "confirmRevokeTitle": "Revogar chave S3",
-        "confirmRevokeDescription": "Confirme a revogação da chave S3 {{name}}. Clientes usando esta chave deixarão de autenticar.",
+        "confirmRevokeDescription": "{{name}}",
         "paginationLabel": "Paginação das credenciais S3",
         "paginationSummary": "Exibindo {{start}}-{{end}} de {{total}} credenciais",
         "previousPage": "Página anterior",
@@ -449,9 +424,8 @@
         "loadFailed": "Falha ao carregar chaves S3.",
         "createFailed": "Falha ao criar chave S3.",
         "revokeFailed": "Falha ao revogar chave S3.",
-        "emptyTitle": "Nenhuma credencial S3 criada ainda.",
-        "emptyDescription": "Crie uma chave para conectar clientes S3-compatíveis.",
-        "helpText": "Use estas credenciais somente no endpoint S3. Para endpoints por IP no WinSCP, abra Avançado > S3 e defina Estilo da URL como Path. Proteja as chaves e revogue as que não estiverem mais em uso."
+        "emptyTitle": "Nenhuma credencial S3.",
+        "helpText": "WinSCP: Avançado > S3 > Estilo da URL > Path."
       }
     }
   }

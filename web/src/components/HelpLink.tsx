@@ -8,7 +8,6 @@ export function HelpLink() {
 
   return (
     <p className="help-link">
-      <span>{t("setup.help.needHelp")}</span>
       <a href={DOCS_URL} target="_blank" rel="noreferrer">
         <BookOpen size={17} aria-hidden="true" />
         {t("setup.help.readDocs")}

@@ -34,9 +34,9 @@ test.describe("Settings MCP layout quality", () => {
       maxWidth: 280
     });
 
-    await expect(page.getByText(/Tokens with write permission|Tokens com permissão de escrita/i)).toBeHidden();
+    await expect(page.getByText(/Write and admin scopes change server data|Escopos write e admin alteram dados do servidor/i)).toBeHidden();
     await page.getByTestId("mcp-token-scope-write").check();
-    await expect(page.getByText(/Tokens with write permission|Tokens com permissão de escrita/i)).toBeVisible();
+    await expect(page.getByText(/Write and admin scopes change server data|Escopos write e admin alteram dados do servidor/i)).toBeVisible();
 
     await expectNoHorizontalOverflow(page);
   });

@@ -1433,6 +1433,27 @@ mod tests {
         assert!(list_objects_body.contains("<Key>prefix/hello.txt</Key>"));
         assert!(list_objects_body.contains("<KeyCount>1</KeyCount>"));
 
+        let list_objects_v1 = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/compat-bucket?delimiter=%2F&max-keys=1000&prefix=prefix%2F")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list_objects_v1.status(), StatusCode::OK);
+        assert_s3_xml_content_type(&list_objects_v1);
+        let list_objects_v1_body = response_text(list_objects_v1).await;
+        assert!(list_objects_v1_body.contains("<ListBucketResult"));
+        assert!(list_objects_v1_body.contains("<Marker></Marker>"));
+        assert!(list_objects_v1_body.contains("<Key>prefix/hello.txt</Key>"));
+        assert!(!list_objects_v1_body.contains("<KeyCount>"));
+
         let head_object = s3_app
             .clone()
             .oneshot(

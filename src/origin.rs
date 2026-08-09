@@ -42,6 +42,7 @@ pub struct ListObjectsQuery {
     continuation_token: Option<String>,
     #[serde(rename = "start-after")]
     start_after: Option<String>,
+    marker: Option<String>,
     uploads: Option<String>,
     location: Option<String>,
     delete: Option<String>,
@@ -236,15 +237,19 @@ pub async fn list_objects(
         };
     }
 
-    if query.list_type.as_deref() != Some("2") {
-        return s3_error(
-            StatusCode::BAD_REQUEST,
-            "InvalidArgument",
-            "Only ListObjectsV2 is supported",
-            Some(&bucket_name),
-            None,
-        );
-    }
+    let list_v2 = match query.list_type.as_deref() {
+        None => false,
+        Some("2") => true,
+        Some(_) => {
+            return s3_error(
+                StatusCode::BAD_REQUEST,
+                "InvalidArgument",
+                "Unsupported list-type",
+                Some(&bucket_name),
+                None,
+            );
+        }
+    };
 
     let policy = match state.catalog.get_bucket_policy(&bucket_name).await {
         Ok(policy) => policy,
@@ -262,15 +267,23 @@ pub async fn list_objects(
         prefix: query.prefix.clone(),
         delimiter,
         max_keys,
-        continuation_token: query.continuation_token.clone(),
-        start_after: query.start_after.clone(),
+        continuation_token: list_v2.then(|| query.continuation_token.clone()).flatten(),
+        start_after: if list_v2 {
+            query.start_after.clone()
+        } else {
+            query.marker.clone()
+        },
     };
 
     match state.catalog.list_objects_v2(&bucket_name, options).await {
-        Ok(page) => s3_xml_response(
-            StatusCode::OK,
-            list_objects_v2_xml(&bucket_name, &query, &page),
-        ),
+        Ok(page) => {
+            let xml = if list_v2 {
+                list_objects_v2_xml(&bucket_name, &query, &page)
+            } else {
+                list_objects_v1_xml(&bucket_name, &query, &page)
+            };
+            s3_xml_response(StatusCode::OK, xml)
+        }
         Err(error) => s3_bad_request(error, Some(&bucket_name), None),
     }
 }
@@ -2755,30 +2768,7 @@ fn list_objects_v2_xml(
     page: &S3ListObjectsPage,
 ) -> String {
     let prefix = query.prefix.as_deref().unwrap_or("");
-    let contents = page
-        .items
-        .iter()
-        .map(|object| {
-            format!(
-                "<Contents><Key>{}</Key><LastModified>{}</LastModified>\
-<ETag>&quot;{}&quot;</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass></Contents>",
-                xml_escape(&object.key),
-                xml_escape(&object.created_at),
-                xml_escape(&object.sha256),
-                object.size_bytes
-            )
-        })
-        .collect::<String>();
-    let common_prefixes = page
-        .common_prefixes
-        .iter()
-        .map(|prefix| {
-            format!(
-                "<CommonPrefixes><Prefix>{}</Prefix></CommonPrefixes>",
-                xml_escape(prefix)
-            )
-        })
-        .collect::<String>();
+    let (contents, common_prefixes) = list_objects_entries_xml(page);
     let delimiter = query
         .delimiter
         .as_deref()
@@ -2826,6 +2816,69 @@ fn list_objects_v2_xml(
         contents,
         common_prefixes
     )
+}
+
+fn list_objects_v1_xml(
+    bucket_name: &str,
+    query: &ListObjectsQuery,
+    page: &S3ListObjectsPage,
+) -> String {
+    let prefix = query.prefix.as_deref().unwrap_or("");
+    let marker = query.marker.as_deref().unwrap_or("");
+    let (contents, common_prefixes) = list_objects_entries_xml(page);
+    let delimiter = query
+        .delimiter
+        .as_deref()
+        .map(|value| format!("<Delimiter>{}</Delimiter>", xml_escape(value)))
+        .unwrap_or_default();
+    let next_marker = page
+        .next_continuation_token
+        .as_deref()
+        .map(|value| format!("<NextMarker>{}</NextMarker>", xml_escape(value)))
+        .unwrap_or_default();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+        <ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+        <Name>{}</Name><Prefix>{}</Prefix><Marker>{}</Marker>{}<MaxKeys>{}</MaxKeys>\
+        <IsTruncated>{}</IsTruncated>{}{}{}</ListBucketResult>",
+        xml_escape(bucket_name),
+        xml_escape(prefix),
+        xml_escape(marker),
+        delimiter,
+        page.max_keys,
+        if page.is_truncated { "true" } else { "false" },
+        next_marker,
+        contents,
+        common_prefixes
+    )
+}
+
+fn list_objects_entries_xml(page: &S3ListObjectsPage) -> (String, String) {
+    let contents = page
+        .items
+        .iter()
+        .map(|object| {
+            format!(
+                "<Contents><Key>{}</Key><LastModified>{}</LastModified>\
+<ETag>&quot;{}&quot;</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass></Contents>",
+                xml_escape(&object.key),
+                xml_escape(&object.created_at),
+                xml_escape(&object.sha256),
+                object.size_bytes
+            )
+        })
+        .collect::<String>();
+    let common_prefixes = page
+        .common_prefixes
+        .iter()
+        .map(|prefix| {
+            format!(
+                "<CommonPrefixes><Prefix>{}</Prefix></CommonPrefixes>",
+                xml_escape(prefix)
+            )
+        })
+        .collect::<String>();
+    (contents, common_prefixes)
 }
 
 fn bucket_location_xml() -> String {
@@ -3548,6 +3601,7 @@ mod tests {
             max_keys: Some(1),
             continuation_token: None,
             start_after: Some("photos/a.jpg".to_owned()),
+            marker: None,
             uploads: None,
             location: None,
             delete: None,
@@ -3598,6 +3652,56 @@ mod tests {
         assert!(xml.contains("<ETag>&quot;abc123&quot;</ETag>"));
         assert!(xml.contains("<Size>123</Size>"));
         assert!(xml.contains("<StorageClass>STANDARD</StorageClass>"));
+    }
+
+    #[test]
+    fn list_objects_v1_xml_uses_marker_pagination_for_legacy_clients() {
+        let query = ListObjectsQuery {
+            list_type: None,
+            prefix: Some("photos/".to_owned()),
+            delimiter: Some("/".to_owned()),
+            max_keys: Some(1),
+            continuation_token: None,
+            start_after: None,
+            marker: Some("photos/a.jpg".to_owned()),
+            uploads: None,
+            location: None,
+            delete: None,
+            versioning: None,
+            versions: None,
+            lifecycle: None,
+            encryption: None,
+            object_lock: None,
+            notification: None,
+            policy: None,
+        };
+        let page = S3ListObjectsPage {
+            items: vec![ObjectSummary {
+                key: "photos/cat.jpg".to_owned(),
+                size_bytes: 123,
+                content_type: "image/jpeg".to_owned(),
+                sha256: "abc123".to_owned(),
+                version_id: Some("version-1".to_owned()),
+                is_delete_marker: false,
+                created_at: "2026-06-29T12:00:00Z".to_owned(),
+                updated_at: "2026-06-29T12:00:00Z".to_owned(),
+                state: "AVAILABLE".to_owned(),
+            }],
+            common_prefixes: vec![],
+            key_count: 1,
+            max_keys: 1,
+            is_truncated: true,
+            next_continuation_token: Some("photos/cat.jpg".to_owned()),
+            start_after: Some("photos/a.jpg".to_owned()),
+        };
+
+        let xml = list_objects_v1_xml("media-bucket", &query, &page);
+
+        assert!(xml.contains("<Marker>photos/a.jpg</Marker>"));
+        assert!(xml.contains("<NextMarker>photos/cat.jpg</NextMarker>"));
+        assert!(xml.contains("<IsTruncated>true</IsTruncated>"));
+        assert!(!xml.contains("<KeyCount>"));
+        assert!(!xml.contains("<ContinuationToken>"));
     }
 
     #[test]
