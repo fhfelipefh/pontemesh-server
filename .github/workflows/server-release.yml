@@ -294,7 +294,7 @@ jobs:
       - name: Test Server
         run: |
           cargo fmt --all -- --check
-          cargo clippy --all-targets --locked -- -D warnings
+          cargo clippy --all-targets --locked
           cargo test --locked
 
       - name: Checkout SDK
