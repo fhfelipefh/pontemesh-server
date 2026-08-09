@@ -2,15 +2,17 @@ import { ReactNode } from "react";
 import { BrandHeader } from "./BrandHeader";
 import { HelpLink } from "./HelpLink";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { SetupServerVersion } from "./SetupServerVersion";
 
 type PageShellProps = {
   title: string;
   description: string;
   children?: ReactNode;
   compact?: boolean;
+  serverVersion?: string | null;
 };
 
-export function PageShell({ title, description, children, compact = false }: PageShellProps) {
+export function PageShell({ title, description, children, compact = false, serverVersion }: PageShellProps) {
   return (
     <main className="setup-page">
       <div className="setup-page__language">
@@ -30,6 +32,7 @@ export function PageShell({ title, description, children, compact = false }: Pag
         </div>
       </section>
 
+      {serverVersion ? <SetupServerVersion version={serverVersion} /> : null}
       <HelpLink />
     </main>
   );

@@ -13,6 +13,9 @@ O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a
 * **RF03:** O Origin deve servir objetos diretamente quando não houver fontes auxiliares elegíveis.
 * **RF04:** O Origin deve preservar autorização, manifesto, integridade, métricas e revogação na entrega direta.
 * **RF05:** O Replica/Edge deve operar somente como fonte auxiliar autorizada pelo Origin.
+* **RF05-A:** O servidor deve informar sua versão no estado público de setup, e o painel deve exibi-la discretamente durante toda a configuração inicial.
+* **RF05-B:** O setup deve distinguir listeners internos de endpoints públicos e não apresentar a porta interna do painel como se fosse a porta HTTPS externa.
+* **RF05-C:** O Origin deve permitir configurar endpoints públicos distintos para o painel/API Ponte Mesh e para a API S3-compatible.
 
 ### API S3-like
 

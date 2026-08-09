@@ -4935,6 +4935,11 @@ mod tests {
                 bind: "127.0.0.1".to_owned(),
                 port: 8080,
             },
+            s3: crate::config::S3Section {
+                bind: "127.0.0.1".to_owned(),
+                port: 9000,
+            },
+            public_endpoints: crate::config::PublicEndpointsSection::default(),
             storage: StorageSection {
                 local: LocalStorageSection {
                     path: paths.storage_dir(),

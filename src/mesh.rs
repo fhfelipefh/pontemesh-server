@@ -552,7 +552,7 @@ async fn create_access_package_inner(
         .catalog
         .create_access_package(&application.id, &payload.bucket, &payload.key, expires_at)
         .await?;
-    let base_url = request_s3_base_url(headers);
+    let base_url = request_s3_base_url(&state.paths, headers)?;
     let object_endpoint = format!(
         "{base_url}/{}/{}",
         url_component(&payload.bucket),
@@ -570,7 +570,7 @@ async fn create_access_package_inner(
     .await?;
     let revalidate_endpoint = Some(format!(
         "{}/pontemesh/access-packages/{}/revalidate/{}/{}",
-        request_base_url(headers).trim_end_matches('/'),
+        request_base_url(&state.paths, headers)?.trim_end_matches('/'),
         url_component(&record.id),
         url_component(&payload.bucket),
         object_path(&payload.key)
@@ -616,7 +616,7 @@ async fn get_sources_inner(
 ) -> anyhow::Result<SourcesResponse> {
     let manifest = load_manifest(state, bucket_name, object_key).await?;
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
-    let base_url = request_s3_base_url(headers);
+    let base_url = request_s3_base_url(&state.paths, headers)?;
     let object_endpoint = format!(
         "{base_url}/{}/{}",
         url_component(bucket_name),
@@ -765,7 +765,7 @@ async fn revalidate_access_package_inner(
         .await?
         .ok_or_else(|| anyhow::anyhow!("access package is invalid, expired or revoked"))?;
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
-    let base_url = request_s3_base_url(headers);
+    let base_url = request_s3_base_url(&state.paths, headers)?;
     let object_endpoint = format!(
         "{base_url}/{}/{}",
         url_component(bucket_name),
@@ -784,7 +784,7 @@ async fn revalidate_access_package_inner(
     .await?;
     let revalidate_endpoint = Some(format!(
         "{}/pontemesh/access-packages/{}/revalidate/{}/{}",
-        request_base_url(headers).trim_end_matches('/'),
+        request_base_url(&state.paths, headers)?.trim_end_matches('/'),
         url_component(package_id),
         url_component(bucket_name),
         object_path(object_key)
@@ -1232,9 +1232,12 @@ async fn sign_payload(state: &AppState, payload: &serde_json::Value) -> anyhow::
     Ok(hmac_sha256_hex(&secrets.instance_secret, &bytes))
 }
 
-fn request_base_url(headers: &HeaderMap) -> String {
-    if let Some(endpoint) = public_endpoint("PONTEMESH_PUBLIC_WEB_URL") {
-        return endpoint;
+fn request_base_url(
+    paths: &crate::config::PontemeshHome,
+    headers: &HeaderMap,
+) -> anyhow::Result<String> {
+    if let Some(endpoint) = crate::config::configured_public_web_url(paths)? {
+        return Ok(endpoint);
     }
 
     let proto = headers
@@ -1246,36 +1249,21 @@ fn request_base_url(headers: &HeaderMap) -> String {
         .or_else(|| headers.get("host"))
         .and_then(|value| value.to_str().ok())
         .unwrap_or("localhost");
-    format!("{proto}://{host}")
+    Ok(format!("{proto}://{host}"))
 }
 
-fn request_s3_base_url(headers: &HeaderMap) -> String {
-    if let Some(endpoint) = public_endpoint("PONTEMESH_PUBLIC_S3_URL") {
-        return endpoint;
+fn request_s3_base_url(
+    paths: &crate::config::PontemeshHome,
+    headers: &HeaderMap,
+) -> anyhow::Result<String> {
+    if let Some(endpoint) = crate::config::configured_public_s3_url(paths)? {
+        return Ok(endpoint);
     }
 
-    if let Ok(endpoint) = std::env::var("PONTEMESH_PUBLIC_S3_ENDPOINT") {
-        let endpoint = endpoint.trim_end_matches('/');
-        if !endpoint.is_empty() {
-            return endpoint.to_owned();
-        }
-    }
-
-    request_base_url(headers)
+    Ok(request_base_url(paths, headers)?
         .replace(":8080", ":9000")
         .trim_end_matches('/')
-        .to_owned()
-}
-
-fn public_endpoint(name: &str) -> Option<String> {
-    std::env::var(name).ok().and_then(|value| {
-        let endpoint = value.trim().trim_end_matches('/');
-        if endpoint.is_empty() {
-            None
-        } else {
-            Some(endpoint.to_owned())
-        }
-    })
+        .to_owned())
 }
 
 fn object_path(value: &str) -> String {

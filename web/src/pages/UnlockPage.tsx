@@ -7,7 +7,7 @@ import { Button } from "../components/Button";
 import { PageShell } from "../components/PageShell";
 import { TextInput } from "../components/TextInput";
 
-export function UnlockPage() {
+export function UnlockPage({ serverVersion }: { serverVersion: string | null }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [token, setToken] = useState("");
@@ -30,7 +30,7 @@ export function UnlockPage() {
   }
 
   return (
-    <PageShell title={t("setup.unlock.title")} description={t("setup.unlock.description")}>
+    <PageShell title={t("setup.unlock.title")} description={t("setup.unlock.description")} serverVersion={serverVersion}>
       <form className="form" onSubmit={handleSubmit}>
         <TextInput
           id="token"

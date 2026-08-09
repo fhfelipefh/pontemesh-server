@@ -13,6 +13,9 @@ const PONTEMESH_HTTP_HOST_ENV: &str = "PONTEMESH_HTTP_HOST";
 const PONTEMESH_HTTP_PORT_ENV: &str = "PONTEMESH_HTTP_PORT";
 const PONTEMESH_WEB_PORT_ENV: &str = "PONTEMESH_WEB_PORT";
 const PONTEMESH_S3_PORT_ENV: &str = "PONTEMESH_S3_PORT";
+const PONTEMESH_PUBLIC_WEB_URL_ENV: &str = "PONTEMESH_PUBLIC_WEB_URL";
+const PONTEMESH_PUBLIC_S3_URL_ENV: &str = "PONTEMESH_PUBLIC_S3_URL";
+const PONTEMESH_PUBLIC_S3_ENDPOINT_ENV: &str = "PONTEMESH_PUBLIC_S3_ENDPOINT";
 const DEFAULT_HTTP_PORT: u16 = 8080;
 const DEFAULT_S3_PORT: u16 = 9000;
 
@@ -117,6 +120,10 @@ impl PontemeshHome {
 pub struct InstanceConfig {
     pub instance: InstanceSection,
     pub http: HttpSection,
+    #[serde(default = "default_s3_section")]
+    pub s3: S3Section,
+    #[serde(default, rename = "public")]
+    pub public_endpoints: PublicEndpointsSection,
     pub storage: StorageSection,
     pub replica: Option<ReplicaSection>,
 }
@@ -138,6 +145,18 @@ pub enum InstanceRole {
 pub struct HttpSection {
     pub bind: String,
     pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct S3Section {
+    pub bind: String,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PublicEndpointsSection {
+    pub web_url: Option<String>,
+    pub s3_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,13 +197,17 @@ pub fn load_http_bind_addr(paths: &PontemeshHome) -> anyhow::Result<SocketAddr> 
 
     let config = load_instance_config(paths)?;
 
-    let ip: IpAddr = config
+    let configured_ip: IpAddr = config
         .http
         .bind
         .parse()
         .with_context(|| format!("invalid HTTP bind address '{}'", config.http.bind))?;
 
-    Ok(SocketAddr::new(ip, config.http.port))
+    let ip = environment_ip(PONTEMESH_HTTP_HOST_ENV)?.unwrap_or(configured_ip);
+    let port = environment_port(&[PONTEMESH_WEB_PORT_ENV, PONTEMESH_HTTP_PORT_ENV])?
+        .unwrap_or(config.http.port);
+
+    Ok(SocketAddr::new(ip, port))
 }
 
 pub fn default_bind_addr() -> SocketAddr {
@@ -214,6 +237,110 @@ pub fn default_s3_bind_addr() -> SocketAddr {
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(DEFAULT_S3_PORT);
     SocketAddr::new(host, port)
+}
+
+pub fn load_s3_bind_addr(paths: &PontemeshHome) -> anyhow::Result<SocketAddr> {
+    if !paths.setup_lock_file().exists() || !paths.config_file().exists() {
+        return Ok(default_s3_bind_addr());
+    }
+
+    let config = load_instance_config(paths)?;
+    let configured_ip: IpAddr = config
+        .s3
+        .bind
+        .parse()
+        .with_context(|| format!("invalid S3 bind address '{}'", config.s3.bind))?;
+    let ip = environment_ip(PONTEMESH_HTTP_HOST_ENV)?.unwrap_or(configured_ip);
+    let port = environment_port(&[PONTEMESH_S3_PORT_ENV])?.unwrap_or(config.s3.port);
+
+    Ok(SocketAddr::new(ip, port))
+}
+
+pub fn configured_public_web_url(paths: &PontemeshHome) -> anyhow::Result<Option<String>> {
+    configured_public_url(paths, &[PONTEMESH_PUBLIC_WEB_URL_ENV], |config| {
+        config.public_endpoints.web_url
+    })
+}
+
+pub fn configured_public_s3_url(paths: &PontemeshHome) -> anyhow::Result<Option<String>> {
+    configured_public_url(
+        paths,
+        &[
+            PONTEMESH_PUBLIC_S3_URL_ENV,
+            PONTEMESH_PUBLIC_S3_ENDPOINT_ENV,
+        ],
+        |config| config.public_endpoints.s3_url,
+    )
+}
+
+fn configured_public_url(
+    paths: &PontemeshHome,
+    environment_names: &[&str],
+    from_config: impl FnOnce(InstanceConfig) -> Option<String>,
+) -> anyhow::Result<Option<String>> {
+    for name in environment_names {
+        if let Ok(value) = env::var(name) {
+            if value.trim().is_empty() {
+                continue;
+            }
+            return normalize_public_url(Some(value), name);
+        }
+    }
+
+    if !paths.config_file().exists() {
+        return Ok(None);
+    }
+
+    normalize_public_url(from_config(load_instance_config(paths)?), "public endpoint")
+}
+
+fn normalize_public_url(value: Option<String>, field: &str) -> anyhow::Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim().trim_end_matches('/');
+    if value.is_empty() {
+        return Ok(None);
+    }
+    validate_url(value, field)?;
+    Ok(Some(value.to_owned()))
+}
+
+fn environment_ip(name: &str) -> anyhow::Result<Option<IpAddr>> {
+    let Ok(value) = env::var(name) else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(value.parse().with_context(|| {
+        format!("{name} must be a valid IP address")
+    })?))
+}
+
+fn environment_port(names: &[&str]) -> anyhow::Result<Option<u16>> {
+    for name in names {
+        if let Ok(value) = env::var(name) {
+            let value = value.trim();
+            if value.is_empty() {
+                continue;
+            }
+            return Ok(Some(
+                value
+                    .parse()
+                    .with_context(|| format!("{name} must be a valid TCP port"))?,
+            ));
+        }
+    }
+    Ok(None)
+}
+
+fn default_s3_section() -> S3Section {
+    S3Section {
+        bind: Ipv4Addr::UNSPECIFIED.to_string(),
+        port: DEFAULT_S3_PORT,
+    }
 }
 
 pub fn load_instance_config(paths: &PontemeshHome) -> anyhow::Result<InstanceConfig> {
@@ -357,6 +484,12 @@ health_interval_seconds = 2
         )
         .expect("config");
 
+        let persisted = load_instance_config(&home).expect("persisted config");
+        assert_eq!(persisted.s3.bind, "0.0.0.0");
+        assert_eq!(persisted.s3.port, 9000);
+        assert!(persisted.public_endpoints.web_url.is_none());
+        assert!(persisted.public_endpoints.s3_url.is_none());
+
         let config = load_replica_runtime_config(&home).expect("replica config");
         assert_eq!(config.origin_base_url, "https://origin.example.com");
         assert_eq!(config.public_endpoint, "https://edge.example.com");
@@ -398,6 +531,25 @@ path = "/tmp/pontemesh-edge-storage"
         for role in ["origin", "replica", "replication"] {
             assert!(!cargo_toml.contains(&format!("--features {role}")));
         }
+    }
+
+    #[test]
+    fn public_urls_are_normalized_and_validated() {
+        assert_eq!(
+            normalize_public_url(
+                Some(" https://origin.example.com:9443/ ".to_owned()),
+                "public endpoint"
+            )
+            .expect("valid endpoint"),
+            Some("https://origin.example.com:9443".to_owned())
+        );
+        assert!(
+            normalize_public_url(
+                Some("ftp://origin.example.com".to_owned()),
+                "public endpoint"
+            )
+            .is_err()
+        );
     }
 
     fn test_home(name: &str) -> PontemeshHome {

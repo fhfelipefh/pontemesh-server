@@ -51,6 +51,28 @@ O Origin atende às operações fundamentais de objeto e coordena a distribuiç�
 
 Em ambientes com Docker, proxy reverso ou múltiplas instâncias, `PONTEMESH_PUBLIC_WEB_URL` e `PONTEMESH_PUBLIC_S3_URL` podem ser definidos para que access packages, fontes autorizadas e fallback retornem endpoints alcançáveis pelo cliente externo, em vez de nomes internos da rede de containers.
 
+O painel e a API S3-compatible usam listeners internos separados. Por padrão,
+o painel escuta em `8080` e o S3-compatible em `9000`. Essas não são
+necessariamente as portas públicas: um proxy pode publicar, por exemplo, o
+painel em `https://origin.example.com` e o S3-compatible em
+`https://s3.example.com`, ambos com TLS na porta `443`, ou publicar o segundo em
+uma porta TLS dedicada como `9443`.
+
+O setup persiste esses valores nas seções `[http]`, `[s3]` e `[public]` do
+arquivo da instância. Para implantações gerenciadas, variáveis de ambiente têm
+precedência sobre os valores persistidos:
+
+```text
+PONTEMESH_HTTP_HOST=127.0.0.1
+PONTEMESH_WEB_PORT=8080
+PONTEMESH_S3_PORT=9000
+PONTEMESH_PUBLIC_WEB_URL=https://origin.example.com
+PONTEMESH_PUBLIC_S3_URL=https://s3.example.com
+```
+
+Não é necessário nem recomendado expor diretamente `8080` ou `9000` quando um
+proxy reverso local encaminha os endpoints públicos.
+
 ## Replica/Edge
 
 O bloco de configuração de **Replica/Edge** deve concentrar os parâmetros necessários para que uma réplica autorizada se comunique com o Origin e participe do plano de dados.

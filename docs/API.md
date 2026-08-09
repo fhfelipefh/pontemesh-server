@@ -17,6 +17,36 @@ Em resumo:
 * configurações avançadas e comportamentos híbridos pertencem à API Ponte Mesh;
 * o dashboard administrativo usa APIs próprias para políticas, réplicas, métricas, estratégias e parâmetros operacionais.
 
+### Estado do setup
+
+O painel consulta o estado público da configuração inicial em:
+
+```http
+GET /api/setup/status
+```
+
+A resposta informa se o setup ainda é necessário e a versão exata do binário em
+execução:
+
+```json
+{
+  "setupRequired": true,
+  "serverVersion": "0.2.1",
+  "internalWebPort": 8080,
+  "internalS3Port": 9000
+}
+```
+
+`serverVersion` vem da versão compilada do servidor e deve ser exibida
+discretamente em todas as etapas da configuração inicial.
+As portas retornadas são listeners internos já usados pelo processo, não portas
+HTTPS públicas que o usuário deva escolher durante o setup.
+
+Ao concluir o setup de um Origin, `publicWebUrl` e `publicS3Url` podem persistir
+os dois endpoints externos. Eles precisam encaminhar, respectivamente, ao
+listener web e ao listener S3-compatible. O endpoint S3 normalmente usa outro
+host ou outra porta TLS quando existe proxy reverso.
+
 ## API S3-like mínima
 
 A API S3-like deve oferecer um subconjunto mínimo de operações familiares ao ecossistema S3:

@@ -29,7 +29,17 @@
       },
       "adminUsername": "Initial admin username",
       "adminPassword": "Initial admin password",
-      "httpPort": "HTTP port",
+      "network": {
+        "title": "Network endpoints",
+        "description": "Ponte Mesh listens on private internal ports. A reverse proxy can publish each service with HTTPS on a different address or port.",
+        "internalWebPort": "Internal panel port",
+        "internalS3Port": "Internal S3 port",
+        "internalPortsHelp": "These are process listeners, not the public HTTPS ports. Configure your firewall and reverse proxy separately.",
+        "publicWebUrl": "Public panel URL",
+        "publicS3Url": "Public S3 endpoint",
+        "publicEndpointsHelp": "Use an endpoint that reaches the S3 listener, such as https://s3.example.com or https://server.example.com:9443. Do not reuse the panel URL unless your proxy explicitly routes S3 signatures.",
+        "copyPublicS3Url": "Copy public S3 endpoint"
+      },
       "storage": {
         "title": "Instance storage",
         "description": "Objects, fragments, and instance data will be stored in the persistent volume configured for Ponte Mesh.",
