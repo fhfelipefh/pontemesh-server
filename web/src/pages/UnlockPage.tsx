@@ -48,7 +48,6 @@ export function UnlockPage({ serverVersion }: { serverVersion: string | null }) 
         <Button type="submit" disabled={!token.trim()} loading={submitting} icon={<UnlockKeyhole size={18} aria-hidden="true" />}>
           {submitting ? t("setup.unlock.checking") : t("setup.unlock.continue")}
         </Button>
-        <p className="language-hint">{t("setup.unlock.languageHint")}</p>
       </form>
     </PageShell>
   );

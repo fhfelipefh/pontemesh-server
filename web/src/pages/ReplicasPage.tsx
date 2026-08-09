@@ -127,7 +127,6 @@ export function ReplicasPage() {
         ) : replicas.length === 0 ? (
           <div className="settings-empty-state">
             <h3>{t("setup.replicas.emptyTitle")}</h3>
-            <p>{t("setup.replicas.emptyDescription")}</p>
           </div>
         ) : (
           <div className="settings-table-wrap">

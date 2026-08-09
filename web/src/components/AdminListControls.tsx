@@ -10,7 +10,7 @@ export function ConfirmDialog({
   onConfirm
 }: {
   title: string;
-  description: string;
+  description?: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -21,7 +21,7 @@ export function ConfirmDialog({
         <div className="settings-modal__header">
           <div>
             <h3 id="confirm-title">{title}</h3>
-            <p>{description}</p>
+            {description ? <p>{description}</p> : null}
           </div>
           <button
             className="settings-modal__close"
@@ -104,11 +104,11 @@ export function Pagination({
   );
 }
 
-export function EmptyState({ title, description, children }: { title: string; description: string; children?: ReactNode }) {
+export function EmptyState({ title, description, children }: { title: string; description?: string; children?: ReactNode }) {
   return (
     <div className="empty-state">
       <strong>{title}</strong>
-      <p>{description}</p>
+      {description ? <p>{description}</p> : null}
       {children}
     </div>
   );

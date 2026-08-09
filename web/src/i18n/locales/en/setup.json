@@ -2,26 +2,23 @@
   "setup": {
     "unlock": {
       "title": "Unlock Ponte Mesh",
-      "description": "This Ponte Mesh instance needs the initial admin token before it can be configured.",
+      "description": "Use the initial admin token.",
       "tokenLabel": "Initial admin token",
       "tokenPlaceholder": "Enter initial admin token",
       "continue": "Continue",
       "checking": "Checking...",
       "invalidToken": "Invalid initial admin token.",
-      "languageHint": "You can change the language at any time.",
       "showToken": "Show token",
       "hideToken": "Hide token"
     },
     "configure": {
       "title": "Configure Ponte Mesh",
-      "description": "Finish the initial configuration of this instance.",
       "instanceName": "Instance name",
       "role": "Instance role",
       "origin": "Origin",
       "replicaEdge": "Replica/Edge",
       "replica": {
         "title": "Origin pairing",
-        "description": "Configure how this Replica/Edge instance connects to its Origin.",
         "originBaseUrl": "Origin address",
         "publicEndpoint": "Advertised Replica/Edge address",
         "replicaId": "Replica ID",
@@ -31,41 +28,35 @@
       "adminPassword": "Initial admin password",
       "network": {
         "title": "Network endpoints",
-        "description": "Ponte Mesh listens on private internal ports. A reverse proxy can publish each service with HTTPS on a different address or port.",
         "internalWebPort": "Internal panel port",
         "internalS3Port": "Internal S3 port",
-        "internalPortsHelp": "These are process listeners, not the public HTTPS ports. Configure your firewall and reverse proxy separately.",
+        "internalPortsHelp": "Internal listeners. Configure proxy and firewall separately.",
         "publicWebUrl": "Public panel URL",
         "publicS3Url": "Origin public S3 endpoint",
-        "publicEndpointsHelp": "Required for Origin: SDKs and applications use this address to download objects. It is filled automatically when the environment provides PONTEMESH_PUBLIC_S3_URL; otherwise, use an address that reaches the S3 listener, such as https://server.example.com:9443.",
+        "publicEndpointsHelp": "Origin requires a reachable S3 endpoint, such as https://server.example.com:9443.",
         "copyPublicS3Url": "Copy public S3 endpoint"
       },
       "storage": {
         "title": "Instance storage",
-        "description": "Objects, fragments, and instance data will be stored in the persistent volume configured for Ponte Mesh.",
         "defaultPathLabel": "Path used by the server",
         "advancedTitle": "Advanced configuration",
-        "advancedDescription": "Change this only if you have already prepared a specific volume or directory for storage.",
         "internalPathLabel": "Internal storage path",
-        "internalPathHelp": "In Docker, this path must exist inside the container. To use a host folder, mount it as a volume.",
+        "internalPathHelp": "In Docker, mount the host folder as a volume.",
         "internalPathPlaceholder": "/var/pontemesh_home/data/storage"
       },
       "finish": "Finish setup",
       "finishing": "Finishing...",
       "setupFailed": "Setup failed.",
       "replicaReadyTitle": "Replica/Edge configured",
-      "replicaReadyDescription": "This Ponte Mesh instance will operate with the Replica/Edge role using the persisted pairing configuration.",
       "s3InitialTitle": "Initial S3 access key",
-      "s3InitialDescription": "Use this key with S3-compatible clients after login.",
-      "s3InitialWarning": "Copy your initial S3 key now. The secret will not be shown again.",
+      "s3InitialWarning": "Copy now. Shown once.",
       "goToLogin": "Go to login"
     },
     "ready": {
       "title": "Ponte Mesh Server",
-      "description": "This instance has completed initial setup."
+      "description": "Setup complete."
     },
     "help": {
-      "needHelp": "Need help?",
       "readDocs": "Read the docs"
     },
     "language": {
@@ -78,7 +69,6 @@
     "auth": {
       "admin": "Administrator",
       "loginTitle": "Sign in to Ponte Mesh",
-      "loginDescription": "",
       "username": "Username",
       "password": "Password",
       "signIn": "Sign in",
@@ -183,14 +173,12 @@
       "namePlaceholder": "documents",
       "search": "Search bucket",
       "create": "Create bucket",
-      "createDescription": "Enter a valid name for the new bucket.",
       "managePolicies": "Configure buckets",
-      "managePoliciesDescription": "Set Ponte Mesh defaults for new buckets or apply them to existing buckets.",
       "selectVisible": "Select all buckets on this page",
       "selectBucket": "Select bucket {{name}}",
       "loadingDefaults": "Loading policy defaults",
       "defaultsTitle": "Defaults for new buckets",
-      "defaultsDescription": "New buckets copy these Ponte Mesh settings. Existing buckets change only when you apply them below.",
+      "defaultsDescription": "Used by new buckets.",
       "defaultsLoadFailed": "Failed to load bucket policy defaults.",
       "defaultsSaveFailed": "Failed to save bucket policy defaults.",
       "defaultsSaved": "Defaults saved for future buckets.",
@@ -247,12 +235,10 @@
       "s3ResourcePolicy": "Bucket policy JSON",
       "s3EventNotifications": "Notifications JSON",
       "invalidJson": "Invalid JSON.",
-      "emptyTitle": "No buckets have been created yet.",
-      "emptyDescription": "Create your first bucket to start storing objects.",
+      "emptyTitle": "No buckets.",
       "noResultsTitle": "No buckets found.",
-      "noResultsDescription": "Adjust the search to find another bucket.",
       "confirmDeleteTitle": "Delete bucket",
-      "confirmDeleteDescription": "Confirm deletion of bucket {{name}}. Buckets with objects will not be deleted."
+      "confirmDeleteDescription": "{{name}}"
     },
     "objects": {
       "title": "Objects",
@@ -284,14 +270,11 @@
       "activeObjectExists": "An active object with this key already exists in this bucket.",
       "deleteFailed": "Failed to delete object.",
       "uploadBucket": "Bucket: {{bucket}}",
-      "noBucketsTitle": "No buckets are available.",
-      "noBucketsDescription": "Create a bucket before uploading or listing objects.",
-      "emptyTitle": "This bucket does not have objects yet.",
-      "emptyDescription": "Upload an object to get started.",
+      "noBucketsTitle": "No buckets.",
+      "emptyTitle": "No objects.",
       "noResultsTitle": "No objects found.",
-      "noResultsDescription": "Adjust the search to find another object.",
       "confirmDeleteTitle": "Delete object",
-      "confirmDeleteDescription": "Confirm deletion of object {{key}}."
+      "confirmDeleteDescription": "{{key}}"
     },
     "metrics": {
       "title": "Origin traffic",
@@ -327,21 +310,17 @@
       "copyToken": "Copy replica token",
       "revoke": "Revoke replica",
       "confirmRevokeTitle": "Revoke replica",
-      "confirmRevokeDescription": "Confirm revocation of replica {{name}}. It will stop receiving new authorizations and will no longer be announced as an eligible source.",
+      "confirmRevokeDescription": "{{name}}",
       "loadFailed": "Failed to load replicas.",
       "createFailed": "Failed to create replica.",
       "revokeFailed": "Failed to revoke replica.",
-      "emptyTitle": "No replicas have been registered yet.",
-      "emptyDescription": "Create a Replica/Edge identity before synchronizing edge nodes."
+      "emptyTitle": "No replicas."
     },
     "settings": {
       "title": "Settings",
       "instance": {
-        "title": "Instance identity",
-        "description": "Change the name shown across the administration panel without altering this instance's role or network endpoints.",
+        "title": "Instance",
         "name": "Instance name",
-        "save": "Save name",
-        "saving": "Saving...",
         "loadFailed": "Failed to load the instance name.",
         "saveFailed": "Failed to save the instance name."
       },
@@ -368,16 +347,14 @@
         "scopes": "Scopes",
         "revoke": "Revoke application",
         "confirmRevokeTitle": "Revoke application",
-        "confirmRevokeDescription": "Confirm revocation of application {{name}}. Its token will stop authorizing new requests.",
+        "confirmRevokeDescription": "{{name}}",
         "loadFailed": "Failed to load application credentials.",
         "createFailed": "Failed to create application credential.",
         "revokeFailed": "Failed to revoke application credential.",
-        "emptyTitle": "No application credentials have been created yet.",
-        "emptyDescription": "Create a credential so SDKs can request access packages and manifests."
+        "emptyTitle": "No application credentials."
       },
       "mcp": {
         "title": "MCP",
-        "subtitle": "Allow Model Context Protocol compatible clients to observe and operate this instance according to configured permissions.",
         "status": "MCP status",
         "enabled": "Enabled",
         "disabled": "Disabled",
@@ -398,16 +375,15 @@
         "createToken": "Create token",
         "revokeToken": "Revoke token",
         "tokenCreated": "Token created",
-        "tokenCreatedHint": "Copy this token now. It will not be shown again.",
+        "tokenCreatedHint": "Copy now. Shown once.",
         "tokenPrefix": "Prefix",
         "tokenSecret": "Token",
         "copyToken": "Copy MCP token",
         "connectionConfig": "Connection configuration",
-        "connectionConfigHint": "Copy this JSON to configure compatible MCP clients without manually finding headers or endpoint details.",
         "copyConnectionConfig": "Copy MCP configuration",
         "confirmRevokeTokenTitle": "Revoke MCP token",
-        "confirmRevokeTokenDescription": "Confirm revocation of MCP token {{name}}. It will stop authorizing new calls.",
-        "noTokens": "No MCP tokens have been created yet.",
+        "confirmRevokeTokenDescription": "{{name}}",
+        "noTokens": "No MCP tokens.",
         "recentActivity": "Recent activity",
         "noActivity": "No calls recorded yet.",
         "loadFailed": "Failed to load MCP configuration.",
@@ -417,17 +393,16 @@
         "adminTools": "Admin tools",
         "fullAdmin": "Full administration",
         "tokenScopes": "Scopes",
-        "permissionWarning": "Tokens with write permission can modify buckets and objects. Administrative tokens can change sensitive instance settings."
+        "permissionWarning": "Write and admin scopes change server data."
       },
       "s3": {
         "title": "S3 Credentials",
         "create": "Create key",
         "createModalTitle": "Create S3 credential",
-        "createModalDescription": "Set a name to identify this key in the panel.",
         "name": "Name",
         "namePlaceholder": "default-admin-key",
         "createdTitle": "Key created",
-        "createdHint": "Copy this secret now. It will not be shown again.",
+        "createdHint": "Copy now. Shown once.",
         "accessKeyId": "Access Key",
         "secretAccessKey": "Secret Access Key",
         "copyAccessKeyId": "Copy Access Key",
@@ -440,7 +415,7 @@
         "createdAt": "Created at",
         "revoke": "Revoke key",
         "confirmRevokeTitle": "Revoke S3 key",
-        "confirmRevokeDescription": "Confirm revocation of S3 key {{name}}. Clients using this key will stop authenticating.",
+        "confirmRevokeDescription": "{{name}}",
         "paginationLabel": "S3 credentials pagination",
         "paginationSummary": "Showing {{start}}-{{end}} of {{total}} credentials",
         "previousPage": "Previous page",
@@ -449,9 +424,8 @@
         "loadFailed": "Failed to load S3 keys.",
         "createFailed": "Failed to create S3 key.",
         "revokeFailed": "Failed to revoke S3 key.",
-        "emptyTitle": "No S3 credentials have been created yet.",
-        "emptyDescription": "Create a key to connect S3-compatible clients.",
-        "helpText": "Use these credentials only with the S3 endpoint. For IP endpoints in WinSCP, open Advanced > S3 and set URL style to Path. Keep keys protected and revoke those no longer in use."
+        "emptyTitle": "No S3 credentials.",
+        "helpText": "WinSCP: Advanced > S3 > URL style > Path."
       }
     }
   }

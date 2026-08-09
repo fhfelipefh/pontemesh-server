@@ -66,6 +66,10 @@ A API S3-like deve oferecer um subconjunto mínimo de operações familiares ao 
 * remover logicamente objeto;
 * gerar URL temporária ou mecanismo equivalente.
 
+A listagem de objetos aceita `ListObjects` v1, usado por clientes como o
+WinSCP, e `ListObjectsV2`. A versão v1 pagina por `marker`; a versão v2 usa
+`continuation-token` ou `start-after`.
+
 Na implementação atual, o painel administrativo e a API S3-compatible ficam em
 portas separadas. O painel web/admin usa `http://localhost:8080`; a API
 S3-compatible usa `http://localhost:9000` e expõe as operações S3 na raiz dessa porta.

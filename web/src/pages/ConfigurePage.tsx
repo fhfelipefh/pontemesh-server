@@ -84,7 +84,6 @@ export function ConfigurePage({
     return (
       <PageShell
         title={t("setup.configure.s3InitialTitle")}
-        description={t("setup.configure.s3InitialDescription")}
         serverVersion={serverVersion}
         compact
       >
@@ -131,7 +130,6 @@ export function ConfigurePage({
     return (
       <PageShell
         title={t("setup.configure.replicaReadyTitle")}
-        description={t("setup.configure.replicaReadyDescription")}
         serverVersion={serverVersion}
         compact
       >
@@ -147,7 +145,6 @@ export function ConfigurePage({
   return (
     <PageShell
       title={t("setup.configure.title")}
-      description={t("setup.configure.description")}
       serverVersion={serverVersion}
       compact
     >
@@ -197,7 +194,6 @@ export function ConfigurePage({
           <section className="storage-summary" aria-labelledby="replica-config-title">
             <div>
               <h2 id="replica-config-title">{t("setup.configure.replica.title")}</h2>
-              <p>{t("setup.configure.replica.description")}</p>
             </div>
             <TextInput
               id="originBaseUrl"
@@ -237,7 +233,6 @@ export function ConfigurePage({
         <section className="storage-summary network-summary" aria-labelledby="network-summary-title">
           <div>
             <h2 id="network-summary-title">{t("setup.configure.network.title")}</h2>
-            <p>{t("setup.configure.network.description")}</p>
           </div>
           <div className="network-summary__ports">
             <div className="storage-summary__path">
@@ -278,7 +273,6 @@ export function ConfigurePage({
         <section className="storage-summary" aria-labelledby="storage-summary-title">
           <div>
             <h2 id="storage-summary-title">{t("setup.configure.storage.title")}</h2>
-            <p>{t("setup.configure.storage.description")}</p>
           </div>
           <div className="storage-summary__path">
             <span>{t("setup.configure.storage.defaultPathLabel")}</span>
@@ -300,7 +294,6 @@ export function ConfigurePage({
 
           {advancedOpen ? (
             <div id="advanced-storage-panel" className="advanced-storage__panel">
-              <p>{t("setup.configure.storage.advancedDescription")}</p>
               <TextInput
                 id="internalStoragePath"
                 label={t("setup.configure.storage.internalPathLabel")}

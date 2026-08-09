@@ -6,7 +6,7 @@ import { SetupServerVersion } from "./SetupServerVersion";
 
 type PageShellProps = {
   title: string;
-  description: string;
+  description?: string;
   children?: ReactNode;
   compact?: boolean;
   serverVersion?: string | null;
@@ -27,7 +27,7 @@ export function PageShell({ title, description, children, compact = false, serve
         <div className="setup-card__divider" />
         <div className="setup-card__content">
           <h1 id="page-title">{title}</h1>
-          <p>{description}</p>
+          {description ? <p>{description}</p> : null}
           {children}
         </div>
       </section>

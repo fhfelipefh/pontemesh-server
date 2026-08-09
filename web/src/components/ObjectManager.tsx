@@ -182,7 +182,6 @@ export function ObjectManager({
           ) : !hasObjects ? (
             <EmptyState
               title={objectSearchActive ? t("setup.objects.noResultsTitle") : t("setup.objects.emptyTitle")}
-              description={objectSearchActive ? t("setup.objects.noResultsDescription") : t("setup.objects.emptyDescription")}
             >
               {!objectSearchActive ? (
                 <Button

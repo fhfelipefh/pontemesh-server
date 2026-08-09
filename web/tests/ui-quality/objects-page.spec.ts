@@ -68,7 +68,7 @@ test.describe("Objects page", () => {
     await page.unroute("**/api/**");
     await installAdminApiFixtures(page, { buckets: [] });
     await page.goto("/objects");
-    await expect(page.getByText(/no buckets are available|nenhum bucket disponível/i)).toBeVisible();
+    await expect(page.getByText(/no buckets\.|nenhum bucket\./i)).toBeVisible();
 
     await page.unroute("**/api/**");
     await installAdminApiFixtures(page, {
@@ -78,7 +78,7 @@ test.describe("Objects page", () => {
       }
     });
     await page.goto("/objects?bucket=assets");
-    await expect(page.getByText(/does not have objects yet|ainda não possui objetos/i)).toBeVisible();
+    await expect(page.getByText(/no objects\.|nenhum objeto\./i)).toBeVisible();
     await page.getByTestId("open-upload-object-button").click();
     await expect(page.getByTestId("upload-object-dialog")).toBeVisible();
   });

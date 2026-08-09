@@ -117,7 +117,6 @@ export function ObjectsPage() {
       ) : !hasBuckets ? (
         <EmptyState
           title={t("setup.objects.noBucketsTitle")}
-          description={t("setup.objects.noBucketsDescription")}
         />
       ) : (
         <>

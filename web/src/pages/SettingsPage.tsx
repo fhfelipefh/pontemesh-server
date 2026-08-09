@@ -1,6 +1,6 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Ban, Check, Copy, Download, KeyRound, Network, Plus, Server, ShieldCheck, Upload, Wrench } from "lucide-react";
+import { Activity, Ban, Check, Copy, Download, KeyRound, Network, Plus, Save, Server, ShieldCheck, Upload, Wrench } from "lucide-react";
 import { getInstanceSummary, updateInstanceName } from "../api/dashboardApi";
 import {
   ApplicationCredentialSummary,
@@ -88,7 +88,6 @@ export function SettingsPage() {
   const [instanceName, setInstanceName] = useState("");
   const [loadingInstance, setLoadingInstance] = useState(true);
   const [savingInstance, setSavingInstance] = useState(false);
-  const [instanceSaved, setInstanceSaved] = useState(false);
   const [instanceError, setInstanceError] = useState("");
 
   useEffect(() => {
@@ -103,12 +102,10 @@ export function SettingsPage() {
       return;
     }
     setSavingInstance(true);
-    setInstanceSaved(false);
     setInstanceError("");
     try {
       const summary = await updateInstanceName(instanceName.trim());
       setInstanceName(summary.name);
-      setInstanceSaved(true);
       window.dispatchEvent(new CustomEvent("pontemesh:instance-updated", { detail: summary }));
     } catch (saveError) {
       setInstanceError(saveError instanceof Error ? saveError.message : t("setup.settings.instance.saveFailed"));
@@ -341,7 +338,6 @@ export function SettingsPage() {
         <SettingsSection
           className="settings-card--wide"
           title={t("setup.settings.instance.title")}
-          description={t("setup.settings.instance.description")}
           icon={<Server size={20} />}
         >
           <form className="instance-name-form" onSubmit={(event) => {
@@ -355,19 +351,17 @@ export function SettingsPage() {
                 value={instanceName}
                 maxLength={100}
                 disabled={loadingInstance || savingInstance}
-                onChange={(event) => {
-                  setInstanceName(event.target.value);
-                  setInstanceSaved(false);
-                }}
+                onChange={(event) => setInstanceName(event.target.value)}
               />
             </label>
             <Button
               data-testid="save-instance-name"
               type="submit"
+              loading={savingInstance}
               disabled={loadingInstance || savingInstance || !instanceName.trim()}
-              icon={instanceSaved ? <Check size={17} aria-hidden="true" /> : undefined}
+              icon={<Save size={17} aria-hidden="true" />}
             >
-              {savingInstance ? t("setup.settings.instance.saving") : t("setup.settings.instance.save")}
+              {t("setup.common.save")}
             </Button>
           </form>
           {instanceError ? <p className="error-message">{instanceError}</p> : null}
@@ -582,7 +576,6 @@ function McpSettingsCard({
       className="settings-card--wide"
       id="mcp"
       title={t("setup.settings.mcp.title")}
-      description={t("setup.settings.mcp.subtitle")}
       icon={<Network size={20} />}
     >
 
@@ -677,7 +670,6 @@ function McpSettingsCard({
                     onClick={() => void navigator.clipboard?.writeText(mcpConnectionConfig)}
                   />
                 </div>
-                <p>{t("setup.settings.mcp.connectionConfigHint")}</p>
                 <pre>{mcpConnectionConfig}</pre>
               </div>
               <button className="settings-secondary-button" type="button" onClick={onDismissCreatedToken}>
@@ -919,7 +911,6 @@ function ApplicationCredentialsCard({
         <EmptyState
           icon={<KeyRound size={22} />}
           title={t("setup.settings.applications.emptyTitle")}
-          description={t("setup.settings.applications.emptyDescription")}
         />
       ) : (
         <CredentialTable

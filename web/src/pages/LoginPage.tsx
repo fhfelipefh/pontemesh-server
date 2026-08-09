@@ -33,7 +33,7 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
   }
 
   return (
-    <PageShell title={t("setup.auth.loginTitle")} description={t("setup.auth.loginDescription")}>
+    <PageShell title={t("setup.auth.loginTitle")}>
       <form className="form" onSubmit={handleSubmit}>
         <TextInput
           id="loginUsername"
