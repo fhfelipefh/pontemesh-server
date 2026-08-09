@@ -336,6 +336,15 @@
     },
     "settings": {
       "title": "Settings",
+      "instance": {
+        "title": "Instance identity",
+        "description": "Change the name shown across the administration panel without altering this instance's role or network endpoints.",
+        "name": "Instance name",
+        "save": "Save name",
+        "saving": "Saving...",
+        "loadFailed": "Failed to load the instance name.",
+        "saveFailed": "Failed to save the instance name."
+      },
       "configuration": {
         "title": "Configuration backup",
         "export": "Export JSON",

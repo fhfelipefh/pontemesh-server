@@ -125,6 +125,7 @@ type AdminFixtureOptions = {
 
 export async function installAdminApiFixtures(page: Page, options: AdminFixtureOptions = {}) {
   const fixtureBuckets = options.buckets ?? buckets;
+  let fixtureInstanceName = dashboardSummary.instance.name;
   const fixtureObjectsByBucket = options.objectsByBucket ?? {
     assets: objects,
     documents: objects.slice(1)
@@ -159,7 +160,11 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
     }
 
     if (path === "/api/admin/instance") {
-      return json(route, dashboardSummary.instance);
+      if (request.method() === "PUT") {
+        const body = request.postDataJSON() as { name: string };
+        fixtureInstanceName = body.name.trim();
+      }
+      return json(route, { ...dashboardSummary.instance, name: fixtureInstanceName });
     }
 
     if (path === "/api/admin/dashboard/summary") {

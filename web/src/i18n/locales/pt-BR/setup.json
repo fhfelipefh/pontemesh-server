@@ -336,6 +336,15 @@
     },
     "settings": {
       "title": "Configurações",
+      "instance": {
+        "title": "Identidade da instância",
+        "description": "Altere o nome exibido no painel administrativo sem modificar o papel ou os endpoints de rede desta instância.",
+        "name": "Nome da instância",
+        "save": "Salvar nome",
+        "saving": "Salvando...",
+        "loadFailed": "Falha ao carregar o nome da instância.",
+        "saveFailed": "Falha ao salvar o nome da instância."
+      },
       "configuration": {
         "title": "Backup de configurações",
         "export": "Exportar JSON",

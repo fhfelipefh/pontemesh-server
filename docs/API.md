@@ -167,6 +167,24 @@ Essas políticas podem controlar, por exemplo:
 
 Essas configurações pertencem à API Ponte Mesh.
 
+## Identidade administrativa da instância
+
+O painel administrativo consulta e pode alterar o nome exibido da instância por
+meio de um contrato autenticado:
+
+```http
+GET /api/admin/instance
+PUT /api/admin/instance
+Content-Type: application/json
+
+{ "name": "Ponte Mesh Origin" }
+```
+
+O `PUT` aceita um nome sem caracteres de controle, com 1 a 100 caracteres após
+a remoção de espaços externos. A alteração persiste somente o nome em
+`config.toml`, preserva papel, endpoints e armazenamento, exige sessão
+administrativa e gera evento de auditoria.
+
 ## Contratos para Replica/Edge
 
 Toda chamada de réplica deve ser autenticada e autorizada.

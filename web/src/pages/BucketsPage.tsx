@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   FolderOpen,
   Plus,
@@ -32,6 +32,7 @@ import { ObjectManager } from "../components/ObjectManager";
 import { emptyPage, formatBytes, formatDate } from "../utils/adminFormat";
 
 const BUCKET_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const BUCKET_AUTO_REFRESH_MS = 5000;
 
 type ConfirmationState =
   | { kind: "bucket"; bucket: string }
@@ -56,10 +57,17 @@ export function BucketsPage() {
   const [drawerActionError, setDrawerActionError] = useState("");
   const [selectedBuckets, setSelectedBuckets] = useState<Set<string>>(new Set());
   const [policyManagerOpen, setPolicyManagerOpen] = useState(false);
+  const bucketRefreshInFlight = useRef(false);
 
-  const refreshBuckets = useCallback(async () => {
-    setLoadingBuckets(true);
-    setBucketError("");
+  const refreshBuckets = useCallback(async (silent = false) => {
+    if (bucketRefreshInFlight.current) {
+      return;
+    }
+    bucketRefreshInFlight.current = true;
+    if (!silent) {
+      setLoadingBuckets(true);
+      setBucketError("");
+    }
     try {
       const nextPage = await listBuckets({
         query: bucketSearch,
@@ -77,12 +85,24 @@ export function BucketsPage() {
     } catch (loadError) {
       setBucketError(loadError instanceof Error ? loadError.message : t("setup.buckets.loadFailed"));
     } finally {
-      setLoadingBuckets(false);
+      if (!silent) {
+        setLoadingBuckets(false);
+      }
+      bucketRefreshInFlight.current = false;
     }
   }, [bucketPageNumber, bucketPageSize, bucketSearch, t]);
 
   useEffect(() => {
     refreshBuckets();
+  }, [refreshBuckets]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshBuckets(true);
+      }
+    }, BUCKET_AUTO_REFRESH_MS);
+    return () => window.clearInterval(interval);
   }, [refreshBuckets]);
 
   useEffect(() => {

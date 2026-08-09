@@ -30,6 +30,14 @@ A API do Origin deve seguir as seguintes diretrizes:
 * operações base de bucket e objeto devem permanecer preferencialmente na API S3-like;
 * políticas, manifestos, fontes autorizadas, fallback e métricas devem ficar na API Ponte Mesh.
 
+### Nome da instância
+
+O painel usa `GET /api/admin/instance` para consultar a identidade exibida e
+`PUT /api/admin/instance` com `{ "name": "..." }` para renomeá-la. A escrita
+exige uma sessão administrativa, valida um nome de 1 a 100 caracteres, altera
+somente `instance.name` no arquivo de configuração e registra a operação na
+auditoria.
+
 ## API S3-like
 
 A API S3-like deve oferecer uma interface familiar para operações fundamentais de buckets e objetos.

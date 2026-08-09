@@ -51,6 +51,11 @@ pub struct InstanceSummary {
     pub uptime_seconds: u64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateInstanceRequest {
+    name: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HealthSummary {
@@ -243,6 +248,36 @@ pub async fn instance_summary(State(state): State<AppState>) -> Response {
     match build_instance_summary(&state) {
         Ok(summary) => Json(summary).into_response(),
         Err(error) => internal_error(error),
+    }
+}
+
+pub async fn update_instance(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(request): Json<UpdateInstanceRequest>,
+) -> Response {
+    match config::update_instance_name(&state.paths, &request.name) {
+        Ok(_) => {
+            audit::event(
+                "instance_name_updated",
+                Some(&session.username),
+                "success",
+                "instance display name updated",
+            );
+            record_admin_audit(
+                &state,
+                "instance_name_updated",
+                &session.username,
+                "success",
+                "instance display name updated",
+            )
+            .await;
+            match build_instance_summary(&state) {
+                Ok(summary) => Json(summary).into_response(),
+                Err(error) => internal_error(error),
+            }
+        }
+        Err(error) => bad_request(error),
     }
 }
 

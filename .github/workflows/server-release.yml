@@ -255,6 +255,21 @@ jobs:
           fi
           gh "${args[@]}"
 
+      - name: Delete older GitHub releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current_tag="v${{ needs.validate.outputs.version }}"
+          current_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${current_tag}" --jq '.id')"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | [.id, .tag_name] | @tsv' |
+            while IFS=$'\t' read -r release_id tag_name; do
+              if [ "$release_id" != "$current_id" ]; then
+                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
+                echo "Deleted release ${tag_name}; its Git tag was preserved."
+              fi
+            done
+
   quality:
     name: Server quality and real SDK integration
     needs: validate

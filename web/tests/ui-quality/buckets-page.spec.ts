@@ -173,6 +173,27 @@ test.describe("Buckets page layout quality", () => {
     await expect(page.getByTestId("upload-object-dialog")).toBeHidden();
     expect(pageErrors).toEqual([]);
   });
+
+  test("buckets created outside the panel should appear automatically", async ({ page }) => {
+    let requests = 0;
+    await page.route("**/api/admin/buckets?*", async (route) => {
+      requests += 1;
+      const items = requests > 1
+        ? [
+            { name: "assets", objectCount: 2, totalBytes: 3072, createdAt: "2026-06-30T12:00:00.000Z" },
+            { name: "external-bucket", objectCount: 0, totalBytes: 0, createdAt: "2026-06-30T12:00:00.000Z" }
+          ]
+        : [{ name: "assets", objectCount: 2, totalBytes: 3072, createdAt: "2026-06-30T12:00:00.000Z" }];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items, page: 1, pageSize: 20, total: items.length, totalPages: 1 })
+      });
+    });
+
+    await openBucketsPage(page);
+    await expect(page.getByText("external-bucket", { exact: true })).toBeVisible({ timeout: 7000 });
+  });
 });
 
 async function openBucketsPage(page: import("@playwright/test").Page) {
