@@ -105,7 +105,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             "/api/admin/dashboard/summary",
             get(admin::dashboard_summary),
         )
-        .route("/api/admin/instance", get(admin::instance_summary))
+        .route(
+            "/api/admin/instance",
+            get(admin::instance_summary).put(admin::update_instance),
+        )
         .route("/api/admin/system/resources", get(admin::system_resources))
         .route("/api/admin/storage/status", get(admin::storage_status))
         .route("/api/admin/audit-events", get(admin::list_audit_events))
@@ -467,6 +470,45 @@ mod tests {
         assert_eq!(unauthenticated_body["error"], "authentication required");
 
         let cookie = login_cookie(app.clone()).await;
+
+        let rename_instance = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/instance")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"Contract Origin"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(rename_instance.status(), StatusCode::OK);
+        let renamed_instance_body = json_body(rename_instance).await;
+        assert_eq!(renamed_instance_body["name"], "Contract Origin");
+        assert_eq!(
+            crate::config::load_instance_config(&ctx.paths)
+                .expect("persisted instance config")
+                .instance
+                .name,
+            "Contract Origin"
+        );
+
+        let invalid_instance_name = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/instance")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"   "}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(invalid_instance_name.status(), StatusCode::BAD_REQUEST);
 
         let dashboard = app
             .clone()

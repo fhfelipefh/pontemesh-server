@@ -349,6 +349,30 @@ pub fn load_instance_config(paths: &PontemeshHome) -> anyhow::Result<InstanceCon
     toml::from_str(&raw_config).context("failed to parse Ponte Mesh config.toml")
 }
 
+pub fn update_instance_name(paths: &PontemeshHome, name: &str) -> anyhow::Result<InstanceConfig> {
+    let name = validate_instance_name(name)?;
+    let mut config = load_instance_config(paths)?;
+    config.instance.name = name;
+    let serialized = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;
+    fs::write(paths.config_file(), serialized)
+        .with_context(|| format!("failed to write {}", paths.config_file().display()))?;
+    Ok(config)
+}
+
+pub fn validate_instance_name(name: &str) -> anyhow::Result<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("instance name cannot be empty");
+    }
+    if name.chars().count() > 100 {
+        bail!("instance name cannot exceed 100 characters");
+    }
+    if name.chars().any(char::is_control) {
+        bail!("instance name cannot contain control characters");
+    }
+    Ok(name.to_owned())
+}
+
 pub fn configured_instance_role(paths: &PontemeshHome) -> anyhow::Result<Option<InstanceRole>> {
     if !paths.setup_lock_file().exists() || !paths.config_file().exists() {
         return Ok(None);
@@ -449,6 +473,17 @@ fn validate_url(value: &str, field: &str) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn validates_instance_names() {
+        assert_eq!(
+            validate_instance_name("  Ponte Mesh  ").unwrap(),
+            "Ponte Mesh"
+        );
+        assert!(validate_instance_name("   ").is_err());
+        assert!(validate_instance_name("bad\nname").is_err());
+        assert!(validate_instance_name(&"x".repeat(101)).is_err());
+    }
 
     #[test]
     fn loads_replica_runtime_config() {

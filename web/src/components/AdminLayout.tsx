@@ -55,6 +55,17 @@ export function AdminLayout({ children, instanceName, username, onLogout }: Admi
   }, [instanceName]);
 
   useEffect(() => {
+    function handleInstanceUpdated(event: Event) {
+      const summary = (event as CustomEvent<{ name?: string }>).detail;
+      if (summary?.name) {
+        setResolvedInstanceName(summary.name);
+      }
+    }
+    window.addEventListener("pontemesh:instance-updated", handleInstanceUpdated);
+    return () => window.removeEventListener("pontemesh:instance-updated", handleInstanceUpdated);
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem("pontemesh.sidebarCollapsed", String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 

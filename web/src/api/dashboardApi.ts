@@ -159,6 +159,19 @@ export async function getInstanceSummary(): Promise<InstanceSummary> {
   return response.json() as Promise<InstanceSummary>;
 }
 
+export async function updateInstanceName(name: string): Promise<InstanceSummary> {
+  const response = await fetch("/api/admin/instance", {
+    method: "PUT",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ name })
+  });
+  await ensureOk(response);
+  return response.json() as Promise<InstanceSummary>;
+}
+
 export async function getOriginTrafficMetrics(): Promise<OriginTrafficMetrics> {
   const response = await fetch("/api/admin/metrics/origin-traffic", {
     headers: {

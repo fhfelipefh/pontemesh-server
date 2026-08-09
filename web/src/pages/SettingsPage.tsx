@@ -1,6 +1,7 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Ban, Check, Copy, Download, KeyRound, Network, Plus, ShieldCheck, Upload, Wrench } from "lucide-react";
+import { Activity, Ban, Check, Copy, Download, KeyRound, Network, Plus, Server, ShieldCheck, Upload, Wrench } from "lucide-react";
+import { getInstanceSummary, updateInstanceName } from "../api/dashboardApi";
 import {
   ApplicationCredentialSummary,
   CreatedApplicationCredential,
@@ -84,6 +85,37 @@ export function SettingsPage() {
   const [configurationResult, setConfigurationResult] = useState<ConfigurationImportResult | null>(null);
   const [configurationError, setConfigurationError] = useState("");
   const [destructiveConfirmation, setDestructiveConfirmation] = useState<DestructiveConfirmation>(null);
+  const [instanceName, setInstanceName] = useState("");
+  const [loadingInstance, setLoadingInstance] = useState(true);
+  const [savingInstance, setSavingInstance] = useState(false);
+  const [instanceSaved, setInstanceSaved] = useState(false);
+  const [instanceError, setInstanceError] = useState("");
+
+  useEffect(() => {
+    getInstanceSummary()
+      .then((summary) => setInstanceName(summary.name))
+      .catch((loadError) => setInstanceError(loadError instanceof Error ? loadError.message : t("setup.settings.instance.loadFailed")))
+      .finally(() => setLoadingInstance(false));
+  }, [t]);
+
+  async function handleRenameInstance() {
+    if (!instanceName.trim()) {
+      return;
+    }
+    setSavingInstance(true);
+    setInstanceSaved(false);
+    setInstanceError("");
+    try {
+      const summary = await updateInstanceName(instanceName.trim());
+      setInstanceName(summary.name);
+      setInstanceSaved(true);
+      window.dispatchEvent(new CustomEvent("pontemesh:instance-updated", { detail: summary }));
+    } catch (saveError) {
+      setInstanceError(saveError instanceof Error ? saveError.message : t("setup.settings.instance.saveFailed"));
+    } finally {
+      setSavingInstance(false);
+    }
+  }
 
   const refreshKeys = useCallback(async (page: number) => {
     setLoading(true);
@@ -306,6 +338,40 @@ export function SettingsPage() {
       </header>
 
       <div className="settings-page__grid">
+        <SettingsSection
+          className="settings-card--wide"
+          title={t("setup.settings.instance.title")}
+          description={t("setup.settings.instance.description")}
+          icon={<Server size={20} />}
+        >
+          <form className="instance-name-form" onSubmit={(event) => {
+            event.preventDefault();
+            void handleRenameInstance();
+          }}>
+            <label>
+              <span>{t("setup.settings.instance.name")}</span>
+              <input
+                data-testid="instance-name-input"
+                value={instanceName}
+                maxLength={100}
+                disabled={loadingInstance || savingInstance}
+                onChange={(event) => {
+                  setInstanceName(event.target.value);
+                  setInstanceSaved(false);
+                }}
+              />
+            </label>
+            <Button
+              data-testid="save-instance-name"
+              type="submit"
+              disabled={loadingInstance || savingInstance || !instanceName.trim()}
+              icon={instanceSaved ? <Check size={17} aria-hidden="true" /> : undefined}
+            >
+              {savingInstance ? t("setup.settings.instance.saving") : t("setup.settings.instance.save")}
+            </Button>
+          </form>
+          {instanceError ? <p className="error-message">{instanceError}</p> : null}
+        </SettingsSection>
         <McpSettingsCard
           settings={mcpSettings}
           status={mcpStatus}
