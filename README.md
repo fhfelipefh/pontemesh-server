@@ -321,3 +321,10 @@ Paste the initial token into the web panel and complete the instance setup.
 If Ponte Mesh is useful to you, consider supporting its continued development:
 
 [Sponsor on GitHub](https://github.com/sponsors/fhfelipefh)
+
+## Project links
+
+- [Ponte Mesh documentation](https://fhfelipefh.github.io/pontemesh-docs/)
+- [Ponte Mesh Server](https://github.com/fhfelipefh/pontemesh-server)
+- [Ponte Mesh SDK](https://github.com/fhfelipefh/pontemesh-sdk)
+- [Game Launcher Example](https://github.com/fhfelipefh/pontemesh-game-launcher-example)
