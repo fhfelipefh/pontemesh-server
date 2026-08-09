@@ -156,6 +156,13 @@ PONTEMESH_WEB_PORT=8080
 PONTEMESH_S3_PORT=9000
 ```
 
+The web panel and S3-compatible API are separate internal listeners. Behind a
+reverse proxy, keep those listeners private and configure distinct public
+endpoints with `PONTEMESH_PUBLIC_WEB_URL` and `PONTEMESH_PUBLIC_S3_URL`. For
+example, an IP-only deployment can publish the panel at
+`https://203.0.113.10` and S3 at `https://203.0.113.10:9443` without exposing
+ports `8080` or `9000` directly.
+
 `PONTEMESH_HOME` is the instance's persistent directory. In containers, mount a volume at `/var/pontemesh_home`; the default storage directory will be created at `/var/pontemesh_home/data/storage`. To use a specific host directory, mount it at `/var/pontemesh_home`, or set `PONTEMESH_STORAGE_PATH` to a prepared internal path.
 
 You can also run the server with Docker:
@@ -315,6 +322,11 @@ http://localhost:8080
 ```
 
 Paste the initial token into the web panel and complete the instance setup.
+
+The setup screen reports the internal web and S3 listener ports rather than
+asking users to treat an internal HTTP port as the public HTTPS port. Origin
+setups also record the public panel URL and the public S3-compatible endpoint
+used in SDK access packages and fallback contracts.
 
 ## Support the project
 

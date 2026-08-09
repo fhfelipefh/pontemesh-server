@@ -2,7 +2,7 @@ use crate::{
     audit,
     config::{
         HttpSection, InstanceConfig, InstanceRole, InstanceSection, LocalStorageSection,
-        ReplicaSection, StorageSection,
+        PublicEndpointsSection, ReplicaSection, S3Section, StorageSection,
     },
     http::AppState,
     security::{
@@ -43,6 +43,9 @@ pub struct UnlockResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SetupStatusResponse {
     setup_required: bool,
+    server_version: &'static str,
+    internal_web_port: u16,
+    internal_s3_port: u16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +56,9 @@ pub struct CompleteSetupRequest {
     pub admin_username: String,
     pub admin_password: String,
     pub http_port: Option<u16>,
+    pub s3_port: Option<u16>,
+    pub public_web_url: Option<String>,
+    pub public_s3_url: Option<String>,
     #[serde(alias = "storageLocalPath")]
     pub internal_storage_path: Option<String>,
     pub origin_base_url: Option<String>,
@@ -69,8 +75,15 @@ pub struct ErrorResponse {
 }
 
 pub async fn status(State(state): State<AppState>) -> Response {
+    let web_bind_addr = crate::config::load_http_bind_addr(&state.paths)
+        .unwrap_or_else(|_| crate::config::default_web_bind_addr());
+    let s3_bind_addr = crate::config::load_s3_bind_addr(&state.paths)
+        .unwrap_or_else(|_| crate::config::default_s3_bind_addr());
     Json(SetupStatusResponse {
         setup_required: state.setup.is_required(&state.paths),
+        server_version: env!("CARGO_PKG_VERSION"),
+        internal_web_port: web_bind_addr.port(),
+        internal_s3_port: s3_bind_addr.port(),
     })
     .into_response()
 }
@@ -168,7 +181,12 @@ pub(crate) async fn complete_setup(
         _ => bail!("role must be origin or replica-edge"),
     };
 
-    let http_port = payload.http_port.unwrap_or(8080);
+    let web_bind_addr = crate::config::default_web_bind_addr();
+    let s3_bind_addr = crate::config::default_s3_bind_addr();
+    let http_port = payload.http_port.unwrap_or(web_bind_addr.port());
+    let s3_port = payload.s3_port.unwrap_or(s3_bind_addr.port());
+    let public_web_url = optional_http_url(payload.public_web_url, "publicWebUrl")?;
+    let public_s3_url = optional_http_url(payload.public_s3_url, "publicS3Url")?;
     let storage_path = resolve_setup_storage_path(state, payload.internal_storage_path)?;
     validate_storage_path(&storage_path)?;
 
@@ -230,8 +248,16 @@ pub(crate) async fn complete_setup(
             role,
         },
         http: HttpSection {
-            bind: "0.0.0.0".to_owned(),
+            bind: web_bind_addr.ip().to_string(),
             port: http_port,
+        },
+        s3: S3Section {
+            bind: s3_bind_addr.ip().to_string(),
+            port: s3_port,
+        },
+        public_endpoints: PublicEndpointsSection {
+            web_url: public_web_url,
+            s3_url: public_s3_url,
         },
         storage: StorageSection {
             local: LocalStorageSection { path: storage_path },
@@ -415,4 +441,57 @@ fn internal_error(error: anyhow::Error) -> Response {
         }),
     )
         .into_response()
+}
+
+fn optional_http_url(value: Option<String>, field: &str) -> anyhow::Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(
+        http_url(Some(value.to_owned()), field)?
+            .trim_end_matches('/')
+            .to_owned(),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_status_serializes_the_compiled_server_version() {
+        let response = SetupStatusResponse {
+            setup_required: true,
+            server_version: env!("CARGO_PKG_VERSION"),
+            internal_web_port: 8080,
+            internal_s3_port: 9000,
+        };
+
+        assert_eq!(
+            serde_json::to_value(response).expect("setup status should serialize"),
+            serde_json::json!({
+                "setupRequired": true,
+                "serverVersion": env!("CARGO_PKG_VERSION"),
+                "internalWebPort": 8080,
+                "internalS3Port": 9000
+            })
+        );
+    }
+
+    #[test]
+    fn public_setup_urls_are_trimmed_and_reject_non_http_schemes() {
+        assert_eq!(
+            optional_http_url(
+                Some(" https://s3.example.com:9443/ ".to_owned()),
+                "publicS3Url"
+            )
+            .expect("valid public S3 URL"),
+            Some("https://s3.example.com:9443".to_owned())
+        );
+        assert!(optional_http_url(Some("ftp://s3.example.com".to_owned()), "publicS3Url").is_err());
+    }
 }

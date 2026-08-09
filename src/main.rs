@@ -69,7 +69,7 @@ async fn run_servers(
     catalog: catalog::Catalog,
 ) -> anyhow::Result<()> {
     let web_bind_addr = config::load_http_bind_addr(&paths)?;
-    let s3_bind_addr = config::default_s3_bind_addr();
+    let s3_bind_addr = config::load_s3_bind_addr(&paths)?;
     let web_app = http::web_router(paths.clone(), setup_state.clone(), catalog.clone());
     let s3_app = http::s3_router(paths, setup_state, catalog);
     let web_listener = tokio::net::TcpListener::bind(web_bind_addr)

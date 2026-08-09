@@ -10,14 +10,21 @@ import { TextInput } from "../components/TextInput";
 
 const DEFAULT_STORAGE_PATH = "/var/pontemesh_home/data/storage";
 
-export function ConfigurePage() {
+type ConfigurePageProps = {
+  serverVersion: string | null;
+  internalWebPort: number;
+  internalS3Port: number;
+};
+
+export function ConfigurePage({ serverVersion, internalWebPort, internalS3Port }: ConfigurePageProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [instanceName, setInstanceName] = useState("Ponte Mesh Local");
   const [role, setRole] = useState<CompleteSetupRequest["role"]>("origin");
   const [adminUsername, setAdminUsername] = useState("admin");
   const [adminPassword, setAdminPassword] = useState("");
-  const [httpPort, setHttpPort] = useState("8080");
+  const [publicWebUrl, setPublicWebUrl] = useState(() => window.location.origin);
+  const [publicS3Url, setPublicS3Url] = useState(() => defaultPublicS3Url(internalS3Port));
   const [internalStoragePath, setInternalStoragePath] = useState("");
   const [originBaseUrl, setOriginBaseUrl] = useState("");
   const [replicaId, setReplicaId] = useState("");
@@ -37,8 +44,7 @@ export function ConfigurePage() {
       instanceName,
       role,
       adminUsername,
-      adminPassword,
-      httpPort: Number(httpPort)
+      adminPassword
     };
 
     if (internalStoragePath.trim()) {
@@ -50,6 +56,9 @@ export function ConfigurePage() {
       payload.replicaId = replicaId.trim();
       payload.replicaToken = replicaToken.trim();
       payload.replicaPublicEndpoint = replicaPublicEndpoint.trim();
+    } else {
+      payload.publicWebUrl = publicWebUrl.trim();
+      payload.publicS3Url = publicS3Url.trim();
     }
 
     try {
@@ -66,6 +75,7 @@ export function ConfigurePage() {
       <PageShell
         title={t("setup.configure.s3InitialTitle")}
         description={t("setup.configure.s3InitialDescription")}
+        serverVersion={serverVersion}
         compact
       >
         <div className="secret-panel" role="status">
@@ -74,6 +84,13 @@ export function ConfigurePage() {
             <strong>{t("setup.configure.s3InitialWarning")}</strong>
           </div>
           <dl>
+            <div>
+              <dt>{t("setup.configure.network.publicS3Url")}</dt>
+              <dd>
+                <code>{publicS3Url}</code>
+                <CopyButton value={publicS3Url} label={t("setup.configure.network.copyPublicS3Url")} />
+              </dd>
+            </div>
             <div>
               <dt>{t("setup.settings.s3.accessKeyId")}</dt>
               <dd>
@@ -105,6 +122,7 @@ export function ConfigurePage() {
       <PageShell
         title={t("setup.configure.replicaReadyTitle")}
         description={t("setup.configure.replicaReadyDescription")}
+        serverVersion={serverVersion}
         compact
       >
         <div className="form__footer">
@@ -120,6 +138,7 @@ export function ConfigurePage() {
     <PageShell
       title={t("setup.configure.title")}
       description={t("setup.configure.description")}
+      serverVersion={serverVersion}
       compact
     >
       <form className="form form--two-column" onSubmit={handleSubmit}>
@@ -164,17 +183,6 @@ export function ConfigurePage() {
           revealable
           required
         />
-        <TextInput
-          id="httpPort"
-          label={t("setup.configure.httpPort")}
-          type="number"
-          min={1}
-          max={65535}
-          value={httpPort}
-          onChange={setHttpPort}
-          required
-        />
-
         {role === "replica-edge" ? (
           <section className="storage-summary" aria-labelledby="replica-config-title">
             <div>
@@ -215,6 +223,47 @@ export function ConfigurePage() {
             />
           </section>
         ) : null}
+
+        <section className="storage-summary network-summary" aria-labelledby="network-summary-title">
+          <div>
+            <h2 id="network-summary-title">{t("setup.configure.network.title")}</h2>
+            <p>{t("setup.configure.network.description")}</p>
+          </div>
+          <div className="network-summary__ports">
+            <div className="storage-summary__path">
+              <span>{t("setup.configure.network.internalWebPort")}</span>
+              <code>{internalWebPort}</code>
+            </div>
+            <div className="storage-summary__path">
+              <span>{t("setup.configure.network.internalS3Port")}</span>
+              <code>{internalS3Port}</code>
+            </div>
+          </div>
+          <p className="network-summary__help">{t("setup.configure.network.internalPortsHelp")}</p>
+          {role === "origin" ? (
+            <div className="network-summary__public">
+              <TextInput
+                id="publicWebUrl"
+                label={t("setup.configure.network.publicWebUrl")}
+                type="url"
+                value={publicWebUrl}
+                onChange={setPublicWebUrl}
+                placeholder="https://origin.example.com"
+                required
+              />
+              <TextInput
+                id="publicS3Url"
+                label={t("setup.configure.network.publicS3Url")}
+                type="url"
+                value={publicS3Url}
+                onChange={setPublicS3Url}
+                placeholder="https://s3.example.com"
+                required
+              />
+              <p className="network-summary__help">{t("setup.configure.network.publicEndpointsHelp")}</p>
+            </div>
+          ) : null}
+        </section>
 
         <section className="storage-summary" aria-labelledby="storage-summary-title">
           <div>
@@ -277,4 +326,14 @@ function CopyButton({ value, label }: { value: string; label: string }) {
       <Clipboard size={16} aria-hidden="true" />
     </button>
   );
+}
+
+function defaultPublicS3Url(internalS3Port: number): string {
+  if (!["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
+    return "";
+  }
+
+  const endpoint = new URL(window.location.origin);
+  endpoint.port = String(internalS3Port);
+  return endpoint.origin;
 }

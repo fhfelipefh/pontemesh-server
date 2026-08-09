@@ -7,7 +7,10 @@ export type CompleteSetupRequest = {
   role: "origin" | "replica-edge";
   adminUsername: string;
   adminPassword: string;
-  httpPort: number;
+  httpPort?: number;
+  s3Port?: number;
+  publicWebUrl?: string;
+  publicS3Url?: string;
   internalStoragePath?: string;
   originBaseUrl?: string;
   replicaId?: string;
@@ -17,6 +20,9 @@ export type CompleteSetupRequest = {
 
 export type SetupStatusResponse = {
   setupRequired: boolean;
+  serverVersion: string;
+  internalWebPort: number;
+  internalS3Port: number;
 };
 
 export type InitialS3AccessKey = {

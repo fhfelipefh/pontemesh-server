@@ -140,7 +140,12 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
     }
 
     if (path === "/api/setup/status") {
-      return json(route, { setupRequired: false });
+      return json(route, {
+        setupRequired: false,
+        serverVersion: "0.2.1",
+        internalWebPort: 8080,
+        internalS3Port: 9000
+      });
     }
 
     if (path === "/api/auth/me") {

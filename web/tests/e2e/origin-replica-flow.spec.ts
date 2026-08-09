@@ -29,7 +29,8 @@ test("validates real Origin + Replica/Edge hybrid flow", async ({ page, request 
     instanceName: "Ponte Mesh Origin E2E",
     role: "origin",
     username: "origin-admin",
-    password: adminPassword
+    password: adminPassword,
+    publicS3Url: originS3Url
   });
   await login(page, originUrl, "origin-admin", adminPassword);
   await expectDashboardRole(page, "origin");
@@ -193,6 +194,7 @@ type SetupOptions = {
   replicaPublicEndpoint?: string;
   replicaId?: string;
   replicaToken?: string;
+  publicS3Url?: string;
 };
 
 type AuthorizedSource = {
@@ -260,12 +262,14 @@ async function completeInitialSetup(page: Page, baseUrl: string, token: string, 
   await page.locator("#role").selectOption(options.role);
   await page.locator("#adminUsername").fill(options.username);
   await page.locator("#adminPassword").fill(options.password);
-  await page.locator("#httpPort").fill("8080");
   if (options.role === "replica-edge") {
     await page.locator("#originBaseUrl").fill(required(options.originBaseUrl));
     await page.locator("#replicaPublicEndpoint").fill(required(options.replicaPublicEndpoint));
     await page.locator("#replicaId").fill(required(options.replicaId));
     await page.locator("#replicaToken").fill(required(options.replicaToken));
+  } else {
+    await page.locator("#publicWebUrl").fill(baseUrl);
+    await page.locator("#publicS3Url").fill(required(options.publicS3Url));
   }
   await page.getByRole("button", { name: /finish|concluir|complete|finalizar/i }).click();
   await page.getByRole("button", { name: /login|entrar/i }).click();

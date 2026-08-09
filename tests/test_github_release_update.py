@@ -7,6 +7,7 @@ import json
 import pathlib
 import socketserver
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -90,6 +91,7 @@ class GithubReleaseUpdateTests(unittest.TestCase):
             )
             result = subprocess.run(
                 [
+                    sys.executable,
                     str(SCRIPT),
                     "--product",
                     "sdk",

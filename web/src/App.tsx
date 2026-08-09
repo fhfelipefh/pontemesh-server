@@ -17,13 +17,24 @@ import { UnlockPage } from "./pages/UnlockPage";
 function SetupRoutes() {
   const location = useLocation();
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
+  const [serverVersion, setServerVersion] = useState<string | null>(null);
+  const [internalWebPort, setInternalWebPort] = useState(8080);
+  const [internalS3Port, setInternalS3Port] = useState(9000);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoaded, setAuthLoaded] = useState(false);
 
   useEffect(() => {
     getSetupStatus()
-      .then((status) => setSetupRequired(status.setupRequired))
-      .catch(() => setSetupRequired(false));
+      .then((status) => {
+        setSetupRequired(status.setupRequired);
+        setServerVersion(status.serverVersion);
+        setInternalWebPort(status.internalWebPort);
+        setInternalS3Port(status.internalS3Port);
+      })
+      .catch(() => {
+        setSetupRequired(false);
+        setServerVersion(null);
+      });
   }, [location.pathname]);
 
   useEffect(() => {
@@ -78,11 +89,17 @@ function SetupRoutes() {
       />
       <Route
         path="/setup"
-        element={setupRequired ? <UnlockPage /> : <Navigate to="/" replace />}
+        element={setupRequired ? <UnlockPage serverVersion={serverVersion} /> : <Navigate to="/" replace />}
       />
       <Route
         path="/setup/configure"
-        element={setupRequired ? <ConfigurePage /> : <Navigate to="/" replace />}
+        element={setupRequired ? (
+          <ConfigurePage
+            serverVersion={serverVersion}
+            internalWebPort={internalWebPort}
+            internalS3Port={internalS3Port}
+          />
+        ) : <Navigate to="/" replace />}
       />
       <Route
         path="/login"

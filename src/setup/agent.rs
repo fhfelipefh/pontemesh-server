@@ -154,6 +154,9 @@ pub async fn run(paths: PontemeshHome, options: SetupAgentOptions) -> anyhow::Re
                     admin_username: options.admin_username.clone(),
                     admin_password: generated_password.clone(),
                     http_port: Some(options.http_port),
+                    s3_port: None,
+                    public_web_url: None,
+                    public_s3_url: None,
                     internal_storage_path: options.storage_path.clone(),
                     origin_base_url: None,
                     replica_id: None,
@@ -206,7 +209,7 @@ pub async fn run(paths: PontemeshHome, options: SetupAgentOptions) -> anyhow::Re
         .await?;
 
     let web_port = config::load_http_bind_addr(&paths)?.port();
-    let s3_port = config::default_s3_bind_addr().port();
+    let s3_port = config::load_s3_bind_addr(&paths)?.port();
     let web_url = format!("http://127.0.0.1:{web_port}");
     let mcp_url = format!("{web_url}{}", settings.endpoint_path);
     let connection_config = mcp_connection_config(&mcp_url, &created_mcp_token.secret);
