@@ -61,6 +61,27 @@ export type UpdateBucketPolicyInput = {
   s3EventNotifications: unknown;
 };
 
+export type BucketPolicyDefaultsInput = Pick<
+  UpdateBucketPolicyInput,
+  | "accessPackageTtlSeconds"
+  | "fragmentSizeBytes"
+  | "allowReplicaEdge"
+  | "allowPeerSharing"
+  | "sourceSelectionStrategy"
+  | "fragmentPriorityStrategy"
+  | "failureThreshold"
+  | "fallbackMode"
+>;
+
+export type BucketPolicyDefaults = BucketPolicyDefaultsInput & {
+  updatedAt: string;
+};
+
+export type BulkBucketPolicyResult = {
+  updatedBuckets: string[];
+  updatedCount: number;
+};
+
 export type ObjectSummary = {
   key: string;
   sizeBytes: number;
@@ -134,6 +155,37 @@ export async function updateBucketPolicy(bucketName: string, policy: UpdateBucke
   });
   await ensureOk(response);
   return response.json() as Promise<BucketPolicy>;
+}
+
+export async function getBucketPolicyDefaults(): Promise<BucketPolicyDefaults> {
+  const response = await fetch("/api/admin/bucket-policy-defaults", {
+    headers: { accept: "application/json" }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<BucketPolicyDefaults>;
+}
+
+export async function updateBucketPolicyDefaults(policy: BucketPolicyDefaultsInput): Promise<BucketPolicyDefaults> {
+  const response = await fetch("/api/admin/bucket-policy-defaults", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(policy)
+  });
+  await ensureOk(response);
+  return response.json() as Promise<BucketPolicyDefaults>;
+}
+
+export async function bulkUpdateBucketPolicies(
+  target: { allBuckets: boolean; bucketNames: string[] },
+  policy: BucketPolicyDefaultsInput
+): Promise<BulkBucketPolicyResult> {
+  const response = await fetch("/api/admin/buckets/bulk-policy", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...target, policy })
+  });
+  await ensureOk(response);
+  return response.json() as Promise<BulkBucketPolicyResult>;
 }
 
 export async function listObjects(bucketName: string, params: PageParams): Promise<PaginatedResponse<ObjectSummary>> {

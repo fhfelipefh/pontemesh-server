@@ -22,6 +22,12 @@ poderia ser substituído por:
 endpoint = https://origin-s3.exemplo.com
 ```
 
+Clientes conectados a um endereço IP ou a um serviço sem DNS wildcard devem usar
+URLs em estilo path (`https://endpoint/bucket/object`). O estilo virtual-host
+(`https://bucket.endpoint/object`) requer DNS e certificado válidos para cada
+subdomínio. No WinSCP, selecione **Advanced Site Settings > S3 > URL style >
+Path** para endpoints Ponte Mesh publicados por IP.
+
 Desde que a aplicação utilize apenas o subconjunto suportado, a lógica principal de envio, leitura e consulta de objetos deve permanecer familiar.
 
 A diferença está no comportamento interno do Origin e do SDK. Enquanto uma API S3 tradicional entrega o objeto diretamente a partir do serviço de armazenamento, o Ponte Mesh pode aplicar autorização, manifesto, fragmentação, validação de integridade, seleção de fontes e fallback.
@@ -43,6 +49,9 @@ O subconjunto S3-like deve contemplar, no mínimo:
 * Delete Objects em lote;
 * DELETE Object como deleção lógica;
 * URL temporária ou mecanismo equivalente.
+
+`CreateBucket` aceita tanto `PUT /{bucket}` quanto `PUT /{bucket}/`, pois alguns
+clientes S3-compatible, incluindo o WinSCP, preservam a barra final.
 
 O objetivo do projeto é evoluir para uma compatibilidade S3 ampla, mantendo a
 separação entre a interface S3-compatible e os contratos próprios do Ponte Mesh.

@@ -239,6 +239,9 @@ GET /api/admin/metrics/objects
 GET /api/admin/metrics/replicas/{replicaId}
 GET /api/admin/buckets/{bucket}/policy
 PUT /api/admin/buckets/{bucket}/policy
+GET /api/admin/bucket-policy-defaults
+PUT /api/admin/bucket-policy-defaults
+PUT /api/admin/buckets/bulk-policy
 GET /api/admin/application-credentials
 POST /api/admin/application-credentials
 POST /api/admin/application-credentials/{id}/revoke
@@ -250,6 +253,11 @@ POST /api/admin/buckets/{bucket}/object-revocations/{objectKey}
 ```
 
 Essas rotas exigem sessão administrativa do painel.
+
+Os padrões da instância abrangem somente opções próprias da distribuição
+híbrida do Ponte Mesh. Novos buckets recebem uma cópia desses valores. A edição
+em massa aplica o mesmo conjunto a todos os buckets ou a uma lista explícita,
+preservando opções S3 e políticas específicas que não façam parte do pedido.
 
 `GET /api/admin/configuration` exporta configurações operacionais sem segredos,
 incluindo settings MCP e políticas de buckets. `POST /api/admin/configuration`

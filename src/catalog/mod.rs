@@ -173,6 +173,33 @@ pub struct BucketPolicyUpdate {
     pub s3_event_notifications: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketPolicyDefaults {
+    pub access_package_ttl_seconds: i64,
+    pub fragment_size_bytes: i64,
+    pub allow_replica_edge: bool,
+    pub allow_peer_sharing: bool,
+    pub source_selection_strategy: String,
+    pub fragment_priority_strategy: String,
+    pub failure_threshold: i64,
+    pub fallback_mode: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BucketPolicyDefaultsUpdate {
+    pub access_package_ttl_seconds: i64,
+    pub fragment_size_bytes: i64,
+    pub allow_replica_edge: bool,
+    pub allow_peer_sharing: bool,
+    pub source_selection_strategy: String,
+    pub fragment_priority_strategy: String,
+    pub failure_threshold: i64,
+    pub fallback_mode: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewObject {
     pub bucket_name: String,
@@ -1119,8 +1146,18 @@ impl Catalog {
 
         query(
             r#"
-            INSERT INTO bucket_policies (bucket_id)
-            VALUES ($1::uuid)
+            INSERT INTO bucket_policies (
+                bucket_id, access_package_ttl_seconds, fragment_size_bytes,
+                allow_replica_edge, allow_peer_sharing,
+                source_selection_strategy, fragment_priority_strategy,
+                failure_threshold, fallback_mode
+            )
+            SELECT $1::uuid, access_package_ttl_seconds, fragment_size_bytes,
+                allow_replica_edge, allow_peer_sharing,
+                source_selection_strategy, fragment_priority_strategy,
+                failure_threshold, fallback_mode
+            FROM bucket_policy_defaults
+            WHERE singleton = TRUE
             ON CONFLICT (bucket_id) DO NOTHING
             "#,
         )
@@ -1219,6 +1256,129 @@ impl Catalog {
             Some(row) => Ok(bucket_policy_from_row(row)),
             None => bail!("bucket not found: {bucket_name}"),
         }
+    }
+
+    pub async fn get_bucket_policy_defaults(&self) -> anyhow::Result<BucketPolicyDefaults> {
+        let row = query(
+            r#"
+            SELECT access_package_ttl_seconds, fragment_size_bytes,
+                allow_replica_edge, allow_peer_sharing,
+                source_selection_strategy, fragment_priority_strategy,
+                failure_threshold, fallback_mode, updated_at
+            FROM bucket_policy_defaults
+            WHERE singleton = TRUE
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to load bucket policy defaults")?;
+        Ok(bucket_policy_defaults_from_row(row))
+    }
+
+    pub async fn update_bucket_policy_defaults(
+        &self,
+        update: BucketPolicyDefaultsUpdate,
+    ) -> anyhow::Result<BucketPolicyDefaults> {
+        validate_bucket_policy_defaults(&update)?;
+        let row = query(
+            r#"
+            UPDATE bucket_policy_defaults SET
+                access_package_ttl_seconds = $1,
+                fragment_size_bytes = $2,
+                allow_replica_edge = $3,
+                allow_peer_sharing = $4,
+                source_selection_strategy = $5,
+                fragment_priority_strategy = $6,
+                failure_threshold = $7,
+                fallback_mode = $8,
+                updated_at = now()
+            WHERE singleton = TRUE
+            RETURNING access_package_ttl_seconds, fragment_size_bytes,
+                allow_replica_edge, allow_peer_sharing,
+                source_selection_strategy, fragment_priority_strategy,
+                failure_threshold, fallback_mode, updated_at
+            "#,
+        )
+        .bind(update.access_package_ttl_seconds)
+        .bind(update.fragment_size_bytes)
+        .bind(update.allow_replica_edge)
+        .bind(update.allow_peer_sharing)
+        .bind(&update.source_selection_strategy)
+        .bind(&update.fragment_priority_strategy)
+        .bind(update.failure_threshold)
+        .bind(&update.fallback_mode)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to update bucket policy defaults")?;
+        Ok(bucket_policy_defaults_from_row(row))
+    }
+
+    pub async fn bulk_update_bucket_policy(
+        &self,
+        all_buckets: bool,
+        bucket_names: &[String],
+        update: BucketPolicyDefaultsUpdate,
+    ) -> anyhow::Result<Vec<String>> {
+        validate_bucket_policy_defaults(&update)?;
+        let mut names = bucket_names.to_vec();
+        names.sort();
+        names.dedup();
+        if !all_buckets && names.is_empty() {
+            bail!("select at least one bucket");
+        }
+        for name in &names {
+            validate_bucket_name(name)?;
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin bulk policy transaction")?;
+        let rows = query(
+            r#"
+            UPDATE bucket_policies p SET
+                access_package_ttl_seconds = $1,
+                fragment_size_bytes = $2,
+                allow_replica_edge = $3,
+                allow_peer_sharing = $4,
+                source_selection_strategy = $5,
+                fragment_priority_strategy = $6,
+                failure_threshold = $7,
+                fallback_mode = $8,
+                updated_at = now()
+            FROM buckets b
+            WHERE p.bucket_id = b.id
+              AND b.deleted_at IS NULL
+              AND ($9 OR b.name = ANY($10))
+            RETURNING b.name
+            "#,
+        )
+        .bind(update.access_package_ttl_seconds)
+        .bind(update.fragment_size_bytes)
+        .bind(update.allow_replica_edge)
+        .bind(update.allow_peer_sharing)
+        .bind(&update.source_selection_strategy)
+        .bind(&update.fragment_priority_strategy)
+        .bind(update.failure_threshold)
+        .bind(&update.fallback_mode)
+        .bind(all_buckets)
+        .bind(&names)
+        .fetch_all(&mut *tx)
+        .await
+        .context("failed to update bucket policies in bulk")?;
+        let mut updated_names = rows
+            .into_iter()
+            .map(|row| row.get::<String, _>("name"))
+            .collect::<Vec<_>>();
+        updated_names.sort();
+        if !all_buckets && updated_names.len() != names.len() {
+            bail!("one or more selected buckets do not exist");
+        }
+        tx.commit()
+            .await
+            .context("failed to commit bulk policy transaction")?;
+        Ok(updated_names)
     }
 
     pub async fn list_bucket_policies(&self) -> anyhow::Result<Vec<BucketPolicy>> {
@@ -5279,6 +5439,20 @@ fn bucket_policy_from_row(row: PgRow) -> BucketPolicy {
     }
 }
 
+fn bucket_policy_defaults_from_row(row: PgRow) -> BucketPolicyDefaults {
+    BucketPolicyDefaults {
+        access_package_ttl_seconds: row.get("access_package_ttl_seconds"),
+        fragment_size_bytes: row.get("fragment_size_bytes"),
+        allow_replica_edge: row.get("allow_replica_edge"),
+        allow_peer_sharing: row.get("allow_peer_sharing"),
+        source_selection_strategy: row.get("source_selection_strategy"),
+        fragment_priority_strategy: row.get("fragment_priority_strategy"),
+        failure_threshold: row.get("failure_threshold"),
+        fallback_mode: row.get("fallback_mode"),
+        updated_at: format_datetime(row.get("updated_at")),
+    }
+}
+
 fn application_summary_from_row(row: PgRow) -> anyhow::Result<ApplicationCredentialSummary> {
     Ok(ApplicationCredentialSummary {
         id: row.get("id"),
@@ -5462,34 +5636,13 @@ fn format_datetime(value: chrono::DateTime<chrono::Utc>) -> String {
 }
 
 fn validate_bucket_policy(update: &BucketPolicyUpdate) -> anyhow::Result<()> {
-    if !(60..=3600).contains(&update.access_package_ttl_seconds) {
-        bail!("accessPackageTtlSeconds must be between 60 and 3600");
-    }
-    if !(1024..=134_217_728).contains(&update.fragment_size_bytes) {
-        bail!("fragmentSizeBytes must be between 1024 and 134217728");
-    }
-    validate_policy_enum(
-        "sourceSelectionStrategy",
+    validate_hybrid_policy(
+        update.access_package_ttl_seconds,
+        update.fragment_size_bytes,
         &update.source_selection_strategy,
-        &[
-            "ORIGIN_REPLICA_EDGE",
-            "ORIGIN_ONLY",
-            "REPLICA_EDGE_FIRST",
-            "PEER_FIRST",
-        ],
-    )?;
-    validate_policy_enum(
-        "fragmentPriorityStrategy",
         &update.fragment_priority_strategy,
-        &["MANIFEST_ORDER", "INITIAL_FIRST", "RAREST_FIRST"],
-    )?;
-    if !(1..=20).contains(&update.failure_threshold) {
-        bail!("failureThreshold must be between 1 and 20");
-    }
-    validate_policy_enum(
-        "fallbackMode",
+        update.failure_threshold,
         &update.fallback_mode,
-        &["ORIGIN_RANGE", "ORIGIN_FULL_OBJECT", "DISABLED"],
     )?;
     if !(1..=10_000).contains(&update.s3_list_default_max_keys) {
         bail!("s3ListDefaultMaxKeys must be between 1 and 10000");
@@ -5527,6 +5680,57 @@ fn validate_bucket_policy(update: &BucketPolicyUpdate) -> anyhow::Result<()> {
     }
     validate_lifecycle_rules(&update.s3_lifecycle_rules)?;
     validate_s3_resource_policy(&update.s3_resource_policy)?;
+    Ok(())
+}
+
+fn validate_bucket_policy_defaults(update: &BucketPolicyDefaultsUpdate) -> anyhow::Result<()> {
+    validate_hybrid_policy(
+        update.access_package_ttl_seconds,
+        update.fragment_size_bytes,
+        &update.source_selection_strategy,
+        &update.fragment_priority_strategy,
+        update.failure_threshold,
+        &update.fallback_mode,
+    )
+}
+
+fn validate_hybrid_policy(
+    access_package_ttl_seconds: i64,
+    fragment_size_bytes: i64,
+    source_selection_strategy: &str,
+    fragment_priority_strategy: &str,
+    failure_threshold: i64,
+    fallback_mode: &str,
+) -> anyhow::Result<()> {
+    if !(60..=3600).contains(&access_package_ttl_seconds) {
+        bail!("accessPackageTtlSeconds must be between 60 and 3600");
+    }
+    if !(1024..=134_217_728).contains(&fragment_size_bytes) {
+        bail!("fragmentSizeBytes must be between 1024 and 134217728");
+    }
+    validate_policy_enum(
+        "sourceSelectionStrategy",
+        source_selection_strategy,
+        &[
+            "ORIGIN_REPLICA_EDGE",
+            "ORIGIN_ONLY",
+            "REPLICA_EDGE_FIRST",
+            "PEER_FIRST",
+        ],
+    )?;
+    validate_policy_enum(
+        "fragmentPriorityStrategy",
+        fragment_priority_strategy,
+        &["MANIFEST_ORDER", "INITIAL_FIRST", "RAREST_FIRST"],
+    )?;
+    if !(1..=20).contains(&failure_threshold) {
+        bail!("failureThreshold must be between 1 and 20");
+    }
+    validate_policy_enum(
+        "fallbackMode",
+        fallback_mode,
+        &["ORIGIN_RANGE", "ORIGIN_FULL_OBJECT", "DISABLED"],
+    )?;
     Ok(())
 }
 

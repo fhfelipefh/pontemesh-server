@@ -4,20 +4,25 @@ import {
   Plus,
   Save,
   Search,
+  Settings2,
   Trash2,
   X
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
+  BucketPolicyDefaultsInput,
   BucketPolicy,
   BucketSummary,
   PaginatedResponse,
+  bulkUpdateBucketPolicies,
   createBucket,
   deleteBucket,
   deleteObject,
   getBucketPolicy,
+  getBucketPolicyDefaults,
   listBuckets,
-  updateBucketPolicy
+  updateBucketPolicy,
+  updateBucketPolicyDefaults
 } from "../api/bucketsApi";
 import { Button } from "../components/Button";
 import { ConfirmDialog, EmptyState, PageSizeSelect, Pagination } from "../components/AdminListControls";
@@ -49,6 +54,8 @@ export function BucketsPage() {
   const [confirmation, setConfirmation] = useState<ConfirmationState>(null);
   const [objectRefreshNonce, setObjectRefreshNonce] = useState(0);
   const [drawerActionError, setDrawerActionError] = useState("");
+  const [selectedBuckets, setSelectedBuckets] = useState<Set<string>>(new Set());
+  const [policyManagerOpen, setPolicyManagerOpen] = useState(false);
 
   const refreshBuckets = useCallback(async () => {
     setLoadingBuckets(true);
@@ -126,6 +133,11 @@ export function BucketsPage() {
     setBucketError("");
     try {
       await deleteBucket(bucket);
+      setSelectedBuckets((current) => {
+        const next = new Set(current);
+        next.delete(bucket);
+        return next;
+      });
       setConfirmation(null);
       if (activeBucket?.name === bucket) {
         setActiveBucket(null);
@@ -138,6 +150,8 @@ export function BucketsPage() {
 
   const bucketSearchActive = bucketSearch.trim().length > 0;
   const hasBuckets = bucketPage.items.length > 0;
+  const visibleBucketNames = bucketPage.items.map((bucket) => bucket.name);
+  const allVisibleSelected = visibleBucketNames.length > 0 && visibleBucketNames.every((name) => selectedBuckets.has(name));
 
   return (
     <div className="buckets-page">
@@ -146,15 +160,26 @@ export function BucketsPage() {
           <div>
             <h1>{t("setup.buckets.title")}</h1>
           </div>
-          <Button
-            className="buckets-create-button"
-            data-testid="create-bucket-button"
-            type="button"
-            icon={<Plus size={17} aria-hidden="true" />}
-            onClick={() => setCreateModalOpen(true)}
-          >
-            {t("setup.buckets.create")}
-          </Button>
+          <div className="buckets-header-actions">
+            <Button
+              className="buckets-policy-button"
+              data-testid="bucket-policy-manager-button"
+              type="button"
+              icon={<Settings2 size={17} aria-hidden="true" />}
+              onClick={() => setPolicyManagerOpen(true)}
+            >
+              {t("setup.buckets.managePolicies")}
+            </Button>
+            <Button
+              className="buckets-create-button"
+              data-testid="create-bucket-button"
+              type="button"
+              icon={<Plus size={17} aria-hidden="true" />}
+              onClick={() => setCreateModalOpen(true)}
+            >
+              {t("setup.buckets.create")}
+            </Button>
+          </div>
         </div>
 
         <div className="buckets-toolbar">
@@ -195,6 +220,23 @@ export function BucketsPage() {
           ) : (
             <div className="buckets-table" data-testid="bucket-list" role="table" aria-label={t("setup.buckets.title")}>
               <div className="buckets-table__head" role="row">
+                <span role="columnheader" className="buckets-table__select">
+                  <input
+                    type="checkbox"
+                    aria-label={t("setup.buckets.selectVisible")}
+                    checked={allVisibleSelected}
+                    onChange={(event) => {
+                      setSelectedBuckets((current) => {
+                        const next = new Set(current);
+                        for (const name of visibleBucketNames) {
+                          if (event.target.checked) next.add(name);
+                          else next.delete(name);
+                        }
+                        return next;
+                      });
+                    }}
+                  />
+                </span>
                 <span role="columnheader">{t("setup.buckets.name")}</span>
                 <span role="columnheader">{t("setup.buckets.objectCount")}</span>
                 <span role="columnheader">{t("setup.buckets.totalSize")}</span>
@@ -203,6 +245,21 @@ export function BucketsPage() {
               </div>
               {bucketPage.items.map((bucket) => (
                 <div className="buckets-table__row" data-testid="bucket-row" role="row" key={bucket.name}>
+                  <span role="cell" className="buckets-table__select">
+                    <input
+                      type="checkbox"
+                      aria-label={t("setup.buckets.selectBucket", { name: bucket.name })}
+                      checked={selectedBuckets.has(bucket.name)}
+                      onChange={(event) => {
+                        setSelectedBuckets((current) => {
+                          const next = new Set(current);
+                          if (event.target.checked) next.add(bucket.name);
+                          else next.delete(bucket.name);
+                          return next;
+                        });
+                      }}
+                    />
+                  </span>
                   <span role="cell" title={bucket.name}>{bucket.name}</span>
                   <span role="cell">{bucket.objectCount}</span>
                   <span role="cell">{formatBytes(bucket.totalBytes)}</span>
@@ -251,6 +308,17 @@ export function BucketsPage() {
           refreshNonce={objectRefreshNonce}
           externalError={drawerActionError}
           onConfirmDeleteObject={(objectKey) => setConfirmation({ kind: "object", bucket: activeBucket.name, objectKey })}
+        />
+      ) : null}
+
+      {policyManagerOpen ? (
+        <BucketPolicyManager
+          selectedBuckets={[...selectedBuckets].sort()}
+          onClose={() => setPolicyManagerOpen(false)}
+          onApplied={async () => {
+            setPolicyManagerOpen(false);
+            await refreshBuckets();
+          }}
         />
       ) : null}
 
@@ -336,6 +404,217 @@ export function BucketsPage() {
       setDrawerActionError(deleteError instanceof Error ? deleteError.message : t("setup.objects.deleteFailed"));
     }
   }
+}
+
+type BucketPolicyManagerProps = {
+  selectedBuckets: string[];
+  onClose: () => void;
+  onApplied: () => Promise<void>;
+};
+
+function BucketPolicyManager({ selectedBuckets, onClose, onApplied }: BucketPolicyManagerProps) {
+  const { t } = useTranslation();
+  const [policy, setPolicy] = useState<BucketPolicyDefaultsInput | null>(null);
+  const [scope, setScope] = useState<"selected" | "all">(selectedBuckets.length > 0 ? "selected" : "all");
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState<"defaults" | "buckets" | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    getBucketPolicyDefaults()
+      .then((defaults) => {
+        if (active) setPolicy(defaults);
+      })
+      .catch((loadError) => {
+        if (active) setError(loadError instanceof Error ? loadError.message : t("setup.buckets.defaultsLoadFailed"));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [t]);
+
+  async function saveDefaults() {
+    if (!policy) return;
+    setSubmitting("defaults");
+    setError("");
+    setNotice("");
+    try {
+      const saved = await updateBucketPolicyDefaults(policy);
+      setPolicy(saved);
+      setNotice(t("setup.buckets.defaultsSaved"));
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : t("setup.buckets.defaultsSaveFailed"));
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
+  async function applyToBuckets(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!policy || (scope === "selected" && selectedBuckets.length === 0)) return;
+    setSubmitting("buckets");
+    setError("");
+    setNotice("");
+    try {
+      await bulkUpdateBucketPolicies(
+        { allBuckets: scope === "all", bucketNames: scope === "selected" ? selectedBuckets : [] },
+        policy
+      );
+      await onApplied();
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : t("setup.buckets.bulkSaveFailed"));
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
+  return (
+    <div className="settings-modal-backdrop" data-testid="modal-backdrop" role="presentation">
+      <form
+        className="settings-modal bucket-policy-manager"
+        data-testid="bucket-policy-manager-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bucket-policy-manager-title"
+        onSubmit={applyToBuckets}
+      >
+        <div className="settings-modal__header">
+          <div>
+            <h3 id="bucket-policy-manager-title">{t("setup.buckets.managePolicies")}</h3>
+            <p>{t("setup.buckets.managePoliciesDescription")}</p>
+          </div>
+          <button className="settings-modal__close" type="button" aria-label={t("setup.common.close")} onClick={onClose}>
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+
+        {loading ? <div className="admin-loading">{t("setup.buckets.loadingDefaults")}</div> : null}
+        <ErrorMessage message={error} />
+        {notice ? <p className="settings-success" role="status">{notice}</p> : null}
+
+        {policy ? (
+          <>
+            <section className="bucket-policy-manager__section">
+              <h4>{t("setup.buckets.defaultsTitle")}</h4>
+              <p>{t("setup.buckets.defaultsDescription")}</p>
+              <HybridPolicyFields policy={policy} onChange={setPolicy} idPrefix="bucket-defaults" />
+            </section>
+
+            <section className="bucket-policy-manager__section">
+              <h4>{t("setup.buckets.applyTitle")}</h4>
+              <div className="bucket-policy-manager__scope">
+                <label>
+                  <input
+                    type="radio"
+                    name="bucket-policy-scope"
+                    value="selected"
+                    checked={scope === "selected"}
+                    disabled={selectedBuckets.length === 0}
+                    onChange={() => setScope("selected")}
+                  />
+                  <span>{t("setup.buckets.applySelected", { count: selectedBuckets.length })}</span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="bucket-policy-scope"
+                    value="all"
+                    checked={scope === "all"}
+                    onChange={() => setScope("all")}
+                  />
+                  <span>{t("setup.buckets.applyAll")}</span>
+                </label>
+              </div>
+            </section>
+
+            <div className="settings-modal__actions bucket-policy-manager__actions">
+              <button className="settings-secondary-button" type="button" onClick={onClose}>
+                <X size={16} aria-hidden="true" />
+                {t("setup.common.cancel")}
+              </button>
+              <Button
+                type="button"
+                loading={submitting === "defaults"}
+                disabled={submitting !== null}
+                icon={<Save size={17} aria-hidden="true" />}
+                onClick={() => void saveDefaults()}
+              >
+                {t("setup.buckets.saveDefaults")}
+              </Button>
+              <Button
+                type="submit"
+                loading={submitting === "buckets"}
+                disabled={submitting !== null || (scope === "selected" && selectedBuckets.length === 0)}
+                icon={<Settings2 size={17} aria-hidden="true" />}
+              >
+                {t("setup.buckets.applyPolicy")}
+              </Button>
+            </div>
+          </>
+        ) : null}
+      </form>
+    </div>
+  );
+}
+
+type HybridPolicyFieldsProps = {
+  policy: BucketPolicyDefaultsInput;
+  onChange: (policy: BucketPolicyDefaultsInput) => void;
+  idPrefix: string;
+};
+
+function HybridPolicyFields({ policy, onChange, idPrefix }: HybridPolicyFieldsProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <FormGrid columns={4}>
+        <FormField label={t("setup.buckets.accessPackageTtl")} htmlFor={`${idPrefix}-ttl`}>
+          <input id={`${idPrefix}-ttl`} type="number" min={60} max={3600} required value={policy.accessPackageTtlSeconds} onChange={(event) => onChange({ ...policy, accessPackageTtlSeconds: Number(event.target.value) })} />
+        </FormField>
+        <FormField label={t("setup.buckets.fragmentSize")} htmlFor={`${idPrefix}-fragment-size`}>
+          <input id={`${idPrefix}-fragment-size`} type="number" min={1024} max={134217728} required value={policy.fragmentSizeBytes} onChange={(event) => onChange({ ...policy, fragmentSizeBytes: Number(event.target.value) })} />
+        </FormField>
+        <FormField label={t("setup.buckets.sourceSelection")} htmlFor={`${idPrefix}-source`}>
+          <select id={`${idPrefix}-source`} value={policy.sourceSelectionStrategy} onChange={(event) => onChange({ ...policy, sourceSelectionStrategy: event.target.value })}>
+            <option value="ORIGIN_REPLICA_EDGE">{t("setup.buckets.sourceOriginReplica")}</option>
+            <option value="ORIGIN_ONLY">{t("setup.buckets.sourceOriginOnly")}</option>
+            <option value="REPLICA_EDGE_FIRST">{t("setup.buckets.sourceReplicaFirst")}</option>
+            <option value="PEER_FIRST">{t("setup.buckets.sourcePeerFirst")}</option>
+          </select>
+        </FormField>
+        <FormField label={t("setup.buckets.fragmentPriority")} htmlFor={`${idPrefix}-priority`}>
+          <select id={`${idPrefix}-priority`} value={policy.fragmentPriorityStrategy} onChange={(event) => onChange({ ...policy, fragmentPriorityStrategy: event.target.value })}>
+            <option value="MANIFEST_ORDER">{t("setup.buckets.priorityManifest")}</option>
+            <option value="INITIAL_FIRST">{t("setup.buckets.priorityInitial")}</option>
+            <option value="RAREST_FIRST">{t("setup.buckets.priorityRarest")}</option>
+          </select>
+        </FormField>
+        <FormField label={t("setup.buckets.failureThreshold")} htmlFor={`${idPrefix}-failure-threshold`}>
+          <input id={`${idPrefix}-failure-threshold`} type="number" min={1} max={20} required value={policy.failureThreshold} onChange={(event) => onChange({ ...policy, failureThreshold: Number(event.target.value) })} />
+        </FormField>
+        <FormField label={t("setup.buckets.fallbackMode")} htmlFor={`${idPrefix}-fallback`}>
+          <select id={`${idPrefix}-fallback`} value={policy.fallbackMode} onChange={(event) => onChange({ ...policy, fallbackMode: event.target.value })}>
+            <option value="ORIGIN_RANGE">{t("setup.buckets.fallbackRange")}</option>
+            <option value="ORIGIN_FULL_OBJECT">{t("setup.buckets.fallbackFull")}</option>
+            <option value="DISABLED">{t("setup.buckets.fallbackDisabled")}</option>
+          </select>
+        </FormField>
+      </FormGrid>
+      <CheckboxGrid columns={2}>
+        <CheckboxField label={t("setup.buckets.allowReplicaEdge")}>
+          <input type="checkbox" checked={policy.allowReplicaEdge} onChange={(event) => onChange({ ...policy, allowReplicaEdge: event.target.checked })} />
+        </CheckboxField>
+        <CheckboxField label={t("setup.buckets.allowPeerSharing")}>
+          <input type="checkbox" checked={policy.allowPeerSharing} onChange={(event) => onChange({ ...policy, allowPeerSharing: event.target.checked })} />
+        </CheckboxField>
+      </CheckboxGrid>
+    </>
+  );
 }
 
 type BucketDrawerProps = {

@@ -1,7 +1,10 @@
 use crate::{
     audit,
     auth::AdminSession,
-    catalog::{self, BucketPolicyUpdate, BucketSummary, NewObject, ObjectSummary, ObjectTotals},
+    catalog::{
+        self, BucketPolicyDefaultsUpdate, BucketPolicyUpdate, BucketSummary, NewObject,
+        ObjectSummary, ObjectTotals,
+    },
     config::{self, InstanceRole},
     http::AppState,
     security::s3_secret::s3_secret_encryption_key,
@@ -113,6 +116,23 @@ pub struct UpdateBucketPolicyRequest {
     s3_lifecycle_rules: Option<serde_json::Value>,
     s3_resource_policy: Option<serde_json::Value>,
     s3_event_notifications: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkUpdateBucketPoliciesRequest {
+    #[serde(default)]
+    all_buckets: bool,
+    #[serde(default)]
+    bucket_names: Vec<String>,
+    policy: BucketPolicyDefaultsUpdate,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BulkUpdateBucketPoliciesResponse {
+    updated_buckets: Vec<String>,
+    updated_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -629,6 +649,96 @@ pub async fn get_bucket_policy(
 ) -> Response {
     match state.catalog.get_bucket_policy(&bucket_name).await {
         Ok(policy) => Json(policy).into_response(),
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn get_bucket_policy_defaults(State(state): State<AppState>) -> Response {
+    match state.catalog.get_bucket_policy_defaults().await {
+        Ok(defaults) => Json(defaults).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn update_bucket_policy_defaults(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<BucketPolicyDefaultsUpdate>,
+) -> Response {
+    match state.catalog.update_bucket_policy_defaults(payload).await {
+        Ok(defaults) => {
+            audit::event(
+                "bucket_policy_defaults_updated",
+                Some(&session.username),
+                "success",
+                "instance bucket policy defaults updated",
+            );
+            record_admin_audit(
+                &state,
+                "bucket_policy_defaults_updated",
+                &session.username,
+                "success",
+                "instance bucket policy defaults updated",
+            )
+            .await;
+            Json(defaults).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn bulk_update_bucket_policies(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<BulkUpdateBucketPoliciesRequest>,
+) -> Response {
+    let policy_detail =
+        serde_json::to_value(&payload.policy).unwrap_or_else(|_| serde_json::json!({}));
+    match state
+        .catalog
+        .bulk_update_bucket_policy(payload.all_buckets, &payload.bucket_names, payload.policy)
+        .await
+    {
+        Ok(updated_buckets) => {
+            for bucket_name in &updated_buckets {
+                if let Err(error) = state
+                    .catalog
+                    .record_replica_policy_update_for_bucket(
+                        bucket_name,
+                        None,
+                        "BUCKET_POLICY_UPDATED",
+                        policy_detail.clone(),
+                    )
+                    .await
+                {
+                    audit::failure(
+                        "replica_policy_update_persist_failed",
+                        Some(&session.username),
+                        &error.to_string(),
+                    );
+                }
+            }
+            let detail = format!("updatedBuckets={}", updated_buckets.len());
+            audit::event(
+                "bucket_policies_bulk_updated",
+                Some(&session.username),
+                "success",
+                &detail,
+            );
+            record_admin_audit(
+                &state,
+                "bucket_policies_bulk_updated",
+                &session.username,
+                "success",
+                &detail,
+            )
+            .await;
+            Json(BulkUpdateBucketPoliciesResponse {
+                updated_count: updated_buckets.len(),
+                updated_buckets,
+            })
+            .into_response()
+        }
         Err(error) => bad_request(error),
     }
 }
