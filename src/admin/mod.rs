@@ -84,6 +84,7 @@ pub struct ListObjectsQuery {
 pub struct CreateApplicationCredentialRequest {
     name: String,
     scopes: Option<Vec<String>>,
+    preset: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -681,8 +682,12 @@ pub async fn update_bucket_policy(
         s3_object_lock_default_retain_days: payload
             .s3_object_lock_default_retain_days
             .or(current.s3_object_lock_default_retain_days),
-        s3_lifecycle_rules: payload.s3_lifecycle_rules.unwrap_or(current.s3_lifecycle_rules),
-        s3_resource_policy: payload.s3_resource_policy.unwrap_or(current.s3_resource_policy),
+        s3_lifecycle_rules: payload
+            .s3_lifecycle_rules
+            .unwrap_or(current.s3_lifecycle_rules),
+        s3_resource_policy: payload
+            .s3_resource_policy
+            .unwrap_or(current.s3_resource_policy),
         s3_event_notifications: payload
             .s3_event_notifications
             .unwrap_or(current.s3_event_notifications),
@@ -925,7 +930,10 @@ pub async fn create_application_credential(
     Extension(session): Extension<AdminSession>,
     Json(payload): Json<CreateApplicationCredentialRequest>,
 ) -> Response {
-    let scopes = payload.scopes.unwrap_or_else(default_application_scopes);
+    let scopes = match resolve_application_scopes(payload.scopes, payload.preset.as_deref()) {
+        Ok(scopes) => scopes,
+        Err(error) => return bad_request(error),
+    };
     match state
         .catalog
         .create_application_credential(&payload.name, scopes)
@@ -1490,6 +1498,27 @@ fn default_application_scopes() -> Vec<String> {
     ]
 }
 
+fn downloader_application_scopes() -> Vec<String> {
+    default_application_scopes()
+        .into_iter()
+        .filter(|scope| scope != "origin:objects:write")
+        .collect()
+}
+
+fn resolve_application_scopes(
+    scopes: Option<Vec<String>>,
+    preset: Option<&str>,
+) -> anyhow::Result<Vec<String>> {
+    if let Some(scopes) = scopes {
+        return Ok(scopes);
+    }
+    match preset.unwrap_or("downloader") {
+        "downloader" => Ok(downloader_application_scopes()),
+        "full" => Ok(default_application_scopes()),
+        value => anyhow::bail!("unsupported application credential preset: {value}"),
+    }
+}
+
 fn bad_request(error: anyhow::Error) -> Response {
     (
         StatusCode::BAD_REQUEST,
@@ -1553,5 +1582,23 @@ mod tests {
             normalize_s3_access_key_pagination(&huge_page_size),
             (3, MAX_S3_ACCESS_KEYS_PAGE_SIZE)
         );
+    }
+
+    #[test]
+    fn downloader_preset_never_grants_object_write() {
+        let scopes = resolve_application_scopes(None, Some("downloader")).expect("scopes");
+
+        assert!(scopes.iter().any(|scope| scope == "origin:objects:read"));
+        assert!(
+            scopes
+                .iter()
+                .any(|scope| scope == "pontemesh:access-package:create")
+        );
+        assert!(!scopes.iter().any(|scope| scope == "origin:objects:write"));
+    }
+
+    #[test]
+    fn unsupported_application_preset_is_rejected() {
+        assert!(resolve_application_scopes(None, Some("anonymous-admin")).is_err());
     }
 }

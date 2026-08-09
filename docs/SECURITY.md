@@ -87,6 +87,12 @@ Credenciais administrativas devem ser separadas de credenciais operacionais.
 
 Credenciais de Replica/Edge devem ser específicas por réplica.
 
+Aplicações públicas, como launchers desktop, não conseguem manter um segredo
+reutilizável dentro do binário. Para conteúdo público, elas devem receber em tempo
+de execução uma credencial restrita somente a download. Para conteúdo protegido,
+devem autenticar o usuário por um provedor consolidado e trocar essa identidade por
+uma credencial curta; um identificador público de cliente não é autenticação.
+
 ### Autorização temporária
 
 Tickets, URLs temporárias, credenciais transitórias e pacotes de acesso devem expirar.

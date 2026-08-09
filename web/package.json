@@ -1,6 +1,6 @@
 {
   "name": "pontemesh-server-web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,6 +15,7 @@
     "test:e2e:origin-replica": "playwright test --config playwright.e2e.config.ts tests/e2e/origin-replica-flow.spec.ts",
     "validate": "npm run i18n:check && npm run typecheck && npm run lint && npm run test && npm run test:ui:quality",
     "build": "npm run i18n:prune && npm run validate && vite build",
+    "build:app": "npm run i18n:check && vite build",
     "build:ci": "npm run i18n:check && npm run validate && vite build",
     "preview": "vite preview"
   },
@@ -44,5 +45,8 @@
     "eslint-plugin-react-refresh": "^0.4.16",
     "tsx": "^4.21.0",
     "vitest": "^4.1.9"
+  },
+  "overrides": {
+    "js-yaml": "^4.3.1"
   }
 }

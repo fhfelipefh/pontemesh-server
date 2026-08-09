@@ -1,6 +1,9 @@
 name: Server Release
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -13,7 +16,7 @@ concurrency:
 jobs:
   validate:
     name: Validate release request
-    if: github.actor == github.repository_owner
+    if: github.event_name != 'workflow_dispatch' || github.actor == github.repository_owner
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -35,7 +38,7 @@ jobs:
             echo "Cargo.toml version must use semver format, for example 0.1.0."
             exit 1
           fi
-          if git rev-parse "v$version" >/dev/null 2>&1; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && git rev-parse "v$version" >/dev/null 2>&1; then
             echo "Tag v$version already exists."
             exit 1
           fi
@@ -49,6 +52,7 @@ jobs:
   web:
     name: Validate and build web panel
     needs: validate
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -82,6 +86,7 @@ jobs:
   build:
     name: Build server ${{ matrix.target.name }}
     needs: [validate, web]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.target.os }}
     strategy:
       fail-fast: false
@@ -164,7 +169,7 @@ jobs:
   publish:
     name: Publish server release
     needs: [validate, build]
-    if: github.actor == github.repository_owner
+    if: github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -249,3 +254,57 @@ jobs:
             args+=(--prerelease)
           fi
           gh "${args[@]}"
+
+  quality:
+    name: Server quality and real SDK integration
+    needs: validate
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Test web panel
+        working-directory: web
+        run: |
+          npm ci
+          npm run i18n:check
+          npm run typecheck
+          npm run lint
+          npm run test
+          npm run build:app
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          components: rustfmt, clippy
+
+      - name: Test Server
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --locked
+          cargo test --locked
+
+      - name: Checkout SDK
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: fhfelipefh/pontemesh-sdk
+          path: pontemesh-sdk
+          persist-credentials: false
+
+      - name: Test current Server against the SDK
+        env:
+          PONTEMESH_SDK_SOURCE: ${{ github.workspace }}/pontemesh-sdk
+        run: ./scripts/ci-sdk-integration.sh
