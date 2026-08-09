@@ -73,6 +73,13 @@ PONTEMESH_PUBLIC_S3_URL=https://s3.example.com
 Não é necessário nem recomendado expor diretamente `8080` ou `9000` quando um
 proxy reverso local encaminha os endpoints públicos.
 
+Ao usar um IP como endpoint S3 público, configure clientes S3-compatible para o
+estilo de URL path. O estilo virtual-host transforma o bucket em subdomínio e,
+por exemplo, tentaria resolver `bucket.134.65.234.41`, o que não é um hostname
+DNS válido. Um domínio com DNS wildcard e certificado correspondente pode usar
+virtual-host style; isso não é obrigatório para redes locais ou instalações por
+IP.
+
 ## Replica/Edge
 
 O bloco de configuração de **Replica/Edge** deve concentrar os parâmetros necessários para que uma réplica autorizada se comunique com o Origin e participe do plano de dados.

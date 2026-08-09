@@ -223,6 +223,9 @@ manifesto nem pacote de acesso.
 ```http
 GET /api/admin/buckets/{bucket}/policy
 PUT /api/admin/buckets/{bucket}/policy
+GET /api/admin/bucket-policy-defaults
+PUT /api/admin/bucket-policy-defaults
+PUT /api/admin/buckets/bulk-policy
 ```
 
 Contrato inicial:
@@ -239,6 +242,12 @@ Contrato inicial:
 Essa política é persistida no catálogo PostgreSQL. O Origin usa
 `accessPackageTtlSeconds` na emissão de pacotes e `fragmentSizeBytes` na geração
 de manifestos.
+
+Os padrões da instância contêm os campos Ponte Mesh da política: TTL do pacote,
+tamanho de fragmento, uso de Replica/Edge e peers, estratégias de fonte e
+prioridade, limite de falhas e fallback. A criação de bucket copia os padrões
+vigentes. A atualização em massa aceita `allBuckets: true` ou `bucketNames` e é
+atômica; campos S3 específicos de cada bucket são preservados.
 
 ### Consultar disponibilidade
 

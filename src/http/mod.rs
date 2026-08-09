@@ -72,6 +72,14 @@ pub fn s3_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catalo
                 .delete(origin::delete_bucket),
         )
         .route(
+            "/{bucket_name}/",
+            put(origin::put_bucket)
+                .post(origin::post_bucket)
+                .get(origin::list_objects)
+                .head(origin::head_bucket)
+                .delete(origin::delete_bucket),
+        )
+        .route(
             "/{bucket_name}/{*object_key}",
             put(origin::put_object)
                 .post(origin::post_object)
@@ -149,6 +157,14 @@ fn admin_routes(state: AppState) -> Router<AppState> {
 
 fn origin_admin_routes(state: AppState) -> Router<AppState> {
     Router::new()
+        .route(
+            "/api/admin/bucket-policy-defaults",
+            get(admin::get_bucket_policy_defaults).put(admin::update_bucket_policy_defaults),
+        )
+        .route(
+            "/api/admin/buckets/bulk-policy",
+            put(admin::bulk_update_bucket_policies),
+        )
         .route(
             "/api/admin/buckets",
             get(admin::list_buckets).post(admin::create_bucket),
@@ -1035,6 +1051,105 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bucket_policy_defaults_are_copied_and_can_be_applied_in_bulk() {
+        let Some(ctx) = TestContext::new("bucket-policy-defaults").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let cookie = login_cookie(app.clone()).await;
+        let defaults = r#"{
+            "accessPackageTtlSeconds":1200,
+            "fragmentSizeBytes":8388608,
+            "allowReplicaEdge":true,
+            "allowPeerSharing":false,
+            "sourceSelectionStrategy":"REPLICA_EDGE_FIRST",
+            "fragmentPriorityStrategy":"INITIAL_FIRST",
+            "failureThreshold":4,
+            "fallbackMode":"ORIGIN_RANGE"
+        }"#;
+
+        let update_defaults = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/bucket-policy-defaults")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(defaults))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(update_defaults.status(), StatusCode::OK);
+
+        for name in ["defaults-one", "defaults-two"] {
+            let create = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/api/admin/buckets")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(format!(r#"{{"name":"{name}"}}"#)))
+                        .expect("valid request"),
+                )
+                .await
+                .expect("router response");
+            assert_eq!(create.status(), StatusCode::CREATED);
+        }
+
+        let inherited = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/defaults-one/policy")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        let inherited = json_body(inherited).await;
+        assert_eq!(inherited["accessPackageTtlSeconds"], 1200);
+        assert_eq!(inherited["fragmentSizeBytes"], 8_388_608);
+
+        let bulk = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/buckets/bulk-policy")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"allBuckets":false,"bucketNames":["defaults-two"],"policy":{defaults}}}"#
+                    ).replace("1200", "1800")))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(bulk.status(), StatusCode::OK);
+        let bulk = json_body(bulk).await;
+        assert_eq!(bulk["updatedCount"], 1);
+
+        let updated = ctx
+            .catalog
+            .get_bucket_policy("defaults-two")
+            .await
+            .expect("policy");
+        let untouched = ctx
+            .catalog
+            .get_bucket_policy("defaults-one")
+            .await
+            .expect("policy");
+        assert_eq!(updated.access_package_ttl_seconds, 1800);
+        assert_eq!(untouched.access_package_ttl_seconds, 1200);
+    }
+
+    #[tokio::test]
     async fn s3_compatible_contract_covers_core_bucket_and_object_operations() {
         let Some(ctx) = TestContext::new("s3-compatible-contract").await else {
             return;
@@ -1087,7 +1202,7 @@ mod tests {
                 signed_s3_request(
                     Request::builder()
                         .method(Method::PUT)
-                        .uri("/compat-bucket")
+                        .uri("/compat-bucket/")
                         .body(Body::empty()),
                     b"",
                 )

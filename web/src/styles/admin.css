@@ -1567,9 +1567,71 @@
   line-height: 1.45;
 }
 
+.buckets-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.buckets-policy-button,
 .buckets-create-button {
   width: auto;
   flex: 0 0 auto;
+}
+
+.bucket-policy-manager {
+  width: min(100%, 920px);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+}
+
+.bucket-policy-manager__section {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--pm-border);
+  border-radius: 14px;
+  padding: 16px;
+  background: var(--pm-bg-elevated);
+}
+
+.bucket-policy-manager__section h4,
+.bucket-policy-manager__section p,
+.settings-success {
+  margin: 0;
+}
+
+.bucket-policy-manager__section h4 {
+  color: var(--pm-deep-navy);
+  font-size: 0.98rem;
+}
+
+.bucket-policy-manager__section p {
+  color: var(--pm-muted);
+  line-height: 1.45;
+}
+
+.bucket-policy-manager__scope {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bucket-policy-manager__scope label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border: 1px solid var(--pm-border);
+  border-radius: 11px;
+  padding: 0 12px;
+  color: var(--pm-deep-navy);
+  background: var(--pm-surface);
+  font-weight: 800;
+}
+
+.settings-success {
+  color: var(--pm-success);
+  font-weight: 800;
 }
 
 .buckets-toolbar,
@@ -1742,7 +1804,7 @@
 .buckets-table__head,
 .buckets-table__row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) 110px 120px 180px 230px;
+  grid-template-columns: 36px minmax(160px, 1fr) 110px 120px 180px 230px;
   align-items: center;
   gap: 12px;
   padding: 11px 14px;
@@ -1762,13 +1824,23 @@
   font-size: 0.92rem;
 }
 
-.buckets-table__row > span:first-child,
+.buckets-table__row > span:nth-child(2),
 .object-table--drawer .object-table__row > span:first-child,
 .object-table--drawer .object-table__row > span:nth-child(3) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 800;
+}
+
+.buckets-table__select {
+  display: grid;
+  place-items: center;
+}
+
+.buckets-table__select input {
+  width: 18px;
+  height: 18px;
 }
 
 .buckets-table__actions {
@@ -2651,6 +2723,21 @@
   .buckets-pagination {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .buckets-header-actions,
+  .bucket-policy-manager__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .buckets-header-actions > *,
+  .bucket-policy-manager__actions > * {
+    width: 100%;
+  }
+
+  .bucket-policy-manager__scope {
+    grid-template-columns: 1fr;
   }
 
   .buckets-pagination__actions {

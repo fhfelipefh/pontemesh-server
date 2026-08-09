@@ -184,6 +184,22 @@
       "search": "Buscar bucket",
       "create": "Criar bucket",
       "createDescription": "Informe um nome válido para o novo bucket.",
+      "managePolicies": "Configurar buckets",
+      "managePoliciesDescription": "Defina padrões do Ponte Mesh para novos buckets ou aplique-os aos buckets existentes.",
+      "selectVisible": "Selecionar todos os buckets desta página",
+      "selectBucket": "Selecionar bucket {{name}}",
+      "loadingDefaults": "Carregando padrões da política",
+      "defaultsTitle": "Padrões para novos buckets",
+      "defaultsDescription": "Novos buckets copiam estas configurações do Ponte Mesh. Buckets existentes só mudam quando você aplicar abaixo.",
+      "defaultsLoadFailed": "Falha ao carregar os padrões da política de buckets.",
+      "defaultsSaveFailed": "Falha ao salvar os padrões da política de buckets.",
+      "defaultsSaved": "Padrões salvos para os próximos buckets.",
+      "saveDefaults": "Salvar padrões",
+      "applyTitle": "Aplicar aos buckets existentes",
+      "applySelected": "Buckets selecionados ({{count}})",
+      "applyAll": "Todos os buckets",
+      "applyPolicy": "Aplicar configurações",
+      "bulkSaveFailed": "Falha ao aplicar as configurações aos buckets.",
       "open": "Abrir bucket",
       "delete": "Excluir bucket",
       "objectCount": "Objetos",
@@ -426,7 +442,7 @@
         "revokeFailed": "Falha ao revogar chave S3.",
         "emptyTitle": "Nenhuma credencial S3 criada ainda.",
         "emptyDescription": "Crie uma chave para conectar clientes S3-compatíveis.",
-        "helpText": "As credenciais S3 permitem que aplicações e ferramentas acessem seus buckets de forma segura. Mantenha suas chaves protegidas e revogue aquelas que não estiverem mais em uso."
+        "helpText": "Use estas credenciais somente no endpoint S3. Para endpoints por IP no WinSCP, abra Avançado > S3 e defina Estilo da URL como Path. Proteja as chaves e revogue as que não estiverem mais em uso."
       }
     }
   }

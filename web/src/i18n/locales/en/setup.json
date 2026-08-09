@@ -184,6 +184,22 @@
       "search": "Search bucket",
       "create": "Create bucket",
       "createDescription": "Enter a valid name for the new bucket.",
+      "managePolicies": "Configure buckets",
+      "managePoliciesDescription": "Set Ponte Mesh defaults for new buckets or apply them to existing buckets.",
+      "selectVisible": "Select all buckets on this page",
+      "selectBucket": "Select bucket {{name}}",
+      "loadingDefaults": "Loading policy defaults",
+      "defaultsTitle": "Defaults for new buckets",
+      "defaultsDescription": "New buckets copy these Ponte Mesh settings. Existing buckets change only when you apply them below.",
+      "defaultsLoadFailed": "Failed to load bucket policy defaults.",
+      "defaultsSaveFailed": "Failed to save bucket policy defaults.",
+      "defaultsSaved": "Defaults saved for future buckets.",
+      "saveDefaults": "Save defaults",
+      "applyTitle": "Apply to existing buckets",
+      "applySelected": "Selected buckets ({{count}})",
+      "applyAll": "All buckets",
+      "applyPolicy": "Apply settings",
+      "bulkSaveFailed": "Failed to apply settings to buckets.",
       "open": "Open bucket",
       "delete": "Delete bucket",
       "objectCount": "Objects",
@@ -426,7 +442,7 @@
         "revokeFailed": "Failed to revoke S3 key.",
         "emptyTitle": "No S3 credentials have been created yet.",
         "emptyDescription": "Create a key to connect S3-compatible clients.",
-        "helpText": "S3 credentials allow applications and tools to access your buckets securely. Keep your keys protected and revoke keys that are no longer in use."
+        "helpText": "Use these credentials only with the S3 endpoint. For IP endpoints in WinSCP, open Advanced > S3 and set URL style to Path. Keep keys protected and revoke those no longer in use."
       }
     }
   }

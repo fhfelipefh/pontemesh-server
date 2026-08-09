@@ -55,6 +55,37 @@ test.describe("Buckets page layout quality", () => {
     await expectBodyDoesNotScroll(page);
   });
 
+  test("bucket defaults and bulk settings should support selected or all buckets", async ({ page }) => {
+    await openBucketsPage(page);
+
+    const configureButton = page.getByTestId("bucket-policy-manager-button");
+    const createButton = page.getByTestId("create-bucket-button");
+    const configureBox = await configureButton.boundingBox();
+    const createBox = await createButton.boundingBox();
+    expect(configureBox).not.toBeNull();
+    expect(createBox).not.toBeNull();
+    if (configureBox && createBox) {
+      expect(configureBox.x).toBeLessThan(createBox.x);
+    }
+
+    await page.getByRole("checkbox", { name: /select bucket assets|selecionar bucket assets/i }).check();
+    await configureButton.click();
+
+    const dialog = page.getByTestId("bucket-policy-manager-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel(/Max package TTL|TTL máximo do pacote/i)).toHaveValue("900");
+    await expect(dialog.getByRole("radio", { name: /Selected buckets \(1\)|Buckets selecionados \(1\)/i })).toBeChecked();
+    await expect(dialog.getByRole("radio", { name: /All buckets|Todos os buckets/i })).toBeEnabled();
+
+    await dialog.getByLabel(/Max package TTL|TTL máximo do pacote/i).fill("1200");
+    await dialog.getByRole("button", { name: /Save defaults|Salvar padrões/i }).click();
+    await expect(dialog.getByText(/Defaults saved|Padrões salvos/i)).toBeVisible();
+
+    await dialog.getByRole("button", { name: /Apply settings|Aplicar configurações/i }).click();
+    await expect(dialog).toBeHidden();
+    await expectNoHorizontalOverflow(page);
+  });
+
   test("hybrid policy form should keep proportional controls and aligned checkboxes", async ({ page }) => {
     await openBucketsPage(page);
 

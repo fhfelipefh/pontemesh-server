@@ -177,6 +177,26 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
       return json(route, pageResponse(fixtureBuckets));
     }
 
+    if (path === "/api/admin/bucket-policy-defaults") {
+      return json(route, {
+        accessPackageTtlSeconds: bucketPolicy.accessPackageTtlSeconds,
+        fragmentSizeBytes: bucketPolicy.fragmentSizeBytes,
+        allowReplicaEdge: bucketPolicy.allowReplicaEdge,
+        allowPeerSharing: bucketPolicy.allowPeerSharing,
+        sourceSelectionStrategy: bucketPolicy.sourceSelectionStrategy,
+        fragmentPriorityStrategy: bucketPolicy.fragmentPriorityStrategy,
+        failureThreshold: bucketPolicy.failureThreshold,
+        fallbackMode: bucketPolicy.fallbackMode,
+        updatedAt: now
+      });
+    }
+
+    if (path === "/api/admin/buckets/bulk-policy") {
+      const body = request.postDataJSON() as { allBuckets: boolean; bucketNames: string[] };
+      const updatedBuckets = body.allBuckets ? fixtureBuckets.map((bucket) => bucket.name) : body.bucketNames;
+      return json(route, { updatedBuckets, updatedCount: updatedBuckets.length });
+    }
+
     const objectListMatch = path.match(/^\/api\/admin\/buckets\/([^/]+)\/objects$/);
     if (objectListMatch) {
       const bucketName = decodeURIComponent(objectListMatch[1]);
