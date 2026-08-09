@@ -36,8 +36,8 @@
         "internalS3Port": "Internal S3 port",
         "internalPortsHelp": "These are process listeners, not the public HTTPS ports. Configure your firewall and reverse proxy separately.",
         "publicWebUrl": "Public panel URL",
-        "publicS3Url": "Public S3 endpoint",
-        "publicEndpointsHelp": "Use an endpoint that reaches the S3 listener, such as https://s3.example.com or https://server.example.com:9443. Do not reuse the panel URL unless your proxy explicitly routes S3 signatures.",
+        "publicS3Url": "Origin public S3 endpoint",
+        "publicEndpointsHelp": "Required for Origin: SDKs and applications use this address to download objects. It is filled automatically when the environment provides PONTEMESH_PUBLIC_S3_URL; otherwise, use an address that reaches the S3 listener, such as https://server.example.com:9443.",
         "copyPublicS3Url": "Copy public S3 endpoint"
       },
       "storage": {

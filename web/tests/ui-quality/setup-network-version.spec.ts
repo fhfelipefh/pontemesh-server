@@ -7,9 +7,11 @@ test.beforeEach(async ({ page }) => {
       contentType: "application/json",
       body: JSON.stringify({
         setupRequired: true,
-        serverVersion: "0.2.1",
+        serverVersion: "0.2.2",
         internalWebPort: 8080,
-        internalS3Port: 9000
+        internalS3Port: 9000,
+        publicWebUrl: "https://134.65.234.41",
+        publicS3Url: "https://134.65.234.41:9443"
       })
     });
   });
@@ -28,8 +30,14 @@ test("shows internal listeners separately from public Origin endpoints", async (
   await expect(page.locator("#httpPort")).toHaveCount(0);
   await expect(page.getByText(/internal panel port|porta interna do painel/i)).toBeVisible();
   await expect(page.getByText(/internal s3 port|porta interna s3/i)).toBeVisible();
-  await expect(page.locator("#publicWebUrl")).toHaveValue("http://127.0.0.1:5173");
-  await expect(page.locator("#publicS3Url")).toHaveValue("http://127.0.0.1:9000");
+  await expect(page.locator("#publicWebUrl")).toHaveValue("https://134.65.234.41");
+  await expect(page.locator("#publicS3Url")).toHaveValue("https://134.65.234.41:9443");
+
+  const cardBox = await page.locator(".setup-card").boundingBox();
+  const helpBox = await page.locator(".help-link").boundingBox();
+  expect(cardBox).not.toBeNull();
+  expect(helpBox).not.toBeNull();
+  expect(helpBox!.y - (cardBox!.y + cardBox!.height)).toBeGreaterThanOrEqual(18);
 
   await page.locator("#role").selectOption("replica-edge");
   await expect(page.locator("#publicWebUrl")).toHaveCount(0);
@@ -42,8 +50,8 @@ test("keeps only the fixed version centered at the bottom on desktop and mobile"
     await page.goto("/setup");
 
     const version = page.locator(".setup-page__version");
-    await expect(version).toHaveText("v0.2.1");
-    await expect(page.getByText("Ponte Mesh Server v0.2.1", { exact: true })).toHaveCount(0);
+    await expect(version).toHaveText("v0.2.2");
+    await expect(page.getByText("Ponte Mesh Server v0.2.2", { exact: true })).toHaveCount(0);
 
     const position = await version.evaluate((element) => getComputedStyle(element).position);
     expect(position).toBe("fixed");

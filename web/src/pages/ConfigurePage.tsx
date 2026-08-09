@@ -14,17 +14,27 @@ type ConfigurePageProps = {
   serverVersion: string | null;
   internalWebPort: number;
   internalS3Port: number;
+  configuredPublicWebUrl: string | null;
+  configuredPublicS3Url: string | null;
 };
 
-export function ConfigurePage({ serverVersion, internalWebPort, internalS3Port }: ConfigurePageProps) {
+export function ConfigurePage({
+  serverVersion,
+  internalWebPort,
+  internalS3Port,
+  configuredPublicWebUrl,
+  configuredPublicS3Url
+}: ConfigurePageProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [instanceName, setInstanceName] = useState("Ponte Mesh Local");
   const [role, setRole] = useState<CompleteSetupRequest["role"]>("origin");
   const [adminUsername, setAdminUsername] = useState("admin");
   const [adminPassword, setAdminPassword] = useState("");
-  const [publicWebUrl, setPublicWebUrl] = useState(() => window.location.origin);
-  const [publicS3Url, setPublicS3Url] = useState(() => defaultPublicS3Url(internalS3Port));
+  const [publicWebUrl, setPublicWebUrl] = useState(() => configuredPublicWebUrl ?? window.location.origin);
+  const [publicS3Url, setPublicS3Url] = useState(
+    () => configuredPublicS3Url ?? defaultPublicS3Url(internalS3Port)
+  );
   const [internalStoragePath, setInternalStoragePath] = useState("");
   const [originBaseUrl, setOriginBaseUrl] = useState("");
   const [replicaId, setReplicaId] = useState("");

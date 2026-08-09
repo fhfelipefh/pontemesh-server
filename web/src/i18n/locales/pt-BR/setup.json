@@ -36,8 +36,8 @@
         "internalS3Port": "Porta interna S3",
         "internalPortsHelp": "Esses valores são listeners do processo, não as portas HTTPS públicas. Configure firewall e proxy reverso separadamente.",
         "publicWebUrl": "URL pública do painel",
-        "publicS3Url": "Endpoint público S3",
-        "publicEndpointsHelp": "Use um endpoint que alcance o listener S3, como https://s3.exemplo.com ou https://servidor.exemplo.com:9443. Não reutilize a URL do painel, exceto se o proxy rotear explicitamente assinaturas S3.",
+        "publicS3Url": "Endpoint público S3 do Origin",
+        "publicEndpointsHelp": "Obrigatório para Origin: SDKs e aplicações usam este endereço para baixar objetos. O valor é preenchido automaticamente quando o ambiente informa PONTEMESH_PUBLIC_S3_URL; caso contrário, use um endereço que alcance o listener S3, como https://servidor.exemplo.com:9443.",
         "copyPublicS3Url": "Copiar endpoint público S3"
       },
       "storage": {
