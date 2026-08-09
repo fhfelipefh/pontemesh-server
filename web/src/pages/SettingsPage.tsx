@@ -63,6 +63,7 @@ export function SettingsPage() {
   const [applications, setApplications] = useState<ApplicationCredentialSummary[]>([]);
   const [createdApplication, setCreatedApplication] = useState<CreatedApplicationCredential | null>(null);
   const [applicationName, setApplicationName] = useState("default-sdk");
+  const [applicationPreset, setApplicationPreset] = useState<"downloader" | "full">("downloader");
   const [loadingApplications, setLoadingApplications] = useState(true);
   const [creatingApplication, setCreatingApplication] = useState(false);
   const [revokingApplication, setRevokingApplication] = useState<string | null>(null);
@@ -180,7 +181,7 @@ export function SettingsPage() {
     setCreatingApplication(true);
     setApplicationError("");
     try {
-      const created = await createApplicationCredential(applicationName.trim());
+      const created = await createApplicationCredential(applicationName.trim(), undefined, applicationPreset);
       setCreatedApplication(created);
       setApplicationName("");
       await refreshApplications();
@@ -325,15 +326,17 @@ export function SettingsPage() {
           onDismissCreatedToken={() => setCreatedMcpToken(null)}
           onRevokeToken={(id, name) => setDestructiveConfirmation({ kind: "mcpToken", id, name })}
         />
-        <ApplicationCredentialsCard
+          <ApplicationCredentialsCard
           applications={applications}
           createdApplication={createdApplication}
-          applicationName={applicationName}
+            applicationName={applicationName}
+            applicationPreset={applicationPreset}
           loading={loadingApplications}
           creating={creatingApplication}
           revoking={revokingApplication}
           error={applicationError}
-          onApplicationNameChange={setApplicationName}
+            onApplicationNameChange={setApplicationName}
+            onApplicationPresetChange={setApplicationPreset}
           onCreateApplication={handleCreateApplication}
           onDismissCreatedApplication={() => setCreatedApplication(null)}
           onRevokeApplication={(id, name) => setDestructiveConfirmation({ kind: "application", id, name })}
@@ -761,11 +764,13 @@ type ApplicationCredentialsCardProps = {
   applications: ApplicationCredentialSummary[];
   createdApplication: CreatedApplicationCredential | null;
   applicationName: string;
+  applicationPreset: "downloader" | "full";
   loading: boolean;
   creating: boolean;
   revoking: string | null;
   error: string;
   onApplicationNameChange: (value: string) => void;
+  onApplicationPresetChange: (value: "downloader" | "full") => void;
   onCreateApplication: () => void;
   onDismissCreatedApplication: () => void;
   onRevokeApplication: (id: string, name: string) => void;
@@ -775,11 +780,13 @@ function ApplicationCredentialsCard({
   applications,
   createdApplication,
   applicationName,
+  applicationPreset,
   loading,
   creating,
   revoking,
   error,
   onApplicationNameChange,
+  onApplicationPresetChange,
   onCreateApplication,
   onDismissCreatedApplication,
   onRevokeApplication
@@ -801,6 +808,14 @@ function ApplicationCredentialsCard({
           placeholder={t("setup.settings.applications.namePlaceholder")}
           aria-label={t("setup.settings.applications.name")}
         />
+        <select
+          value={applicationPreset}
+          onChange={(event) => onApplicationPresetChange(event.target.value as "downloader" | "full")}
+          aria-label={t("setup.settings.applications.preset")}
+        >
+          <option value="downloader">{t("setup.settings.applications.downloaderPreset")}</option>
+          <option value="full">{t("setup.settings.applications.fullPreset")}</option>
+        </select>
         <button className="settings-create-key-button" type="submit" disabled={creating || !applicationName.trim()}>
           <Plus size={17} aria-hidden="true" />
           {t("setup.settings.applications.create")}

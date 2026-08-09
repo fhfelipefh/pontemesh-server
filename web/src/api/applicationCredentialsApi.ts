@@ -25,14 +25,15 @@ export async function listApplicationCredentials(): Promise<ApplicationCredentia
 
 export async function createApplicationCredential(
   name: string,
-  scopes?: string[]
+  scopes?: string[],
+  preset: "downloader" | "full" = "downloader"
 ): Promise<CreatedApplicationCredential> {
   const response = await fetch("/api/admin/application-credentials", {
     method: "POST",
     headers: {
       "content-type": "application/json"
     },
-    body: JSON.stringify({ name, scopes })
+    body: JSON.stringify(scopes ? { name, scopes } : { name, preset })
   });
   await ensureOk(response);
   return response.json() as Promise<CreatedApplicationCredential>;
