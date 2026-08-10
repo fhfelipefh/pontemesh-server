@@ -3,6 +3,7 @@ mod audit;
 mod auth;
 mod catalog;
 mod config;
+mod health;
 mod http;
 mod mcp;
 mod mesh;

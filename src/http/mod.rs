@@ -1,6 +1,6 @@
 use crate::{
-    admin, auth, catalog::Catalog, config::PontemeshHome, mcp, mesh, origin, replica, s3_auth,
-    setup, web_assets,
+    admin, auth, catalog::Catalog, config::PontemeshHome, health, mcp, mesh, origin, replica,
+    s3_auth, setup, web_assets,
 };
 use axum::{
     Json, Router,
@@ -53,6 +53,8 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
         .nest("/pontemesh", pontemesh_routes(state.clone()))
         .merge(admin_routes(state.clone()))
         .route("/api/{*path}", any(setup::routes::api_not_found))
+        .route("/health/live", get(health::liveness))
+        .route("/health/ready", get(health::readiness))
         .fallback(web_assets::serve)
         .with_state(state)
         .layer(TraceLayer::new_for_http())
