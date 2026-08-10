@@ -46,6 +46,7 @@ pub struct ObjectSummary {
     pub created_at: String,
     pub updated_at: String,
     pub state: String,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -99,6 +100,8 @@ pub struct ObjectRecord {
     pub legal_hold: bool,
     pub created_at: String,
     pub state: String,
+    pub user_metadata: Option<serde_json::Value>,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,6 +221,8 @@ pub struct NewObject {
     pub retain_until: Option<chrono::DateTime<chrono::Utc>>,
     pub legal_hold: bool,
     pub manifest: NewObjectManifest,
+    pub user_metadata: Option<serde_json::Value>,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,6 +235,7 @@ pub struct ObjectVersionSummary {
     pub size_bytes: i64,
     pub sha256: String,
     pub last_modified: String,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -299,6 +305,7 @@ pub struct MultipartUploadRecord {
     pub object_key: String,
     pub content_type: String,
     pub initiated_at: String,
+    pub user_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -1563,7 +1570,8 @@ impl Catalog {
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
                 v.s3_version_id, v.is_delete_marker,
-                v.created_at, v.created_at AS updated_at, o.state
+                v.created_at, v.created_at AS updated_at, o.state,
+                v.created_by
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.id = o.current_version_id
@@ -1661,7 +1669,8 @@ impl Catalog {
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
                 v.s3_version_id, v.is_delete_marker,
-                v.created_at, v.created_at AS updated_at, o.state
+                v.created_at, v.created_at AS updated_at, o.state,
+                v.created_by
             FROM objects o
             JOIN object_versions v ON v.id = o.current_version_id
             WHERE o.bucket_id = $1::uuid
@@ -1755,9 +1764,9 @@ impl Catalog {
                 hash_algorithm, object_hash, storage_path, s3_version_id,
                 checksum_sha256, checksum_crc32, encryption_algorithm,
                 encryption_key_id, encryption_nonce, object_lock_mode,
-                retain_until, legal_hold
+                retain_until, legal_hold, user_metadata, created_by
             )
-            VALUES ($1::uuid, $2, $3, $4, 'SHA-256', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1::uuid, $2, $3, $4, 'SHA-256', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING id::text, created_at
             "#,
         )
@@ -1776,6 +1785,8 @@ impl Catalog {
         .bind(object.object_lock_mode.as_deref())
         .bind(object.retain_until)
         .bind(object.legal_hold)
+        .bind(object.user_metadata.as_ref())
+        .bind(object.created_by.as_deref())
         .fetch_one(&mut *tx)
         .await
         .context("failed to register object version")?;
@@ -1863,6 +1874,7 @@ impl Catalog {
             created_at: format_datetime(version_row.get("created_at")),
             updated_at: format_datetime(version_row.get("created_at")),
             state: "AVAILABLE".to_owned(),
+            created_by: object.created_by,
         })
     }
 
@@ -1889,7 +1901,8 @@ impl Catalog {
                 v.storage_path, v.s3_version_id, v.is_delete_marker,
                 v.checksum_sha256, v.checksum_crc32, v.encryption_algorithm,
                 v.encryption_key_id, v.encryption_nonce, v.object_lock_mode,
-                v.retain_until, v.legal_hold, v.created_at, o.state
+                v.retain_until, v.legal_hold, v.created_at, o.state,
+                v.user_metadata, v.created_by
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.object_id = o.id
@@ -2109,6 +2122,7 @@ impl Catalog {
         object_key: &str,
         content_type: &str,
         initiated_by: &str,
+        user_metadata: Option<serde_json::Value>,
     ) -> anyhow::Result<MultipartUploadRecord> {
         validate_bucket_name(bucket_name)?;
         validate_object_key(object_key)?;
@@ -2117,18 +2131,19 @@ impl Catalog {
         }
         let row = query(
             r#"
-            INSERT INTO s3_multipart_uploads (bucket_id, object_key, content_type, initiated_by)
-            SELECT id, $2, $3, $4
+            INSERT INTO s3_multipart_uploads (bucket_id, object_key, content_type, initiated_by, user_metadata)
+            SELECT id, $2, $3, $4, $5
             FROM buckets
             WHERE name = $1 AND deleted_at IS NULL
             RETURNING id::text AS upload_id, $1::text AS bucket_name, object_key,
-                content_type, initiated_at
+                content_type, initiated_at, user_metadata
             "#,
         )
         .bind(bucket_name)
         .bind(object_key)
         .bind(content_type)
         .bind(initiated_by)
+        .bind(user_metadata.as_ref())
         .fetch_optional(&self.pool)
         .await
         .context("failed to create multipart upload")?;
@@ -2149,7 +2164,7 @@ impl Catalog {
         let row = query(
             r#"
             SELECT u.id::text AS upload_id, b.name AS bucket_name, u.object_key,
-                u.content_type, u.initiated_at
+                u.content_type, u.initiated_at, u.user_metadata
             FROM s3_multipart_uploads u
             JOIN buckets b ON b.id = u.bucket_id
             WHERE u.id = $1::uuid
@@ -2177,7 +2192,7 @@ impl Catalog {
         let rows = query(
             r#"
             SELECT u.id::text AS upload_id, b.name AS bucket_name, u.object_key,
-                u.content_type, u.initiated_at
+                u.content_type, u.initiated_at, u.user_metadata
             FROM s3_multipart_uploads u
             JOIN buckets b ON b.id = u.bucket_id
             WHERE b.name = $1
@@ -2477,7 +2492,7 @@ impl Catalog {
             r#"
             SELECT o.object_key, v.s3_version_id, v.is_delete_marker,
                 (o.current_version_id = v.id) AS is_latest,
-                v.size_bytes, v.object_hash, v.created_at
+                v.size_bytes, v.object_hash, v.created_at, v.created_by
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.object_id = o.id
@@ -2501,6 +2516,7 @@ impl Catalog {
                 size_bytes: row.get("size_bytes"),
                 sha256: row.get("object_hash"),
                 last_modified: format_datetime(row.get("created_at")),
+                created_by: row.try_get("created_by").ok().flatten(),
             })
             .collect())
     }
@@ -3754,6 +3770,8 @@ impl Catalog {
                 legal_hold: false,
                 created_at: format_datetime(row.get("created_at")),
                 state: row.get("state"),
+                user_metadata: None,
+                created_by: None,
             },
             bucket_name: row.get("bucket_name"),
             object_key: row.get("object_key"),
@@ -5306,6 +5324,7 @@ fn object_summary_from_row(row: PgRow) -> ObjectSummary {
         created_at: format_datetime(row.get("created_at")),
         updated_at: format_datetime(row.get("updated_at")),
         state: row.get("state"),
+        created_by: row.try_get("created_by").ok().flatten(),
     }
 }
 
@@ -5332,6 +5351,8 @@ fn object_record_from_row(row: PgRow) -> ObjectRecord {
         legal_hold: row.get("legal_hold"),
         created_at: format_datetime(row.get("created_at")),
         state: row.get("state"),
+        user_metadata: row.try_get("user_metadata").ok().flatten(),
+        created_by: row.try_get("created_by").ok().flatten(),
     }
 }
 
@@ -5390,6 +5411,7 @@ fn multipart_upload_from_row(row: PgRow) -> MultipartUploadRecord {
         object_key: row.get("object_key"),
         content_type: row.get("content_type"),
         initiated_at: format_datetime(row.get("initiated_at")),
+        user_metadata: row.try_get("user_metadata").ok().flatten(),
     }
 }
 
@@ -6244,6 +6266,7 @@ mod tests {
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
             state: "AVAILABLE".to_string(),
+            created_by: None,
         }
     }
 

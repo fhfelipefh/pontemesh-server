@@ -1481,6 +1481,8 @@ async fn upload_object_inner(
             retain_until: None,
             legal_hold: false,
             manifest: uploaded_file.manifest,
+            user_metadata: None,
+            created_by: None,
         })
         .await
 }

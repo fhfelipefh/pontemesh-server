@@ -25,6 +25,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use http_body_util::BodyExt;
 use rand_core::{OsRng, RngCore};
 use serde::Deserialize;
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{cmp, fs, path::PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -728,6 +729,7 @@ async fn initiate_multipart_upload(
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("application/octet-stream");
+    let user_metadata = extract_user_metadata(&headers);
     match state
         .catalog
         .create_multipart_upload(
@@ -735,6 +737,7 @@ async fn initiate_multipart_upload(
             &object_key,
             content_type,
             &identity.access_key_id,
+            user_metadata,
         )
         .await
     {
@@ -1445,6 +1448,7 @@ async fn put_object_inner(
 
     let detail = format!("bucket={bucket_name}; key={object_key}");
     let lock_defaults = object_lock_defaults(&policy, headers)?;
+    let user_metadata = extract_user_metadata(headers);
     let object = match state
         .catalog
         .put_object_with_audit(
@@ -1464,6 +1468,8 @@ async fn put_object_inner(
                 retain_until: lock_defaults.retain_until,
                 legal_hold: lock_defaults.legal_hold,
                 manifest: streamed.manifest,
+                user_metadata,
+                created_by: Some(principal.to_owned()),
             },
             principal,
             &detail,
@@ -1620,6 +1626,8 @@ async fn complete_multipart_upload_inner(
                 retain_until: lock_defaults.retain_until,
                 legal_hold: lock_defaults.legal_hold,
                 manifest: assembled.manifest,
+                user_metadata: upload.user_metadata,
+                created_by: Some(principal.to_owned()),
             },
             principal,
             &detail,
@@ -1744,6 +1752,8 @@ async fn copy_object_inner(
                 retain_until: lock_defaults.retain_until,
                 legal_hold: lock_defaults.legal_hold,
                 manifest: copied.manifest,
+                user_metadata: source.user_metadata,
+                created_by: Some(principal.to_owned()),
             },
             principal,
             &detail,
@@ -2858,13 +2868,18 @@ fn list_objects_entries_xml(page: &S3ListObjectsPage) -> (String, String) {
         .items
         .iter()
         .map(|object| {
+            let owner_id = object.created_by.as_deref().unwrap_or("pontemesh");
+            let owner_display = object.created_by.as_deref().unwrap_or("Ponte Mesh");
             format!(
                 "<Contents><Key>{}</Key><LastModified>{}</LastModified>\
-<ETag>&quot;{}&quot;</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass></Contents>",
+<ETag>&quot;{}&quot;</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass>\
+<Owner><ID>{}</ID><DisplayName>{}</DisplayName></Owner></Contents>",
                 xml_escape(&object.key),
                 xml_escape(&object.created_at),
                 xml_escape(&object.sha256),
-                object.size_bytes
+                object.size_bytes,
+                xml_escape(owner_id),
+                xml_escape(owner_display),
             )
         })
         .collect::<String>();
@@ -3015,23 +3030,32 @@ fn list_object_versions_xml(
     let body = versions
         .iter()
         .map(|version| {
+            let owner_id = version.created_by.as_deref().unwrap_or("pontemesh");
+            let owner_display = version.created_by.as_deref().unwrap_or("Ponte Mesh");
+            let owner_xml = format!(
+                "<Owner><ID>{}</ID><DisplayName>{}</DisplayName></Owner>",
+                xml_escape(owner_id),
+                xml_escape(owner_display),
+            );
             if version.is_delete_marker {
                 format!(
-                    "<DeleteMarker><Key>{}</Key><VersionId>{}</VersionId><IsLatest>{}</IsLatest><LastModified>{}</LastModified></DeleteMarker>",
+                    "<DeleteMarker><Key>{}</Key><VersionId>{}</VersionId><IsLatest>{}</IsLatest><LastModified>{}</LastModified>{}</DeleteMarker>",
                     xml_escape(&version.key),
                     xml_escape(&version.version_id),
                     version.is_latest,
-                    xml_escape(&version.last_modified)
+                    xml_escape(&version.last_modified),
+                    owner_xml,
                 )
             } else {
                 format!(
-                    "<Version><Key>{}</Key><VersionId>{}</VersionId><IsLatest>{}</IsLatest><LastModified>{}</LastModified><ETag>&quot;{}&quot;</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass></Version>",
+                    "<Version><Key>{}</Key><VersionId>{}</VersionId><IsLatest>{}</IsLatest><LastModified>{}</LastModified><ETag>&quot;{}&quot;</ETag><Size>{}</Size><StorageClass>STANDARD</StorageClass>{}</Version>",
                     xml_escape(&version.key),
                     xml_escape(&version.version_id),
                     version.is_latest,
                     xml_escape(&version.last_modified),
                     xml_escape(&version.sha256),
-                    version.size_bytes
+                    version.size_bytes,
+                    owner_xml,
                 )
             }
         })
@@ -3346,6 +3370,23 @@ fn verify_request_checksums(headers: &HeaderMap, streamed: &StreamedObject) -> a
     Ok(())
 }
 
+fn extract_user_metadata(headers: &HeaderMap) -> Option<serde_json::Value> {
+    let meta: serde_json::Map<String, serde_json::Value> = headers
+        .iter()
+        .filter_map(|(name, value)| {
+            let name_str = name.as_str();
+            let key = name_str.strip_prefix("x-amz-meta-")?;
+            let val = value.to_str().ok()?;
+            Some((key.to_owned(), json!(val)))
+        })
+        .collect();
+    if meta.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(meta))
+    }
+}
+
 fn add_s3_metadata_headers(
     mut builder: axum::http::response::Builder,
     object: &ObjectRecord,
@@ -3367,6 +3408,23 @@ fn add_s3_metadata_headers(
     }
     if object.legal_hold {
         builder = builder.header("x-amz-object-lock-legal-hold", "ON");
+    }
+    if let Some(owner) = object.created_by.as_deref() {
+        builder = builder.header("x-amz-owner-id", owner);
+        builder = builder.header("x-amz-owner-display-name", owner);
+    }
+    if let Some(meta) = object.user_metadata.as_ref().and_then(|v| v.as_object()) {
+        for (key, value) in meta {
+            if let Some(val_str) = value.as_str() {
+                let header_name = format!("x-amz-meta-{key}");
+                if let (Ok(name), Ok(value)) = (
+                    axum::http::HeaderName::from_bytes(header_name.as_bytes()),
+                    axum::http::HeaderValue::from_str(val_str),
+                ) {
+                    builder = builder.header(name, value);
+                }
+            }
+        }
     }
     builder
 }
@@ -3624,6 +3682,7 @@ mod tests {
                 created_at: "2026-06-29T12:00:00Z".to_owned(),
                 updated_at: "2026-06-29T12:00:00Z".to_owned(),
                 state: "AVAILABLE".to_owned(),
+                created_by: None,
             }],
             common_prefixes: vec!["photos/nested/".to_owned()],
             key_count: 2,
@@ -3686,6 +3745,7 @@ mod tests {
                 created_at: "2026-06-29T12:00:00Z".to_owned(),
                 updated_at: "2026-06-29T12:00:00Z".to_owned(),
                 state: "AVAILABLE".to_owned(),
+                created_by: None,
             }],
             common_prefixes: vec![],
             key_count: 1,
@@ -3844,6 +3904,8 @@ mod tests {
             legal_hold: true,
             created_at: "2026-06-29T12:00:00Z".to_owned(),
             state: "AVAILABLE".to_owned(),
+            user_metadata: None,
+            created_by: None,
         }
     }
 

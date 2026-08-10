@@ -534,6 +534,8 @@ async fn put_small_object(
         retain_until: None,
         legal_hold: false,
         manifest: build_manifest(&bytes, policy.fragment_size_bytes)?,
+        user_metadata: None,
+        created_by: Some("mcp".to_owned()),
     };
     match state
         .catalog
