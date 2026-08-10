@@ -3,6 +3,7 @@ mod audit;
 mod auth;
 mod catalog;
 mod config;
+mod gc;
 mod health;
 mod http;
 mod mcp;
@@ -72,7 +73,7 @@ async fn run_servers(
     let web_bind_addr = config::load_http_bind_addr(&paths)?;
     let s3_bind_addr = config::load_s3_bind_addr(&paths)?;
     let web_app = http::web_router(paths.clone(), setup_state.clone(), catalog.clone());
-    let s3_app = http::s3_router(paths, setup_state, catalog);
+    let s3_app = http::s3_router(paths.clone(), setup_state, catalog.clone());
     let web_listener = tokio::net::TcpListener::bind(web_bind_addr)
         .await
         .with_context(|| format!("failed to bind web server at {web_bind_addr}"))?;
@@ -83,9 +84,16 @@ async fn run_servers(
     info!(%web_bind_addr, "pontemesh-server web listener started");
     info!(%s3_bind_addr, "pontemesh-server S3-compatible listener started");
 
+    let gc_config = config::load_instance_config(&paths)
+        .map(|c| gc::config::GcConfig::from(c.gc))
+        .unwrap_or_default();
+    let gc_metrics = gc::metrics::new_shared();
+    let gc_runtime = gc::scheduler::GcRuntime::new(&catalog, paths, gc_config, gc_metrics);
+
     tokio::try_join!(
         axum::serve(web_listener, web_app).with_graceful_shutdown(shutdown_signal()),
         axum::serve(s3_listener, s3_app).with_graceful_shutdown(shutdown_signal()),
+        async { gc_runtime.run().await; Ok(()) },
     )
     .context("server listener failed")?;
 

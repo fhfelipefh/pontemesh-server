@@ -14,3 +14,15 @@ enabled = true
 warning_percent = 80.0
 degraded_percent = 90.0
 block_percent = 95.0
+
+[garbage_collector]
+enabled = true
+candidate_scan_interval_seconds = 60
+grace_period_seconds = 7200
+quarantine_period_seconds = 86400
+batch_size = 100
+max_concurrent_io = 4
+full_gc_interval_seconds = 86400
+sweep_lease_seconds = 300
+max_retries = 10
+temp_file_max_age_seconds = 3600

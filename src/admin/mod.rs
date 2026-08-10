@@ -328,6 +328,44 @@ pub async fn disk_guard_status(State(state): State<AppState>) -> Response {
     }
 }
 
+pub async fn gc_status(State(state): State<AppState>) -> Response {
+    match config::configured_storage_dir(&state.paths) {
+        Ok(storage_dir) => {
+            match crate::gc::candidate::pending_stats(state.catalog.db_pool()).await {
+                Ok((pending_candidates, pending_bytes)) => {
+                    let gc_config = config::load_instance_config(&state.paths)
+                        .map(|c| c.gc)
+                        .unwrap_or_default();
+                    Json(serde_json::json!({
+                        "enabled": gc_config.enabled,
+                        "state": "IDLE",
+                        "pendingCandidates": pending_candidates,
+                        "pendingBytes": pending_bytes,
+                        "storageDir": storage_dir.display().to_string(),
+                        "gracePeriodSeconds": gc_config.grace_period_seconds,
+                        "quarantinePeriodSeconds": gc_config.quarantine_period_seconds,
+                        "batchSize": gc_config.batch_size,
+                    })).into_response()
+                }
+                Err(error) => internal_error(error),
+            }
+        }
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn gc_dry_run(State(state): State<AppState>) -> Response {
+    match config::configured_storage_dir(&state.paths) {
+        Ok(storage_dir) => {
+            match crate::gc::scheduler::trigger_dry_run(state.catalog.db_pool(), &storage_dir).await {
+                Ok(result) => Json(result).into_response(),
+                Err(error) => internal_error(error),
+            }
+        }
+        Err(error) => internal_error(error),
+    }
+}
+
 pub async fn list_audit_events(
     State(state): State<AppState>,
     Query(query): Query<AuditEventsQuery>,

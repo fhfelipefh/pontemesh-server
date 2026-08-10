@@ -126,6 +126,8 @@ pub struct InstanceConfig {
     pub public_endpoints: PublicEndpointsSection,
     pub storage: StorageSection,
     pub replica: Option<ReplicaSection>,
+    #[serde(default, rename = "garbage_collector")]
+    pub gc: GcSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,6 +206,58 @@ fn default_degraded_percent() -> f64 {
 fn default_block_percent() -> f64 {
     95.0
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GcSection {
+    #[serde(default = "default_gc_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_candidate_scan_interval")]
+    pub candidate_scan_interval_seconds: u64,
+    #[serde(default = "default_grace_period")]
+    pub grace_period_seconds: u64,
+    #[serde(default = "default_quarantine_period")]
+    pub quarantine_period_seconds: u64,
+    #[serde(default = "default_gc_batch_size")]
+    pub batch_size: usize,
+    #[serde(default = "default_max_concurrent_io")]
+    pub max_concurrent_io: usize,
+    #[serde(default = "default_full_gc_interval")]
+    pub full_gc_interval_seconds: u64,
+    #[serde(default = "default_sweep_lease")]
+    pub sweep_lease_seconds: u64,
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    #[serde(default = "default_temp_file_max_age")]
+    pub temp_file_max_age_seconds: u64,
+}
+
+impl Default for GcSection {
+    fn default() -> Self {
+        Self {
+            enabled: default_gc_enabled(),
+            candidate_scan_interval_seconds: default_candidate_scan_interval(),
+            grace_period_seconds: default_grace_period(),
+            quarantine_period_seconds: default_quarantine_period(),
+            batch_size: default_gc_batch_size(),
+            max_concurrent_io: default_max_concurrent_io(),
+            full_gc_interval_seconds: default_full_gc_interval(),
+            sweep_lease_seconds: default_sweep_lease(),
+            max_retries: default_max_retries(),
+            temp_file_max_age_seconds: default_temp_file_max_age(),
+        }
+    }
+}
+
+fn default_gc_enabled() -> bool { true }
+fn default_candidate_scan_interval() -> u64 { 60 }
+fn default_grace_period() -> u64 { 7200 }
+fn default_quarantine_period() -> u64 { 86400 }
+fn default_gc_batch_size() -> usize { 100 }
+fn default_max_concurrent_io() -> usize { 4 }
+fn default_full_gc_interval() -> u64 { 86400 }
+fn default_sweep_lease() -> u64 { 300 }
+fn default_max_retries() -> u32 { 10 }
+fn default_temp_file_max_age() -> u64 { 3600 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalStorageSection {

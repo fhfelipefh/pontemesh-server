@@ -832,6 +832,10 @@ impl Catalog {
         &self.pool
     }
 
+    pub fn db_pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     pub async fn database_connected(&self) -> bool {
         query("SELECT 1").execute(&self.pool).await.is_ok()
     }
