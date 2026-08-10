@@ -113,6 +113,7 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         )
         .route("/api/admin/system/resources", get(admin::system_resources))
         .route("/api/admin/storage/status", get(admin::storage_status))
+        .route("/api/admin/storage/disk-guard", get(admin::disk_guard_status))
         .route("/api/admin/audit-events", get(admin::list_audit_events))
         .route("/api/admin/logs/application", get(admin::application_logs))
         .route(
@@ -5124,6 +5125,7 @@ mod tests {
                 local: LocalStorageSection {
                     path: paths.storage_dir(),
                 },
+                guards: Default::default(),
             },
             replica: (role == InstanceRole::ReplicaEdge).then(|| crate::config::ReplicaSection {
                 origin_base_url: "https://origin.example.com".to_owned(),

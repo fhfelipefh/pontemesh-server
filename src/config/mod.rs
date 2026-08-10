@@ -162,6 +162,47 @@ pub struct PublicEndpointsSection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageSection {
     pub local: LocalStorageSection,
+    #[serde(default)]
+    pub guards: StorageGuardsSection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageGuardsSection {
+    #[serde(default = "default_guards_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_warning_percent")]
+    pub warning_percent: f64,
+    #[serde(default = "default_degraded_percent")]
+    pub degraded_percent: f64,
+    #[serde(default = "default_block_percent")]
+    pub block_percent: f64,
+}
+
+impl Default for StorageGuardsSection {
+    fn default() -> Self {
+        Self {
+            enabled: default_guards_enabled(),
+            warning_percent: default_warning_percent(),
+            degraded_percent: default_degraded_percent(),
+            block_percent: default_block_percent(),
+        }
+    }
+}
+
+fn default_guards_enabled() -> bool {
+    true
+}
+
+fn default_warning_percent() -> f64 {
+    80.0
+}
+
+fn default_degraded_percent() -> f64 {
+    90.0
+}
+
+fn default_block_percent() -> f64 {
+    95.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,6 +229,7 @@ pub struct ReplicaRuntimeConfig {
     pub sync_interval_seconds: u64,
     pub health_interval_seconds: u64,
     pub storage_path: PathBuf,
+    pub storage_guards: StorageGuardsSection,
 }
 
 pub fn load_http_bind_addr(paths: &PontemeshHome) -> anyhow::Result<SocketAddr> {
@@ -439,6 +481,7 @@ pub fn load_replica_runtime_config(paths: &PontemeshHome) -> anyhow::Result<Repl
         sync_interval_seconds: replica.sync_interval_seconds.unwrap_or(30).max(5),
         health_interval_seconds: replica.health_interval_seconds.unwrap_or(30).max(5),
         storage_path,
+        storage_guards: config.storage.guards,
     })
 }
 

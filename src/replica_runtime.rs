@@ -337,6 +337,7 @@ async fn sync_fragment(
         &object.manifest_id,
         fragment,
     )?;
+    crate::system::disk_guard::enforce(&config.storage_path, &config.storage_guards)?;
     let downloaded =
         signed_download_to_file(client, config, Method::GET, &path, &local_path).await?;
     if downloaded.sha256 != fragment.sha256 {

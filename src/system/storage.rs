@@ -110,7 +110,7 @@ pub fn ensure_writable(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn filesystem_usage(path: &Path) -> Option<(u64, u64)> {
+pub fn filesystem_usage(path: &Path) -> Option<(u64, u64)> {
     let canonical = path.canonicalize().unwrap_or_else(|_| PathBuf::from(path));
     let disks = Disks::new_with_refreshed_list();
     disks

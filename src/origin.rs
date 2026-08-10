@@ -1395,6 +1395,10 @@ async fn put_object_inner(
     authorize_s3_action(&policy, principal, "s3:PutObject")?;
 
     let storage_path = config::configured_storage_dir(&state.paths)?;
+    if let Ok(guards) = config::load_instance_config(&state.paths).map(|c| c.storage.guards) {
+        crate::system::disk_guard::enforce(&storage_path, &guards)?;
+    }
+
     let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
     let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/uploads");
     fs::create_dir_all(&temp_dir).with_context(|| {

@@ -8,7 +8,7 @@ use crate::{
     config::{self, InstanceRole},
     http::AppState,
     security::s3_secret::s3_secret_encryption_key,
-    system::{application_logs, environment, resources, storage},
+    system::{application_logs, disk_guard, environment, resources, storage},
 };
 use anyhow::Context;
 use axum::{
@@ -311,6 +311,18 @@ pub async fn storage_status(
                 "storage status requested",
             );
             Json(status).into_response()
+        }
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn disk_guard_status(State(state): State<AppState>) -> Response {
+    match config::configured_storage_dir(&state.paths) {
+        Ok(path) => {
+            let guards = config::load_instance_config(&state.paths)
+                .map(|c| c.storage.guards)
+                .unwrap_or_default();
+            Json(disk_guard::check(&path, &guards)).into_response()
         }
         Err(error) => internal_error(error),
     }
@@ -1420,6 +1432,9 @@ async fn upload_object_inner(
     let mut uploaded_file: Option<UploadedObjectFile> = None;
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
     let storage_path = config::configured_storage_dir(&state.paths)?;
+    if let Ok(guards) = config::load_instance_config(&state.paths).map(|c| c.storage.guards) {
+        crate::system::disk_guard::enforce(&storage_path, &guards)?;
+    }
     let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
     fs::create_dir_all(&bucket_dir).with_context(|| {
         format!(

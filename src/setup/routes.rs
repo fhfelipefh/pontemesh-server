@@ -271,6 +271,7 @@ pub(crate) async fn complete_setup(
         },
         storage: StorageSection {
             local: LocalStorageSection { path: storage_path },
+            guards: Default::default(),
         },
         replica,
     };

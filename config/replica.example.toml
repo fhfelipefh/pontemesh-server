@@ -9,6 +9,12 @@ port = 8080
 [storage.local]
 path = "/var/pontemesh_home/data/storage"
 
+[storage.guards]
+enabled = true
+warning_percent = 80.0
+degraded_percent = 90.0
+block_percent = 95.0
+
 [replica]
 origin_base_url = "https://origin.example.com"
 replica_id = "00000000-0000-0000-0000-000000000000"

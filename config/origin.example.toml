@@ -8,3 +8,9 @@ port = 8080
 
 [storage.local]
 path = "/var/pontemesh_home/data/storage"
+
+[storage.guards]
+enabled = true
+warning_percent = 80.0
+degraded_percent = 90.0
+block_percent = 95.0
