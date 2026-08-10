@@ -285,7 +285,7 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
             json!(
                 state
                     .catalog
-                    .list_objects_page(bucket, query, page, page_size)
+                    .list_objects_page(bucket, query, None, page, page_size)
                     .await?
             )
         }

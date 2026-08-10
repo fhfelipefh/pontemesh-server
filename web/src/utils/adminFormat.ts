@@ -1,3 +1,5 @@
+import type { ObjectsPage } from "../api/bucketsApi";
+
 export function emptyPage<T>(pageSize: number): {
   items: T[];
   page: number;
@@ -7,6 +9,17 @@ export function emptyPage<T>(pageSize: number): {
 } {
   return {
     items: [],
+    page: 1,
+    pageSize,
+    totalItems: 0,
+    totalPages: 1
+  };
+}
+
+export function emptyObjectsPage(pageSize: number): ObjectsPage {
+  return {
+    items: [],
+    commonPrefixes: [],
     page: 1,
     pageSize,
     totalItems: 0,

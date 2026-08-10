@@ -52,6 +52,7 @@ pub struct ObjectSummary {
 #[serde(rename_all = "camelCase")]
 pub struct PaginatedObjects {
     pub items: Vec<ObjectSummary>,
+    pub common_prefixes: Vec<String>,
     pub page: u32,
     pub page_size: u32,
     pub total_items: i64,
@@ -1637,11 +1638,16 @@ impl Catalog {
         &self,
         bucket_name: &str,
         query_text: Option<&str>,
+        prefix: Option<&str>,
         page: u32,
         page_size: u32,
     ) -> anyhow::Result<PaginatedObjects> {
         validate_bucket_name(bucket_name)?;
         let normalized_query = normalize_optional_name(query_text.unwrap_or(""));
+        let effective_prefix: Option<String> = prefix
+            .filter(|p| !p.is_empty())
+            .map(|p| if p.ends_with('/') { p.to_owned() } else { format!("{p}/") });
+
         let bucket_id: Option<String> =
             query_scalar("SELECT id::text FROM buckets WHERE name = $1 AND deleted_at IS NULL")
                 .bind(bucket_name)
@@ -1650,24 +1656,7 @@ impl Catalog {
                 .context("failed to load bucket")?;
         let bucket_id =
             bucket_id.ok_or_else(|| anyhow::anyhow!("bucket not found: {bucket_name}"))?;
-        let total: i64 = query_scalar(
-            r#"
-            SELECT COUNT(*)::bigint
-            FROM objects o
-            WHERE o.bucket_id = $1::uuid
-              AND o.deleted_at IS NULL
-              AND ($2::text IS NULL OR o.object_key ILIKE '%' || $2 || '%')
-            "#,
-        )
-        .bind(&bucket_id)
-        .bind(normalized_query.as_deref())
-        .fetch_one(&self.pool)
-        .await
-        .context("failed to count objects")?;
-        let total_pages = total_pages(total, page_size);
-        let page = page.min(total_pages).max(1);
-        let offset = i64::from(page.saturating_sub(1)) * i64::from(page_size);
-        let limit = i64::from(page_size);
+
         let rows = query(
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
@@ -1677,21 +1666,26 @@ impl Catalog {
             JOIN object_versions v ON v.id = o.current_version_id
             WHERE o.bucket_id = $1::uuid
               AND o.deleted_at IS NULL
-              AND ($2::text IS NULL OR o.object_key ILIKE '%' || $2 || '%')
-            ORDER BY v.created_at DESC, o.object_key ASC
-            LIMIT $3 OFFSET $4
+              AND ($2::text IS NULL OR o.object_key LIKE $2 || '%')
+              AND ($3::text IS NULL OR o.object_key ILIKE '%' || $3 || '%')
+            ORDER BY o.object_key ASC
             "#,
         )
         .bind(&bucket_id)
+        .bind(effective_prefix.as_deref())
         .bind(normalized_query.as_deref())
-        .bind(limit)
-        .bind(offset)
         .fetch_all(&self.pool)
         .await
         .context("failed to list objects")?;
 
+        let delimiter = "/";
+        let prefix_str = effective_prefix.as_deref().unwrap_or("");
+        let (paged_items, common_prefixes, total, total_pages, page) =
+            split_and_paginate(rows.into_iter().map(object_summary_from_row).collect(), prefix_str, delimiter, page, page_size);
+
         Ok(PaginatedObjects {
-            items: rows.into_iter().map(object_summary_from_row).collect(),
+            items: paged_items,
+            common_prefixes,
             page,
             page_size,
             total_items: total,
@@ -6101,6 +6095,35 @@ pub fn build_object_manifest(
     })
 }
 
+fn split_and_paginate(
+    objects: Vec<ObjectSummary>,
+    prefix: &str,
+    delimiter: &str,
+    page: u32,
+    page_size: u32,
+) -> (Vec<ObjectSummary>, Vec<String>, i64, u32, u32) {
+    let mut common_prefixes: Vec<String> = Vec::new();
+    let mut file_items: Vec<ObjectSummary> = Vec::new();
+    for object in objects {
+        match common_prefix_for_key(prefix, delimiter, &object.key) {
+            Some(cp) => {
+                if !common_prefixes.contains(&cp) {
+                    common_prefixes.push(cp);
+                }
+            }
+            None => file_items.push(object),
+        }
+    }
+    let total = i64::try_from(file_items.len()).unwrap_or(i64::MAX);
+    let pages = total_pages(total, page_size);
+    let clamped_page = page.min(pages).max(1);
+    let offset = usize::try_from(clamped_page.saturating_sub(1)).unwrap_or(0)
+        * usize::try_from(page_size).unwrap_or(20);
+    let limit = usize::try_from(page_size).unwrap_or(20);
+    let paged = file_items.into_iter().skip(offset).take(limit).collect();
+    (paged, common_prefixes, total, pages, clamped_page)
+}
+
 fn map_unique_violation(message: &'static str) -> impl Fn(sqlx_core::Error) -> anyhow::Error {
     move |error| match &error {
         sqlx_core::Error::Database(database_error)
@@ -6208,6 +6231,123 @@ mod tests {
             expose_prompts: true,
             allow_localhost_only: true,
         }
+    }
+
+    fn make_object(key: &str) -> ObjectSummary {
+        ObjectSummary {
+            key: key.to_string(),
+            size_bytes: 100,
+            content_type: "application/octet-stream".to_string(),
+            sha256: "abc".to_string(),
+            version_id: None,
+            is_delete_marker: false,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            state: "AVAILABLE".to_string(),
+        }
+    }
+
+    #[test]
+    fn common_prefix_for_key_returns_none_when_no_delimiter_in_rest() {
+        assert_eq!(common_prefix_for_key("", "/", "file.txt"), None);
+        assert_eq!(common_prefix_for_key("a/", "/", "a/file.txt"), None);
+    }
+
+    #[test]
+    fn common_prefix_for_key_returns_prefix_up_to_and_including_delimiter() {
+        assert_eq!(
+            common_prefix_for_key("", "/", "folder/file.txt"),
+            Some("folder/".to_string())
+        );
+        assert_eq!(
+            common_prefix_for_key("a/", "/", "a/b/file.txt"),
+            Some("a/b/".to_string())
+        );
+        assert_eq!(
+            common_prefix_for_key("a/", "/", "a/b/c/file.txt"),
+            Some("a/b/".to_string())
+        );
+    }
+
+    #[test]
+    fn common_prefix_for_key_returns_none_when_key_does_not_start_with_prefix() {
+        assert_eq!(common_prefix_for_key("x/", "/", "y/file.txt"), None);
+    }
+
+    #[test]
+    fn split_and_paginate_separates_files_from_subdirectories() {
+        let objects = vec![
+            make_object("docs/readme.md"),
+            make_object("docs/guide.md"),
+            make_object("images/logo.png"),
+            make_object("root.txt"),
+        ];
+        let (files, prefixes, total, _pages, _page) =
+            split_and_paginate(objects, "", "/", 1, 20);
+
+        assert_eq!(total, 1);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].key, "root.txt");
+        assert_eq!(prefixes.len(), 2);
+        assert!(prefixes.contains(&"docs/".to_string()));
+        assert!(prefixes.contains(&"images/".to_string()));
+    }
+
+    #[test]
+    fn split_and_paginate_deduplicates_common_prefixes() {
+        let objects = vec![
+            make_object("a/file1.txt"),
+            make_object("a/file2.txt"),
+            make_object("a/file3.txt"),
+        ];
+        let (_files, prefixes, _total, _pages, _page) =
+            split_and_paginate(objects, "", "/", 1, 20);
+
+        assert_eq!(prefixes, vec!["a/".to_string()]);
+    }
+
+    #[test]
+    fn split_and_paginate_paginates_file_items_only() {
+        let objects: Vec<ObjectSummary> = (0..25)
+            .map(|i| make_object(&format!("file{i:02}.txt")))
+            .collect();
+
+        let (page1, _, total, total_pages, page_num) =
+            split_and_paginate(objects.clone(), "", "/", 1, 10);
+        assert_eq!(total, 25);
+        assert_eq!(total_pages, 3);
+        assert_eq!(page_num, 1);
+        assert_eq!(page1.len(), 10);
+        assert_eq!(page1[0].key, "file00.txt");
+
+        let (page3, _, _, _, _) = split_and_paginate(objects, "", "/", 3, 10);
+        assert_eq!(page3.len(), 5);
+        assert_eq!(page3[0].key, "file20.txt");
+    }
+
+    #[test]
+    fn split_and_paginate_clamps_page_to_last_when_out_of_bounds() {
+        let objects: Vec<ObjectSummary> = (0..5)
+            .map(|i| make_object(&format!("file{i}.txt")))
+            .collect();
+
+        let (items, _, _, _, page_num) = split_and_paginate(objects, "", "/", 99, 10);
+        assert_eq!(page_num, 1);
+        assert_eq!(items.len(), 5);
+    }
+
+    #[test]
+    fn split_and_paginate_with_prefix_only_counts_direct_children() {
+        let objects = vec![
+            make_object("a/b/deep.txt"),
+            make_object("a/direct.txt"),
+        ];
+        let (files, prefixes, total, _, _) =
+            split_and_paginate(objects, "a/", "/", 1, 20);
+
+        assert_eq!(total, 1);
+        assert_eq!(files[0].key, "a/direct.txt");
+        assert_eq!(prefixes, vec!["a/b/".to_string()]);
     }
 }
 

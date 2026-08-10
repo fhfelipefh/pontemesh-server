@@ -70,7 +70,7 @@ pub async fn read_resource(
             json!(
                 state
                     .catalog
-                    .list_objects_page(bucket, None, 1, 100)
+                    .list_objects_page(bucket, None, None, 1, 100)
                     .await?
             )
         }

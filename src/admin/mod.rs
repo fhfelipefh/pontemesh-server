@@ -83,6 +83,7 @@ pub struct ListBucketsQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ListObjectsQuery {
     query: Option<String>,
+    prefix: Option<String>,
     page: Option<u32>,
     page_size: Option<u32>,
 }
@@ -904,7 +905,7 @@ pub async fn list_objects(
     let (page, page_size) = normalize_storage_pagination(query.page, query.page_size);
     match state
         .catalog
-        .list_objects_page(&bucket_name, query.query.as_deref(), page, page_size)
+        .list_objects_page(&bucket_name, query.query.as_deref(), query.prefix.as_deref(), page, page_size)
         .await
     {
         Ok(objects) => Json(objects).into_response(),
