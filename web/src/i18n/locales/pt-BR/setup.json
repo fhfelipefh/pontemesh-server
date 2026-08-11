@@ -328,6 +328,19 @@
         "loadFailed": "Falha ao carregar o nome da instância.",
         "saveFailed": "Falha ao salvar o nome da instância."
       },
+      "update": {
+        "title": "Atualização do servidor",
+        "available": "Nova versão do Ponte Mesh Server disponível: {{version}}.",
+        "current": "Ponte Mesh Server está atualizado ({{version}}).",
+        "action": "Atualizar agora",
+        "notConfigured": "Atualização automática não configurada.",
+        "restartPending": "Atualização iniciada. O serviço será reiniciado após a conclusão.",
+        "confirmTitle": "Atualizar o servidor?",
+        "confirmDescription": "A versão {{version}} será instalada e o serviço será reiniciado após a conclusão.",
+        "confirmAction": "Atualizar agora",
+        "loadFailed": "Falha ao verificar atualizações.",
+        "requestFailed": "Falha ao iniciar a atualização."
+      },
       "configuration": {
         "title": "Backup de configurações",
         "export": "Exportar JSON",

@@ -52,6 +52,7 @@ Os principais objetivos de segurança são:
 * impedir uso indevido de pacotes de acesso, tickets ou URLs temporárias;
 * reduzir risco de replay em requisições sensíveis;
 * auditar ações administrativas, replicação, emissão de pacotes de acesso, revogações e falhas;
+* limitar atualizações solicitadas pelo painel a um atualizador confiável, configurado pelo operador, sem aceitar comandos do navegador;
 * preservar previsibilidade operacional mesmo com peers instáveis, maliciosos ou indisponíveis;
 * garantir que falhas de configuração resultem em negação de acesso, não em permissão implícita.
 
