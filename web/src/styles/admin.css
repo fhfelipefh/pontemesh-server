@@ -1800,9 +1800,11 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
+  padding: 0;
+  list-style: none;
 }
 
-.admin-users-list span {
+.admin-users-list li {
   border-radius: 999px;
   padding: 5px 10px;
   color: var(--pm-primary-blue-strong);

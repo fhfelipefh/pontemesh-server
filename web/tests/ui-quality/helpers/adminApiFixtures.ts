@@ -201,6 +201,17 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
       return json(route, diskGuardSettings);
     }
 
+    if (path === "/api/admin/users") {
+      return json(route, [
+        {
+          id: "admin-qa",
+          username: "admin",
+          createdAt: now,
+          lastLoginAt: now
+        }
+      ]);
+    }
+
     if (path === "/api/admin/logs/application") {
       return json(route, []);
     }

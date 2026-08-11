@@ -1239,6 +1239,6 @@ function AdminUsersCard({ users, error, saving, currentUsername, currentPassword
       <Button type="submit" disabled={saving || !newAdminUsername.trim() || !newAdminPassword || !currentPassword} icon={<Plus size={17} />}>{t("setup.settings.users.create")}</Button>
     </form>
     {error ? <p className="error-message">{error}</p> : null}
-    <div className="admin-users-list" aria-label={t("setup.settings.users.title")}>{users.map((user) => <span key={user.id}>{user.username}</span>)}</div>
+    <ul className="admin-users-list" aria-label={t("setup.settings.users.title")}>{users.map((user) => <li key={user.id}>{user.username}</li>)}</ul>
   </SettingsSection>;
 }
