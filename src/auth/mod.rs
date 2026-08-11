@@ -18,12 +18,13 @@ use axum::{
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::net::IpAddr;
+use std::{net::IpAddr, time::Duration};
 
 const AUTH_SESSION_COOKIE: &str = "pm_admin_session";
 const REPLICA_SIGNATURE_WINDOW_SECONDS: i64 = 300;
 const LOGIN_RATE_LIMIT_WINDOW_SECONDS: i64 = 300;
 const LOGIN_RATE_LIMIT_MAX_FAILURES: i64 = 10;
+const LOGIN_MINIMUM_RESPONSE_DELAY: Duration = Duration::from_secs(2);
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone)]
@@ -72,6 +73,7 @@ pub async fn login(State(state): State<AppState>, headers: HeaderMap, body: Byte
         Ok(payload) => payload,
         Err(error) => return bad_request(anyhow::anyhow!("invalid JSON payload: {error}")),
     };
+    tokio::time::sleep(LOGIN_MINIMUM_RESPONSE_DELAY).await;
     let username = payload.username.trim();
 
     match state
@@ -566,7 +568,7 @@ fn session_cookie(headers: &HeaderMap, token: &str) -> HeaderValue {
     HeaderValue::from_str(&cookie).expect("valid auth cookie")
 }
 
-fn clear_auth_cookie() -> HeaderValue {
+pub(crate) fn clear_auth_cookie() -> HeaderValue {
     HeaderValue::from_static("pm_admin_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
 }
 

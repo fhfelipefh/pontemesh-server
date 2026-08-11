@@ -797,6 +797,15 @@ pub struct UserRecord {
     pub role: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUserSummary {
+    pub id: String,
+    pub username: String,
+    pub created_at: String,
+    pub last_login_at: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AdminSessionRecord {
     pub user_id: String,
@@ -905,6 +914,73 @@ impl Catalog {
             password_hash: row.get("password_hash"),
             role: row.get("role"),
         }))
+    }
+
+    pub async fn list_active_admin_users(&self) -> anyhow::Result<Vec<AdminUserSummary>> {
+        let rows = query(
+            "SELECT id::text, username, created_at, last_login_at FROM users WHERE role = 'admin' AND is_active = TRUE ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list active admin users")?;
+        Ok(rows
+            .into_iter()
+            .map(|row| AdminUserSummary {
+                id: row.get("id"),
+                username: row.get("username"),
+                created_at: format_datetime(row.get("created_at")),
+                last_login_at: row
+                    .try_get("last_login_at")
+                    .ok()
+                    .flatten()
+                    .map(format_datetime),
+            })
+            .collect())
+    }
+
+    pub async fn create_admin_user(
+        &self,
+        username: &str,
+        password_hash: &str,
+    ) -> anyhow::Result<String> {
+        let row = query("INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'admin') RETURNING id::text")
+            .bind(username)
+            .bind(password_hash)
+            .fetch_one(&self.pool)
+            .await
+            .context("failed to create admin user")?;
+        Ok(row.get("id"))
+    }
+
+    pub async fn update_admin_credentials(
+        &self,
+        user_id: &str,
+        username: &str,
+        password_hash: &str,
+    ) -> anyhow::Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin credentials update transaction")?;
+        let result = query("UPDATE users SET username = $2, password_hash = $3, updated_at = now() WHERE id = $1::uuid AND role = 'admin' AND is_active = TRUE")
+            .bind(user_id)
+            .bind(username)
+            .bind(password_hash)
+            .execute(&mut *tx)
+            .await
+            .context("failed to update admin credentials")?;
+        if result.rows_affected() != 1 {
+            bail!("active admin user not found");
+        }
+        query("UPDATE sessions SET revoked_at = now() WHERE user_id = $1::uuid AND revoked_at IS NULL")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed to revoke prior admin sessions")?;
+        tx.commit()
+            .await
+            .context("failed to commit credentials update")
     }
 
     pub async fn first_active_admin_user(&self) -> anyhow::Result<Option<UserRecord>> {

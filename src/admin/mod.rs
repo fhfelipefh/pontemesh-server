@@ -7,7 +7,10 @@ use crate::{
     },
     config::{self, InstanceRole, StorageGuardsSection},
     http::AppState,
-    security::s3_secret::s3_secret_encryption_key,
+    security::{
+        password::{hash_admin_password, validate_admin_password, verify_admin_password},
+        s3_secret::s3_secret_encryption_key,
+    },
     system::{application_logs, disk_guard, environment, resources, storage},
 };
 use anyhow::Context;
@@ -470,6 +473,22 @@ pub async fn disk_guard_status(State(state): State<AppState>) -> Response {
         }
         Err(error) => internal_error(error),
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAdminUserRequest {
+    username: String,
+    password: String,
+    current_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMyCredentialsRequest {
+    username: String,
+    current_password: String,
+    new_password: String,
 }
 
 pub async fn update_disk_guard(
@@ -1309,6 +1328,125 @@ pub async fn list_application_credentials(State(state): State<AppState>) -> Resp
     }
 }
 
+pub async fn list_admin_users(State(state): State<AppState>) -> Response {
+    match state.catalog.list_active_admin_users().await {
+        Ok(users) => Json(users).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn create_admin_user(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<CreateAdminUserRequest>,
+) -> Response {
+    let username = payload.username.trim();
+    if username.is_empty() {
+        return bad_request(anyhow::anyhow!("username is required"));
+    }
+    let Some(current_user) = (match state
+        .catalog
+        .find_active_user_by_username(&session.username)
+        .await
+    {
+        Ok(user) => user,
+        Err(error) => return internal_error(error),
+    }) else {
+        return admin_unauthorized("authentication required");
+    };
+    if !matches!(
+        verify_admin_password(&payload.current_password, &current_user.password_hash),
+        Ok(true)
+    ) {
+        return admin_unauthorized("current password is incorrect");
+    }
+    if let Err(error) = validate_admin_password(&payload.password) {
+        return bad_request(error);
+    }
+    let password_hash = match hash_admin_password(&payload.password) {
+        Ok(hash) => hash,
+        Err(error) => return internal_error(error),
+    };
+    match state
+        .catalog
+        .create_admin_user(username, &password_hash)
+        .await
+    {
+        Ok(user_id) => {
+            record_admin_audit(
+                &state,
+                "admin_user_created",
+                &session.username,
+                "success",
+                &format!("user_id={user_id}"),
+            )
+            .await;
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({"id": user_id, "username": username})),
+            )
+                .into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn update_my_credentials(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<UpdateMyCredentialsRequest>,
+) -> Response {
+    let username = payload.username.trim();
+    if username.is_empty() {
+        return bad_request(anyhow::anyhow!("username is required"));
+    }
+    let Some(current_user) = (match state
+        .catalog
+        .find_active_user_by_username(&session.username)
+        .await
+    {
+        Ok(user) => user,
+        Err(error) => return internal_error(error),
+    }) else {
+        return admin_unauthorized("authentication required");
+    };
+    if !matches!(
+        verify_admin_password(&payload.current_password, &current_user.password_hash),
+        Ok(true)
+    ) {
+        return admin_unauthorized("current password is incorrect");
+    }
+    if let Err(error) = validate_admin_password(&payload.new_password) {
+        return bad_request(error);
+    }
+    let password_hash = match hash_admin_password(&payload.new_password) {
+        Ok(hash) => hash,
+        Err(error) => return internal_error(error),
+    };
+    match state
+        .catalog
+        .update_admin_credentials(&session.user_id, username, &password_hash)
+        .await
+    {
+        Ok(()) => {
+            record_admin_audit(
+                &state,
+                "admin_credentials_updated",
+                &session.username,
+                "success",
+                "all sessions revoked",
+            )
+            .await;
+            (
+                StatusCode::NO_CONTENT,
+                [(header::SET_COOKIE, crate::auth::clear_auth_cookie())],
+            )
+                .into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
 pub async fn create_application_credential(
     State(state): State<AppState>,
     Extension(session): Extension<AdminSession>,
@@ -1599,6 +1737,14 @@ async fn record_admin_audit(
     {
         audit::failure("audit_persist_failed", Some(username), &error.to_string());
     }
+}
+
+fn admin_unauthorized(message: &str) -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(serde_json::json!({ "error": message })),
+    )
+        .into_response()
 }
 
 async fn build_dashboard_summary(state: &AppState) -> anyhow::Result<DashboardSummary> {

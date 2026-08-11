@@ -3,6 +3,26 @@ use argon2::{
     password_hash::{PasswordHasher, SaltString, rand_core::OsRng},
 };
 
+pub fn validate_admin_password(password: &str) -> anyhow::Result<()> {
+    if password.len() < 12 {
+        anyhow::bail!("password must have at least 12 characters");
+    }
+    if !password
+        .chars()
+        .any(|character| character.is_ascii_lowercase())
+        || !password
+            .chars()
+            .any(|character| character.is_ascii_uppercase())
+        || !password.chars().any(|character| character.is_ascii_digit())
+        || !password
+            .chars()
+            .any(|character| !character.is_ascii_alphanumeric())
+    {
+        anyhow::bail!("password must include upper, lower, number, and symbol");
+    }
+    Ok(())
+}
+
 pub fn hash_admin_password(password: &str) -> anyhow::Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     let hash = Argon2::default()

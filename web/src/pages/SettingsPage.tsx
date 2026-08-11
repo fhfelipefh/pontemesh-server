@@ -1,6 +1,7 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Ban, Check, Copy, Download, HardDrive, KeyRound, Network, Plus, Save, Server, ShieldCheck, Upload, Wrench } from "lucide-react";
+import { Activity, Ban, Check, Copy, Download, HardDrive, KeyRound, LockKeyhole, Network, Plus, Save, Server, ShieldCheck, Upload, Users, Wrench } from "lucide-react";
+import { AdminUserSummary, createAdminUser, listAdminUsers, updateMyCredentials } from "../api/usersApi";
 import { getInstanceSummary, updateInstanceName } from "../api/dashboardApi";
 import { getServerUpdateStatus, requestServerUpdate, ServerUpdateStatus } from "../api/serverUpdateApi";
 import {
@@ -103,6 +104,14 @@ export function SettingsPage() {
   const [serverUpdateError, setServerUpdateError] = useState("");
   const [serverUpdateConfirmation, setServerUpdateConfirmation] = useState(false);
   const [restartPending, setRestartPending] = useState(false);
+  const [adminUsers, setAdminUsers] = useState<AdminUserSummary[]>([]);
+  const [usersError, setUsersError] = useState("");
+  const [currentUsername, setCurrentUsername] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newAdminUsername, setNewAdminUsername] = useState("");
+  const [newAdminPassword, setNewAdminPassword] = useState("");
+  const [savingUsers, setSavingUsers] = useState(false);
 
   useEffect(() => {
     getInstanceSummary()
@@ -215,6 +224,12 @@ export function SettingsPage() {
     void refreshApplications();
   }, [refreshApplications]);
 
+  const refreshAdminUsers = useCallback(async () => {
+    try { setAdminUsers(await listAdminUsers()); } catch (loadError) { setUsersError(loadError instanceof Error ? loadError.message : t("setup.settings.users.loadFailed")); }
+  }, [t]);
+
+  useEffect(() => { void refreshAdminUsers(); }, [refreshAdminUsers]);
+
   const refreshMcp = useCallback(async () => {
     setLoadingMcp(true);
     setMcpError("");
@@ -298,6 +313,22 @@ export function SettingsPage() {
     } finally {
       setRevokingApplication(null);
     }
+  }
+
+  async function handleUpdateCredentials() {
+    setSavingUsers(true); setUsersError("");
+    try {
+      await updateMyCredentials({ username: currentUsername.trim(), currentPassword, newPassword });
+      window.location.assign("/login");
+    } catch (saveError) { setUsersError(saveError instanceof Error ? saveError.message : t("setup.settings.users.updateFailed")); } finally { setSavingUsers(false); }
+  }
+
+  async function handleCreateAdminUser() {
+    setSavingUsers(true); setUsersError("");
+    try {
+      await createAdminUser({ username: newAdminUsername.trim(), password: newAdminPassword, currentPassword });
+      setNewAdminUsername(""); setNewAdminPassword(""); await refreshAdminUsers();
+    } catch (saveError) { setUsersError(saveError instanceof Error ? saveError.message : t("setup.settings.users.createFailed")); } finally { setSavingUsers(false); }
   }
 
   async function handleUpdateMcpSettings(nextSettings: McpSettings) {
@@ -451,6 +482,7 @@ export function SettingsPage() {
           restartPending={restartPending}
           onUpdate={() => setServerUpdateConfirmation(true)}
         />
+        <AdminUsersCard users={adminUsers} error={usersError} saving={savingUsers} currentUsername={currentUsername} currentPassword={currentPassword} newPassword={newPassword} newAdminUsername={newAdminUsername} newAdminPassword={newAdminPassword} onCurrentUsernameChange={setCurrentUsername} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onNewAdminUsernameChange={setNewAdminUsername} onNewAdminPasswordChange={setNewAdminPassword} onUpdate={() => void handleUpdateCredentials()} onCreate={() => void handleCreateAdminUser()} />
         <McpSettingsCard
           settings={mcpSettings}
           status={mcpStatus}
@@ -1189,4 +1221,24 @@ function formatDate(value: string, locale: string): string {
 
 function formatScopes(scopes: string[] | undefined, fallback: string): string {
   return scopes && scopes.length > 0 ? scopes.join(", ") : fallback;
+}
+
+function AdminUsersCard({ users, error, saving, currentUsername, currentPassword, newPassword, newAdminUsername, newAdminPassword, onCurrentUsernameChange, onCurrentPasswordChange, onNewPasswordChange, onNewAdminUsernameChange, onNewAdminPasswordChange, onUpdate, onCreate }: { users: AdminUserSummary[]; error: string; saving: boolean; currentUsername: string; currentPassword: string; newPassword: string; newAdminUsername: string; newAdminPassword: string; onCurrentUsernameChange: (value: string) => void; onCurrentPasswordChange: (value: string) => void; onNewPasswordChange: (value: string) => void; onNewAdminUsernameChange: (value: string) => void; onNewAdminPasswordChange: (value: string) => void; onUpdate: () => void; onCreate: () => void }) {
+  const { t } = useTranslation();
+  return <SettingsSection title={t("setup.settings.users.title")} icon={<Users size={20} />}>
+    <p className="settings-help">{t("setup.settings.users.help")}</p>
+    <form className="inline-form admin-users-form" onSubmit={(event) => { event.preventDefault(); onUpdate(); }}>
+      <input value={currentUsername} onChange={(event) => onCurrentUsernameChange(event.target.value)} placeholder={t("setup.settings.users.username")} aria-label={t("setup.settings.users.username")} autoComplete="username" />
+      <input value={currentPassword} onChange={(event) => onCurrentPasswordChange(event.target.value)} placeholder={t("setup.settings.users.currentPassword")} aria-label={t("setup.settings.users.currentPassword")} type="password" autoComplete="current-password" />
+      <input value={newPassword} onChange={(event) => onNewPasswordChange(event.target.value)} placeholder={t("setup.settings.users.newPassword")} aria-label={t("setup.settings.users.newPassword")} type="password" autoComplete="new-password" />
+      <Button type="submit" disabled={saving || !currentUsername.trim() || !currentPassword || !newPassword} icon={<LockKeyhole size={17} />}>{t("setup.settings.users.update")}</Button>
+    </form>
+    <form className="inline-form admin-users-form" onSubmit={(event) => { event.preventDefault(); onCreate(); }}>
+      <input value={newAdminUsername} onChange={(event) => onNewAdminUsernameChange(event.target.value)} placeholder={t("setup.settings.users.newUsername")} aria-label={t("setup.settings.users.newUsername")} autoComplete="off" />
+      <input value={newAdminPassword} onChange={(event) => onNewAdminPasswordChange(event.target.value)} placeholder={t("setup.settings.users.newPassword")} aria-label={t("setup.settings.users.newPassword")} type="password" autoComplete="new-password" />
+      <Button type="submit" disabled={saving || !newAdminUsername.trim() || !newAdminPassword || !currentPassword} icon={<Plus size={17} />}>{t("setup.settings.users.create")}</Button>
+    </form>
+    {error ? <p className="error-message">{error}</p> : null}
+    <div className="admin-users-list" aria-label={t("setup.settings.users.title")}>{users.map((user) => <span key={user.id}>{user.username}</span>)}</div>
+  </SettingsSection>;
 }

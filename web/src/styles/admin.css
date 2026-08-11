@@ -1759,6 +1759,7 @@
 }
 
 .inline-form input:not([type="checkbox"]):not([type="radio"]),
+.inline-form select,
 .upload-form input,
 .search-box input {
   width: 100%;
@@ -1772,10 +1773,46 @@
 }
 
 .inline-form input:not([type="checkbox"]):not([type="radio"]):focus,
+.inline-form select:focus,
 .upload-form input:focus,
 .search-box input:focus {
   border-color: var(--pm-accent-cyan-blue);
   box-shadow: 0 0 0 4px var(--pm-cyan-focus);
+}
+
+.inline-form select {
+  appearance: none;
+  min-height: 42px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 0 38px 0 12px;
+  color: var(--pm-deep-navy);
+  background: var(--pm-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+}
+
+.admin-users-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  margin-top: 12px;
+}
+
+.admin-users-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.admin-users-list span {
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--pm-primary-blue-strong);
+  background: var(--pm-primary-faint);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+@media (max-width: 860px) {
+  .admin-users-form { grid-template-columns: 1fr; }
 }
 
 .bucket-list {

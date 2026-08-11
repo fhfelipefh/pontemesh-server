@@ -372,6 +372,19 @@
         "exportFailed": "Failed to export configuration.",
         "importFailed": "Failed to import configuration."
       },
+      "users": {
+        "title": "Administrator accounts",
+        "help": "Changing your credentials requires your current password and signs out all active sessions.",
+        "username": "New username",
+        "currentPassword": "Current password",
+        "newPassword": "New password",
+        "newUsername": "New administrator username",
+        "update": "Update my credentials",
+        "create": "Create administrator",
+        "loadFailed": "Failed to load administrator accounts.",
+        "updateFailed": "Failed to update credentials.",
+        "createFailed": "Failed to create administrator."
+      },
       "applications": {
         "title": "Application credentials",
         "name": "Name",

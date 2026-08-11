@@ -372,6 +372,19 @@
         "exportFailed": "Falha ao exportar configuração.",
         "importFailed": "Falha ao importar configuração."
       },
+      "users": {
+        "title": "Contas administradoras",
+        "help": "A alteração exige sua senha atual e encerra todas as sessões ativas.",
+        "username": "Novo usuário",
+        "currentPassword": "Senha atual",
+        "newPassword": "Nova senha",
+        "newUsername": "Usuário do novo administrador",
+        "update": "Atualizar minhas credenciais",
+        "create": "Criar administrador",
+        "loadFailed": "Falha ao carregar contas administradoras.",
+        "updateFailed": "Falha ao atualizar credenciais.",
+        "createFailed": "Falha ao criar administrador."
+      },
       "applications": {
         "title": "Credenciais de aplicação",
         "name": "Nome",
