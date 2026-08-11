@@ -73,6 +73,27 @@ PONTEMESH_PUBLIC_S3_URL=https://s3.example.com
 Não é necessário nem recomendado expor diretamente `8080` ou `9000` quando um
 proxy reverso local encaminha os endpoints públicos.
 
+### Capacidade do storage
+
+O bloco `[storage.guards]` define limites percentuais sobre a capacidade do
+filesystem usado pelo storage. Os valores devem respeitar
+`warning_percent < degraded_percent < block_percent`, no intervalo de 0 a 100.
+Quando a proteção está habilitada e o uso alcança `block_percent`, novas
+gravações administrativas, S3 e de Replica/Edge são bloqueadas; leituras e a
+liberação de espaço permanecem disponíveis.
+
+Esses limites podem ser consultados e alterados por um administrador na seção
+**Configurações > Capacidade do storage**. A alteração é persistida no
+`config.toml` e registrada na auditoria administrativa.
+
+```toml
+[storage.guards]
+enabled = true
+warning_percent = 80.0
+degraded_percent = 90.0
+block_percent = 95.0
+```
+
 Ao usar um IP como endpoint S3 público, configure clientes S3-compatible para o
 estilo de URL path. O estilo virtual-host transforma o bucket em subdomínio e,
 por exemplo, tentaria resolver `bucket.134.65.234.41`, o que não é um hostname

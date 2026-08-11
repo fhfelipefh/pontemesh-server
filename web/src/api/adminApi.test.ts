@@ -24,7 +24,7 @@ import {
 } from "./dashboardApi";
 import { HttpError } from "./http";
 import { createReplicaCredential, listReplicas, revokeReplica } from "./replicasApi";
-import { getStorageStatus } from "./storageApi";
+import { getDiskGuardSettings, getStorageStatus, updateDiskGuardSettings } from "./storageApi";
 
 describe("admin API clients", () => {
   const s3AdvancedPolicy = {
@@ -99,6 +99,44 @@ describe("admin API clients", () => {
       headers: {
         accept: "application/json"
       }
+    });
+  });
+
+  it("reads and updates storage capacity thresholds", async () => {
+    const settings = {
+      enabled: true,
+      level: "OK",
+      usedPercent: 20,
+      availableBytes: 800,
+      totalBytes: 1000,
+      warningPercent: 80,
+      degradedPercent: 90,
+      blockPercent: 95
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(settings))
+      .mockResolvedValueOnce(jsonResponse({ ...settings, blockPercent: 97 }));
+
+    await getDiskGuardSettings();
+    await updateDiskGuardSettings({
+      enabled: true,
+      warningPercent: 80,
+      degradedPercent: 90,
+      blockPercent: 97
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/storage/disk-guard", {
+      headers: { accept: "application/json" }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/storage/disk-guard", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        enabled: true,
+        warningPercent: 80,
+        degradedPercent: 90,
+        blockPercent: 97
+      })
     });
   });
 

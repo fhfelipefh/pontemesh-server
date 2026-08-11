@@ -1,6 +1,6 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Ban, Check, Copy, Download, KeyRound, Network, Plus, Save, Server, ShieldCheck, Upload, Wrench } from "lucide-react";
+import { Activity, Ban, Check, Copy, Download, HardDrive, KeyRound, Network, Plus, Save, Server, ShieldCheck, Upload, Wrench } from "lucide-react";
 import { getInstanceSummary, updateInstanceName } from "../api/dashboardApi";
 import { getServerUpdateStatus, requestServerUpdate, ServerUpdateStatus } from "../api/serverUpdateApi";
 import {
@@ -32,6 +32,7 @@ import {
   updateMcpSettings
 } from "../api/mcpApi";
 import { ConfigurationImportResult, exportConfiguration, importConfiguration } from "../api/configurationApi";
+import { DiskGuardSettings, getDiskGuardSettings, updateDiskGuardSettings } from "../api/storageApi";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
 import { CredentialTable } from "../components/settings/CredentialTable";
@@ -91,6 +92,11 @@ export function SettingsPage() {
   const [loadingInstance, setLoadingInstance] = useState(true);
   const [savingInstance, setSavingInstance] = useState(false);
   const [instanceError, setInstanceError] = useState("");
+  const [diskGuard, setDiskGuard] = useState<DiskGuardSettings | null>(null);
+  const [loadingDiskGuard, setLoadingDiskGuard] = useState(true);
+  const [savingDiskGuard, setSavingDiskGuard] = useState(false);
+  const [diskGuardError, setDiskGuardError] = useState("");
+  const [diskGuardSaved, setDiskGuardSaved] = useState(false);
   const [serverUpdate, setServerUpdate] = useState<ServerUpdateStatus | null>(null);
   const [loadingServerUpdate, setLoadingServerUpdate] = useState(true);
   const [requestingServerUpdate, setRequestingServerUpdate] = useState(false);
@@ -110,6 +116,13 @@ export function SettingsPage() {
       .then(setServerUpdate)
       .catch((loadError) => setServerUpdateError(loadError instanceof Error ? loadError.message : t("setup.settings.update.loadFailed")))
       .finally(() => setLoadingServerUpdate(false));
+  }, [t]);
+
+  useEffect(() => {
+    getDiskGuardSettings()
+      .then(setDiskGuard)
+      .catch((loadError) => setDiskGuardError(loadError instanceof Error ? loadError.message : t("setup.settings.storage.loadFailed")))
+      .finally(() => setLoadingDiskGuard(false));
   }, [t]);
 
   async function handleRequestServerUpdate() {
@@ -140,6 +153,29 @@ export function SettingsPage() {
       setInstanceError(saveError instanceof Error ? saveError.message : t("setup.settings.instance.saveFailed"));
     } finally {
       setSavingInstance(false);
+    }
+  }
+
+  async function handleSaveDiskGuard() {
+    if (!diskGuard) {
+      return;
+    }
+    setSavingDiskGuard(true);
+    setDiskGuardError("");
+    setDiskGuardSaved(false);
+    try {
+      const saved = await updateDiskGuardSettings({
+        enabled: diskGuard.enabled,
+        warningPercent: diskGuard.warningPercent,
+        degradedPercent: diskGuard.degradedPercent,
+        blockPercent: diskGuard.blockPercent
+      });
+      setDiskGuard(saved);
+      setDiskGuardSaved(true);
+    } catch (saveError) {
+      setDiskGuardError(saveError instanceof Error ? saveError.message : t("setup.settings.storage.saveFailed"));
+    } finally {
+      setSavingDiskGuard(false);
     }
   }
 
@@ -395,6 +431,18 @@ export function SettingsPage() {
           </form>
           {instanceError ? <p className="error-message">{instanceError}</p> : null}
         </SettingsSection>
+        <StorageCapacityCard
+          settings={diskGuard}
+          loading={loadingDiskGuard}
+          saving={savingDiskGuard}
+          saved={diskGuardSaved}
+          error={diskGuardError}
+          onChange={(nextSettings) => {
+            setDiskGuardSaved(false);
+            setDiskGuard(nextSettings);
+          }}
+          onSave={() => void handleSaveDiskGuard()}
+        />
         <ServerUpdateCard
           status={serverUpdate}
           loading={loadingServerUpdate}
@@ -504,6 +552,138 @@ export function SettingsPage() {
         />
       ) : null}
     </div>
+  );
+}
+
+function StorageCapacityCard({
+  settings,
+  loading,
+  saving,
+  saved,
+  error,
+  onChange,
+  onSave
+}: {
+  settings: DiskGuardSettings | null;
+  loading: boolean;
+  saving: boolean;
+  saved: boolean;
+  error: string;
+  onChange: (settings: DiskGuardSettings) => void;
+  onSave: () => void;
+}) {
+  const { t } = useTranslation();
+  const thresholdsValid = settings !== null
+    && settings.warningPercent >= 0
+    && settings.warningPercent < settings.degradedPercent
+    && settings.degradedPercent < settings.blockPercent
+    && settings.blockPercent <= 100;
+
+  return (
+    <SettingsSection
+      className="settings-card--wide"
+      title={t("setup.settings.storage.title")}
+      description={t("setup.settings.storage.description")}
+      icon={<HardDrive size={20} />}
+    >
+      {error ? <p className="error-message">{error}</p> : null}
+      {loading || !settings ? (
+        <div className="settings-loading">{t("setup.common.loading")}</div>
+      ) : (
+        <form className="storage-capacity-form" onSubmit={(event) => {
+          event.preventDefault();
+          onSave();
+        }}>
+          <div className="storage-capacity-form__summary">
+            <ToggleRow
+              label={t("setup.settings.storage.enabled")}
+              checked={settings.enabled}
+              disabled={saving}
+              onChange={(enabled) => onChange({ ...settings, enabled })}
+            />
+            <div className="storage-capacity-form__usage">
+              <span>{t("setup.settings.storage.currentUsage")}</span>
+              <strong>{settings.usedPercent === null ? t("setup.common.unavailable") : `${settings.usedPercent.toFixed(1)}%`}</strong>
+            </div>
+          </div>
+          <div className="storage-capacity-form__thresholds">
+            <StorageThresholdField
+              id="storage-warning-percent"
+              label={t("setup.settings.storage.warningPercent")}
+              value={settings.warningPercent}
+              disabled={saving || !settings.enabled}
+              onChange={(warningPercent) => onChange({ ...settings, warningPercent })}
+            />
+            <StorageThresholdField
+              id="storage-degraded-percent"
+              label={t("setup.settings.storage.degradedPercent")}
+              value={settings.degradedPercent}
+              disabled={saving || !settings.enabled}
+              onChange={(degradedPercent) => onChange({ ...settings, degradedPercent })}
+            />
+            <StorageThresholdField
+              id="storage-block-percent"
+              label={t("setup.settings.storage.blockPercent")}
+              value={settings.blockPercent}
+              disabled={saving || !settings.enabled}
+              onChange={(blockPercent) => onChange({ ...settings, blockPercent })}
+            />
+          </div>
+          {!thresholdsValid ? <p className="settings-warning">{t("setup.settings.storage.invalidThresholds")}</p> : null}
+          <div className="storage-capacity-form__actions">
+            {saved ? (
+              <span className="storage-capacity-form__saved" role="status">
+                <Check size={16} aria-hidden="true" />
+                {t("setup.settings.storage.saved")}
+              </span>
+            ) : null}
+            <Button
+              data-testid="save-storage-capacity"
+              type="submit"
+              loading={saving}
+              disabled={saving || !thresholdsValid}
+              icon={<Save size={17} aria-hidden="true" />}
+            >
+              {t("setup.common.save")}
+            </Button>
+          </div>
+        </form>
+      )}
+    </SettingsSection>
+  );
+}
+
+function StorageThresholdField({
+  id,
+  label,
+  value,
+  disabled,
+  onChange
+}: {
+  id: string;
+  label: string;
+  value: number;
+  disabled: boolean;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label htmlFor={id}>
+      <span>{label}</span>
+      <div>
+        <input
+          id={id}
+          type="number"
+          min={0}
+          max={100}
+          step={0.1}
+          required
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(Number(event.target.value))}
+        />
+        <span aria-hidden="true">%</span>
+      </div>
+    </label>
   );
 }
 

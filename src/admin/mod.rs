@@ -5,7 +5,7 @@ use crate::{
         self, BucketPolicyDefaultsUpdate, BucketPolicyUpdate, BucketSummary, NewObject,
         ObjectSummary, ObjectTotals,
     },
-    config::{self, InstanceRole},
+    config::{self, InstanceRole, StorageGuardsSection},
     http::AppState,
     security::s3_secret::s3_secret_encryption_key,
     system::{application_logs, disk_guard, environment, resources, storage},
@@ -54,6 +54,15 @@ pub struct InstanceSummary {
 #[derive(Debug, Deserialize)]
 pub struct UpdateInstanceRequest {
     name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDiskGuardRequest {
+    enabled: bool,
+    warning_percent: f64,
+    degraded_percent: f64,
+    block_percent: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -460,6 +469,42 @@ pub async fn disk_guard_status(State(state): State<AppState>) -> Response {
             Json(disk_guard::check(&path, &guards)).into_response()
         }
         Err(error) => internal_error(error),
+    }
+}
+
+pub async fn update_disk_guard(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(request): Json<UpdateDiskGuardRequest>,
+) -> Response {
+    let guards = StorageGuardsSection {
+        enabled: request.enabled,
+        warning_percent: request.warning_percent,
+        degraded_percent: request.degraded_percent,
+        block_percent: request.block_percent,
+    };
+    match config::update_storage_guards(&state.paths, guards) {
+        Ok(config) => match config::configured_storage_dir(&state.paths) {
+            Ok(path) => {
+                audit::event(
+                    "storage_guards_updated",
+                    Some(&session.username),
+                    "success",
+                    "storage capacity thresholds updated",
+                );
+                record_admin_audit(
+                    &state,
+                    "storage_guards_updated",
+                    &session.username,
+                    "success",
+                    "storage capacity thresholds updated",
+                )
+                .await;
+                Json(disk_guard::check(&path, &config.storage.guards)).into_response()
+            }
+            Err(error) => internal_error(error),
+        },
+        Err(error) => bad_request(error),
     }
 }
 

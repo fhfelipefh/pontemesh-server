@@ -267,15 +267,17 @@ export function ObjectManager({
                   role="row"
                   data-testid="object-row-up"
                 >
-                  <button
-                    className="objects-dir-cell"
-                    type="button"
-                    onClick={navigateUp}
-                    aria-label={t("setup.objects.goUp")}
-                  >
-                    <Folder size={15} aria-hidden="true" />
-                    <span>..</span>
-                  </button>
+                  <span role="cell">
+                    <button
+                      className="objects-dir-cell"
+                      type="button"
+                      onClick={navigateUp}
+                      aria-label={t("setup.objects.goUp")}
+                    >
+                      <Folder size={15} aria-hidden="true" />
+                      <span>..</span>
+                    </button>
+                  </span>
                   <span role="cell" />
                   <span role="cell" />
                   <span role="cell" />
@@ -292,15 +294,17 @@ export function ObjectManager({
                     key={prefix}
                     data-testid="object-row-dir"
                   >
-                    <button
-                      className="objects-dir-cell"
-                      type="button"
-                      onClick={() => navigateToPrefix(prefix)}
-                      title={prefix}
-                    >
-                      <Folder size={15} aria-hidden="true" />
-                      <span>{label}</span>
-                    </button>
+                    <span role="cell">
+                      <button
+                        className="objects-dir-cell"
+                        type="button"
+                        onClick={() => navigateToPrefix(prefix)}
+                        title={prefix}
+                      >
+                        <Folder size={15} aria-hidden="true" />
+                        <span>{label}</span>
+                      </button>
+                    </span>
                     <span role="cell">—</span>
                     <span role="cell">{t("setup.objects.directory")}</span>
                     <span role="cell">—</span>

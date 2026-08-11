@@ -119,7 +119,7 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         .route("/api/admin/storage/status", get(admin::storage_status))
         .route(
             "/api/admin/storage/disk-guard",
-            get(admin::disk_guard_status),
+            get(admin::disk_guard_status).put(admin::update_disk_guard),
         )
         .route("/api/admin/gc/status", get(admin::gc_status))
         .route("/api/admin/gc/dry-run", post(admin::gc_dry_run))

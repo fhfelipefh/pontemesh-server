@@ -55,6 +55,18 @@ test.describe("Buckets page layout quality", () => {
     await expectBodyDoesNotScroll(page);
   });
 
+  test("bucket details should navigate object subfolders", async ({ page }) => {
+    await openBucketsPage(page);
+    await page.getByTestId("bucket-row").first().getByRole("button", { name: /open|abrir/i }).click();
+
+    const dialog = page.getByTestId("bucket-details-dialog");
+    await dialog.getByTestId("object-row-dir").getByRole("button", { name: "images" }).click();
+
+    await expect(dialog.locator(".objects-breadcrumb")).toContainText("images");
+    await expect(dialog.getByText("images/logo.png", { exact: true })).toBeVisible();
+    await expect(dialog.getByTestId("object-row-up")).toBeVisible();
+  });
+
   test("bucket defaults and bulk settings should support selected or all buckets", async ({ page }) => {
     await openBucketsPage(page);
 

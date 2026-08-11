@@ -299,14 +299,21 @@
     },
     "replicas": {
       "title": "Replicas",
+      "description": "Authorize helper nodes to synchronize and serve content within the scopes defined by the Origin.",
+      "summaryLabel": "Replica summary",
+      "total": "Total registered",
+      "active": "Active",
       "credentials": "Replica credentials",
+      "credentialsDescription": "Create a dedicated credential for secure Replica/Edge pairing.",
       "name": "Replica name",
       "namePlaceholder": "edge-1",
       "allowedBuckets": "Allowed buckets",
       "allowedBucketsPlaceholder": "media, documents",
+      "allowedBucketsHint": "Enter buckets separated by commas. The replica can only announce and synchronize these scopes.",
       "availableObjects": "Available objects",
       "lastSeenAt": "Last announcement",
       "neverSeen": "Never",
+      "createdAt": "Created at",
       "create": "Create replica",
       "createdTitle": "Replica token created",
       "replicaId": "Replica ID",
@@ -315,10 +322,13 @@
       "revoke": "Revoke replica",
       "confirmRevokeTitle": "Revoke replica",
       "confirmRevokeDescription": "{{name}}",
+      "registeredTitle": "Registered replicas",
+      "registeredDescription": "Track authorized replicas and their synchronization scopes.",
       "loadFailed": "Failed to load replicas.",
       "createFailed": "Failed to create replica.",
       "revokeFailed": "Failed to revoke replica.",
-      "emptyTitle": "No replicas."
+      "emptyTitle": "No replicas registered.",
+      "emptyDescription": "Create the first credential to connect an authorized Replica/Edge to the Origin."
     },
     "settings": {
       "title": "Settings",
@@ -327,6 +337,19 @@
         "name": "Instance name",
         "loadFailed": "Failed to load the instance name.",
         "saveFailed": "Failed to save the instance name."
+      },
+      "storage": {
+        "title": "Storage capacity",
+        "description": "Choose when the server warns, enters degraded mode, and blocks new writes.",
+        "enabled": "Enforce capacity limit",
+        "currentUsage": "Current disk usage",
+        "warningPercent": "Usage warning",
+        "degradedPercent": "Degraded mode",
+        "blockPercent": "Maximum usage limit",
+        "invalidThresholds": "Use increasing percentages: warning < degraded < maximum limit.",
+        "saved": "Saved",
+        "loadFailed": "Failed to load capacity settings.",
+        "saveFailed": "Failed to save capacity settings."
       },
       "update": {
         "title": "Server update",
