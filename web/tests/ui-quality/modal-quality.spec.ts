@@ -127,6 +127,7 @@ test.describe("Modal and drawer quality", () => {
     await openBucketsPage(page);
     await openFirstBucketDrawer(page);
 
+    await page.getByTestId("bucket-details-dialog").getByTestId("object-row-dir").getByRole("button", { name: "images" }).click();
     await page.getByTestId("bucket-details-dialog").getByRole("button", { name: /delete|excluir/i }).first().click();
 
     await expect(page.getByTestId("bucket-details-dialog")).toBeVisible();
