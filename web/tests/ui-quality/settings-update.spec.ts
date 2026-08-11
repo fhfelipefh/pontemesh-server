@@ -24,3 +24,12 @@ test("shows and saves the maximum storage capacity setting", async ({ page }) =>
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Maximum usage limit")).toHaveValue("97");
 });
+
+test("exposes administrator accounts as a named semantic list", async ({ page }) => {
+  await installAdminApiFixtures(page);
+  await page.goto("/settings");
+
+  const accounts = page.getByRole("list", { name: "Administrator accounts" });
+  await expect(accounts).toBeVisible();
+  await expect(accounts.getByRole("listitem")).toHaveText(["admin"]);
+});
