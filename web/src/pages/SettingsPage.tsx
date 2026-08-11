@@ -51,6 +51,7 @@ import { ServerUpdateCard } from "../components/settings/ServerUpdateCard";
 import { SettingsSection } from "../components/settings/SettingsSection";
 import { StatusBadge } from "../components/settings/StatusBadge";
 import { ToggleRow } from "../components/settings/ToggleRow";
+import { isValidAdminPassword } from "../security/adminPassword";
 
 const S3_KEYS_PAGE_SIZE = 10;
 
@@ -123,6 +124,7 @@ export function SettingsPage() {
   const [newPassword, setNewPassword] = useState("");
   const [newAdminUsername, setNewAdminUsername] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
+  const [newAdminCurrentPassword, setNewAdminCurrentPassword] = useState("");
   const [savingUsers, setSavingUsers] = useState(false);
 
   useEffect(() => {
@@ -184,45 +186,51 @@ export function SettingsPage() {
     }
   }
 
-  async function handleSaveDiskGuard() {
-    if (!diskGuard) {
+  async function handleSaveDiskGuard(nextSettings = diskGuard) {
+    if (!nextSettings) {
       return;
     }
+    const previousSettings = diskGuard;
+    setDiskGuard(nextSettings);
     setSavingDiskGuard(true);
     setDiskGuardError("");
     setDiskGuardSaved(false);
     try {
       const saved = await updateDiskGuardSettings({
-        enabled: diskGuard.enabled,
-        warningPercent: diskGuard.warningPercent,
-        degradedPercent: diskGuard.degradedPercent,
-        blockPercent: diskGuard.blockPercent
+        enabled: nextSettings.enabled,
+        warningPercent: nextSettings.warningPercent,
+        degradedPercent: nextSettings.degradedPercent,
+        blockPercent: nextSettings.blockPercent
       });
       setDiskGuard(saved);
       setDiskGuardSaved(true);
     } catch (saveError) {
+      setDiskGuard(previousSettings);
       setDiskGuardError(saveError instanceof Error ? saveError.message : t("setup.settings.storage.saveFailed"));
     } finally {
       setSavingDiskGuard(false);
     }
   }
 
-  async function handleSaveOperationalWebhook() {
-    if (!operationalWebhook) {
+  async function handleSaveOperationalWebhook(nextSettings = operationalWebhook) {
+    if (!nextSettings) {
       return;
     }
+    const previousSettings = operationalWebhook;
+    setOperationalWebhook(nextSettings);
     setSavingOperationalWebhook(true);
     setOperationalWebhookError("");
     setOperationalWebhookSaved(false);
     try {
       const saved = await updateOperationalWebhook({
-        enabled: operationalWebhook.enabled,
-        url: operationalWebhook.url,
-        cron: operationalWebhook.cron
+        enabled: nextSettings.enabled,
+        url: nextSettings.url,
+        cron: nextSettings.cron
       });
       setOperationalWebhook(saved);
       setOperationalWebhookSaved(true);
     } catch (saveError) {
+      setOperationalWebhook(previousSettings);
       setOperationalWebhookError(saveError instanceof Error ? saveError.message : t("setup.settings.webhook.saveFailed"));
     } finally {
       setSavingOperationalWebhook(false);
@@ -367,8 +375,8 @@ export function SettingsPage() {
   async function handleCreateAdminUser() {
     setSavingUsers(true); setUsersError("");
     try {
-      await createAdminUser({ username: newAdminUsername.trim(), password: newAdminPassword, currentPassword });
-      setNewAdminUsername(""); setNewAdminPassword(""); await refreshAdminUsers();
+      await createAdminUser({ username: newAdminUsername.trim(), password: newAdminPassword, currentPassword: newAdminCurrentPassword });
+      setNewAdminUsername(""); setNewAdminPassword(""); setNewAdminCurrentPassword(""); await refreshAdminUsers();
     } catch (saveError) { setUsersError(saveError instanceof Error ? saveError.message : t("setup.settings.users.createFailed")); } finally { setSavingUsers(false); }
   }
 
@@ -513,6 +521,7 @@ export function SettingsPage() {
             setDiskGuardSaved(false);
             setDiskGuard(nextSettings);
           }}
+          onToggle={(enabled) => diskGuard && void handleSaveDiskGuard({ ...diskGuard, enabled })}
           onSave={() => void handleSaveDiskGuard()}
         />
         <OperationalWebhookCard
@@ -525,6 +534,18 @@ export function SettingsPage() {
             setOperationalWebhookSaved(false);
             setOperationalWebhook(settings);
           }}
+          onToggle={(enabled) => {
+            if (!operationalWebhook) {
+              return;
+            }
+            const nextSettings = { ...operationalWebhook, enabled };
+            if (enabled) {
+              setOperationalWebhookSaved(false);
+              setOperationalWebhook(nextSettings);
+              return;
+            }
+            void handleSaveOperationalWebhook(nextSettings);
+          }}
           onSave={() => void handleSaveOperationalWebhook()}
         />
         <ServerUpdateCard
@@ -535,7 +556,7 @@ export function SettingsPage() {
           restartPending={restartPending}
           onUpdate={() => setServerUpdateConfirmation(true)}
         />
-        <AdminUsersCard users={adminUsers} error={usersError} saving={savingUsers} currentUsername={currentUsername} currentPassword={currentPassword} newPassword={newPassword} newAdminUsername={newAdminUsername} newAdminPassword={newAdminPassword} onCurrentUsernameChange={setCurrentUsername} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onNewAdminUsernameChange={setNewAdminUsername} onNewAdminPasswordChange={setNewAdminPassword} onUpdate={() => void handleUpdateCredentials()} onCreate={() => void handleCreateAdminUser()} />
+        <AdminUsersCard users={adminUsers} error={usersError} saving={savingUsers} currentUsername={currentUsername} currentPassword={currentPassword} newPassword={newPassword} newAdminUsername={newAdminUsername} newAdminPassword={newAdminPassword} newAdminCurrentPassword={newAdminCurrentPassword} onCurrentUsernameChange={setCurrentUsername} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onNewAdminUsernameChange={setNewAdminUsername} onNewAdminPasswordChange={setNewAdminPassword} onNewAdminCurrentPasswordChange={setNewAdminCurrentPassword} onUpdate={() => void handleUpdateCredentials()} onCreate={() => void handleCreateAdminUser()} />
         <McpSettingsCard
           settings={mcpSettings}
           status={mcpStatus}
@@ -647,6 +668,7 @@ function StorageCapacityCard({
   saved,
   error,
   onChange,
+  onToggle,
   onSave
 }: {
   settings: DiskGuardSettings | null;
@@ -655,6 +677,7 @@ function StorageCapacityCard({
   saved: boolean;
   error: string;
   onChange: (settings: DiskGuardSettings) => void;
+  onToggle: (enabled: boolean) => void;
   onSave: () => void;
 }) {
   const { t } = useTranslation();
@@ -679,12 +702,23 @@ function StorageCapacityCard({
           event.preventDefault();
           onSave();
         }}>
+          {!settings.enabled ? (
+            <div className="mcp-settings-grid mcp-settings-grid--single">
+              <ToggleRow
+                label={t("setup.settings.storage.enabled")}
+                checked={settings.enabled}
+                disabled={saving}
+                onChange={onToggle}
+              />
+            </div>
+          ) : (
+            <>
           <div className="storage-capacity-form__summary">
             <ToggleRow
               label={t("setup.settings.storage.enabled")}
               checked={settings.enabled}
               disabled={saving}
-              onChange={(enabled) => onChange({ ...settings, enabled })}
+              onChange={onToggle}
             />
             <div className="storage-capacity-form__usage">
               <span>{t("setup.settings.storage.currentUsage")}</span>
@@ -732,6 +766,8 @@ function StorageCapacityCard({
               {t("setup.common.save")}
             </Button>
           </div>
+            </>
+          )}
         </form>
       )}
     </SettingsSection>
@@ -1265,8 +1301,9 @@ function formatScopes(scopes: string[] | undefined, fallback: string): string {
   return scopes && scopes.length > 0 ? scopes.join(", ") : fallback;
 }
 
-function AdminUsersCard({ users, error, saving, currentUsername, currentPassword, newPassword, newAdminUsername, newAdminPassword, onCurrentUsernameChange, onCurrentPasswordChange, onNewPasswordChange, onNewAdminUsernameChange, onNewAdminPasswordChange, onUpdate, onCreate }: { users: AdminUserSummary[]; error: string; saving: boolean; currentUsername: string; currentPassword: string; newPassword: string; newAdminUsername: string; newAdminPassword: string; onCurrentUsernameChange: (value: string) => void; onCurrentPasswordChange: (value: string) => void; onNewPasswordChange: (value: string) => void; onNewAdminUsernameChange: (value: string) => void; onNewAdminPasswordChange: (value: string) => void; onUpdate: () => void; onCreate: () => void }) {
+function AdminUsersCard({ users, error, saving, currentUsername, currentPassword, newPassword, newAdminUsername, newAdminPassword, newAdminCurrentPassword, onCurrentUsernameChange, onCurrentPasswordChange, onNewPasswordChange, onNewAdminUsernameChange, onNewAdminPasswordChange, onNewAdminCurrentPasswordChange, onUpdate, onCreate }: { users: AdminUserSummary[]; error: string; saving: boolean; currentUsername: string; currentPassword: string; newPassword: string; newAdminUsername: string; newAdminPassword: string; newAdminCurrentPassword: string; onCurrentUsernameChange: (value: string) => void; onCurrentPasswordChange: (value: string) => void; onNewPasswordChange: (value: string) => void; onNewAdminUsernameChange: (value: string) => void; onNewAdminPasswordChange: (value: string) => void; onNewAdminCurrentPasswordChange: (value: string) => void; onUpdate: () => void; onCreate: () => void }) {
   const { t } = useTranslation();
+  const newAdminPasswordValid = isValidAdminPassword(newAdminPassword);
   return <SettingsSection title={t("setup.settings.users.title")} icon={<Users size={20} />}>
     <p className="settings-help">{t("setup.settings.users.help")}</p>
     <form className="inline-form admin-users-form" onSubmit={(event) => { event.preventDefault(); onUpdate(); }}>
@@ -1277,9 +1314,11 @@ function AdminUsersCard({ users, error, saving, currentUsername, currentPassword
     </form>
     <form className="inline-form admin-users-form" onSubmit={(event) => { event.preventDefault(); onCreate(); }}>
       <input value={newAdminUsername} onChange={(event) => onNewAdminUsernameChange(event.target.value)} placeholder={t("setup.settings.users.newUsername")} aria-label={t("setup.settings.users.newUsername")} autoComplete="off" />
-      <input value={newAdminPassword} onChange={(event) => onNewAdminPasswordChange(event.target.value)} placeholder={t("setup.settings.users.newPassword")} aria-label={t("setup.settings.users.newPassword")} type="password" autoComplete="new-password" />
-      <Button type="submit" disabled={saving || !newAdminUsername.trim() || !newAdminPassword || !currentPassword} icon={<Plus size={17} />}>{t("setup.settings.users.create")}</Button>
+      <input value={newAdminPassword} onChange={(event) => onNewAdminPasswordChange(event.target.value)} placeholder={t("setup.settings.users.newPassword")} aria-label={t("setup.settings.users.newPassword")} aria-describedby="new-admin-password-requirements" aria-invalid={newAdminPassword.length > 0 && !newAdminPasswordValid} type="password" autoComplete="new-password" />
+      <input value={newAdminCurrentPassword} onChange={(event) => onNewAdminCurrentPasswordChange(event.target.value)} placeholder={t("setup.settings.users.currentPassword")} aria-label={t("setup.settings.users.confirmCurrentPassword")} type="password" autoComplete="current-password" />
+      <Button type="submit" disabled={saving || !newAdminUsername.trim() || !newAdminPasswordValid || !newAdminCurrentPassword} icon={<Plus size={17} />}>{t("setup.settings.users.create")}</Button>
     </form>
+    <p id="new-admin-password-requirements" className="settings-help admin-password-requirements">{t("setup.settings.users.passwordRequirements")}</p>
     {error ? <p className="error-message">{error}</p> : null}
     <ul className="admin-users-list" aria-label={t("setup.settings.users.title")}>{users.map((user) => <li key={user.id}>{user.username}</li>)}</ul>
   </SettingsSection>;

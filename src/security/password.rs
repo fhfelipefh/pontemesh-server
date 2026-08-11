@@ -4,19 +4,15 @@ use argon2::{
 };
 
 pub fn validate_admin_password(password: &str) -> anyhow::Result<()> {
-    if password.len() < 12 {
+    if password.chars().count() < 12 {
         anyhow::bail!("password must have at least 12 characters");
     }
-    if !password
-        .chars()
-        .any(|character| character.is_ascii_lowercase())
+    if !password.chars().any(|character| character.is_lowercase())
+        || !password.chars().any(|character| character.is_uppercase())
+        || !password.chars().any(|character| character.is_numeric())
         || !password
             .chars()
-            .any(|character| character.is_ascii_uppercase())
-        || !password.chars().any(|character| character.is_ascii_digit())
-        || !password
-            .chars()
-            .any(|character| !character.is_ascii_alphanumeric())
+            .any(|character| !character.is_alphanumeric())
     {
         anyhow::bail!("password must include upper, lower, number, and symbol");
     }
@@ -38,4 +34,23 @@ pub fn verify_admin_password(password: &str, password_hash: &str) -> anyhow::Res
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_strong_ascii_and_unicode_admin_passwords() {
+        assert!(validate_admin_password("PonteMesh123!").is_ok());
+        assert!(validate_admin_password("ÁrvoreSegura１２!x").is_ok());
+    }
+
+    #[test]
+    fn rejects_passwords_missing_any_required_character_class() {
+        assert!(validate_admin_password("pontemesh123!").is_err());
+        assert!(validate_admin_password("PONTEMESH123!").is_err());
+        assert!(validate_admin_password("PonteMeshAdmin!").is_err());
+        assert!(validate_admin_password("PonteMesh1234").is_err());
+    }
 }

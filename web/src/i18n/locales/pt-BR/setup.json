@@ -385,10 +385,12 @@
       },
       "users": {
         "title": "Contas administradoras",
-        "help": "A alteração exige sua senha atual e encerra todas as sessões ativas.",
+        "help": "Alterar suas credenciais ou criar outra conta exige sua senha atual. Alterar suas credenciais encerra todas as sessões ativas.",
         "username": "Novo usuário",
         "currentPassword": "Senha atual",
+        "confirmCurrentPassword": "Sua senha atual para confirmar",
         "newPassword": "Nova senha",
+        "passwordRequirements": "Use pelo menos 12 caracteres, com maiúscula, minúscula, número e símbolo.",
         "newUsername": "Usuário do novo administrador",
         "update": "Atualizar minhas credenciais",
         "create": "Criar administrador",
