@@ -475,6 +475,38 @@ pub fn update_instance_name(paths: &PontemeshHome, name: &str) -> anyhow::Result
     Ok(config)
 }
 
+pub fn update_storage_guards(
+    paths: &PontemeshHome,
+    guards: StorageGuardsSection,
+) -> anyhow::Result<InstanceConfig> {
+    validate_storage_guards(&guards)?;
+    let mut config = load_instance_config(paths)?;
+    config.storage.guards = guards;
+    let serialized = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;
+    fs::write(paths.config_file(), serialized)
+        .with_context(|| format!("failed to write {}", paths.config_file().display()))?;
+    Ok(config)
+}
+
+pub fn validate_storage_guards(guards: &StorageGuardsSection) -> anyhow::Result<()> {
+    let values = [
+        ("warning_percent", guards.warning_percent),
+        ("degraded_percent", guards.degraded_percent),
+        ("block_percent", guards.block_percent),
+    ];
+    for (name, value) in values {
+        if !value.is_finite() || !(0.0..=100.0).contains(&value) {
+            bail!("{name} must be between 0 and 100");
+        }
+    }
+    if guards.warning_percent >= guards.degraded_percent
+        || guards.degraded_percent >= guards.block_percent
+    {
+        bail!("storage thresholds must satisfy warning_percent < degraded_percent < block_percent");
+    }
+    Ok(())
+}
+
 pub fn validate_instance_name(name: &str) -> anyhow::Result<String> {
     let name = name.trim();
     if name.is_empty() {
@@ -600,6 +632,67 @@ mod tests {
         assert!(validate_instance_name("   ").is_err());
         assert!(validate_instance_name("bad\nname").is_err());
         assert!(validate_instance_name(&"x".repeat(101)).is_err());
+    }
+
+    #[test]
+    fn validates_storage_guard_threshold_order() {
+        assert!(validate_storage_guards(&StorageGuardsSection::default()).is_ok());
+        assert!(
+            validate_storage_guards(&StorageGuardsSection {
+                enabled: true,
+                warning_percent: 90.0,
+                degraded_percent: 80.0,
+                block_percent: 95.0,
+            })
+            .is_err()
+        );
+        assert!(
+            validate_storage_guards(&StorageGuardsSection {
+                enabled: true,
+                warning_percent: 80.0,
+                degraded_percent: 90.0,
+                block_percent: 101.0,
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn persists_storage_guard_thresholds() {
+        let home = test_home("storage-guards-update");
+        home.ensure_layout().expect("layout");
+        fs::write(
+            home.config_file(),
+            r#"
+[instance]
+name = "origin"
+role = "origin"
+
+[http]
+bind = "127.0.0.1"
+port = 8080
+
+[storage.local]
+path = "/tmp/pontemesh-origin-storage"
+"#,
+        )
+        .expect("config");
+
+        update_storage_guards(
+            &home,
+            StorageGuardsSection {
+                enabled: true,
+                warning_percent: 82.0,
+                degraded_percent: 91.0,
+                block_percent: 97.0,
+            },
+        )
+        .expect("updated guards");
+
+        let persisted = load_instance_config(&home).expect("persisted config");
+        assert_eq!(persisted.storage.guards.warning_percent, 82.0);
+        assert_eq!(persisted.storage.guards.degraded_percent, 91.0);
+        assert_eq!(persisted.storage.guards.block_percent, 97.0);
     }
 
     #[test]

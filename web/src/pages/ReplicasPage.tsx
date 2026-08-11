@@ -1,5 +1,5 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Ban, Copy, Plus, ServerCog } from "lucide-react";
+import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
+import { Activity, Ban, Boxes, Copy, KeyRound, Plus, ServerCog, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   CreatedReplicaCredential,
@@ -11,6 +11,8 @@ import {
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
 import { ErrorMessage } from "../components/ErrorMessage";
+import { EmptyState } from "../components/settings/EmptyState";
+import { StatusBadge } from "../components/settings/StatusBadge";
 
 type RevokeConfirmation = { id: string; name: string } | null;
 
@@ -77,94 +79,98 @@ export function ReplicasPage() {
   }
 
   return (
-    <div className="settings-page">
-      <header className="settings-page__header">
+    <div className="settings-page replicas-page">
+      <header className="settings-page__header replicas-page__header">
         <div>
           <h1>{t("setup.replicas.title")}</h1>
+          <p>{t("setup.replicas.description")}</p>
         </div>
+        <div className="replicas-page__header-icon" aria-hidden="true"><ServerCog size={28} /></div>
       </header>
-      <section className="settings-card">
-        <div className="settings-card__header">
-          <div className="settings-card__title-group">
-            <div className="settings-card__title-icon">
-              <ServerCog size={20} aria-hidden="true" />
-            </div>
-            <div>
-              <h2>{t("setup.replicas.credentials")}</h2>
-            </div>
-          </div>
-        </div>
-        <form className="inline-form" onSubmit={handleSubmit}>
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("setup.replicas.namePlaceholder")} aria-label={t("setup.replicas.name")} />
-          <input value={allowedBuckets} onChange={(event) => setAllowedBuckets(event.target.value)} placeholder={t("setup.replicas.allowedBucketsPlaceholder")} aria-label={t("setup.replicas.allowedBuckets")} />
-          <Button type="submit" loading={submitting} disabled={!name.trim() || !allowedBuckets.trim()} icon={<Plus size={17} aria-hidden="true" />}>
-            {t("setup.replicas.create")}
-          </Button>
-        </form>
-        <ErrorMessage message={error} />
-        {created ? (
-          <section className="secret-panel" role="status">
-            <strong>{t("setup.replicas.createdTitle")}</strong>
-            <dl>
-              <div>
-                <dt>{t("setup.replicas.replicaId")}</dt>
-                <dd><code>{created.replica.id}</code></dd>
-              </div>
-              <div>
-                <dt>{t("setup.replicas.token")}</dt>
-                <dd>
-                  <code>{created.token}</code>
-                  <button className="icon-button" type="button" title={t("setup.replicas.copyToken")} aria-label={t("setup.replicas.copyToken")} onClick={() => void navigator.clipboard?.writeText(created.token)}>
-                    <Copy size={16} aria-hidden="true" />
-                  </button>
-                </dd>
-              </div>
-            </dl>
-          </section>
-        ) : null}
-        {loading ? (
-          <div className="settings-loading">{t("setup.common.loading")}</div>
-        ) : replicas.length === 0 ? (
-          <div className="settings-empty-state">
-            <h3>{t("setup.replicas.emptyTitle")}</h3>
-          </div>
-        ) : (
-          <div className="settings-table-wrap">
-            <table className="settings-table">
-              <thead>
-                <tr>
-                  <th>{t("setup.replicas.name")}</th>
-                  <th>{t("setup.replicas.allowedBuckets")}</th>
-                  <th>{t("setup.replicas.availableObjects")}</th>
-                  <th>{t("setup.replicas.lastSeenAt")}</th>
-                  <th>{t("setup.settings.s3.status")}</th>
-                  <th>{t("setup.settings.s3.createdAt")}</th>
-                  <th aria-label={t("setup.settings.s3.actions")} />
-                </tr>
-              </thead>
-              <tbody>
-                {replicas.map((replica) => (
-                  <tr key={replica.id}>
-                    <td className="settings-table__name">{replica.name}</td>
-                    <td>{replica.allowedBuckets.join(", ")}</td>
-                    <td>{replica.availableObjects}</td>
-                    <td>{replica.lastSeenAt ? formatDate(replica.lastSeenAt, i18n.language) : t("setup.replicas.neverSeen")}</td>
-                    <td>{replica.revoked ? t("setup.settings.s3.revoked") : t("setup.settings.s3.active")}</td>
-                    <td>{formatDate(replica.createdAt, i18n.language)}</td>
-                    <td className="settings-table__actions">
-                      {!replica.revoked ? (
-                        <button className="settings-revoke-button" type="button" title={t("setup.replicas.revoke")} aria-label={t("setup.replicas.revoke")} disabled={revoking === replica.id} onClick={() => setRevokeConfirmation({ id: replica.id, name: replica.name })}>
-                          <Ban size={16} aria-hidden="true" />
-                        </button>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <section className="replica-summary-grid" aria-label={t("setup.replicas.summaryLabel")}>
+        <ReplicaStat icon={<ServerCog size={18} />} label={t("setup.replicas.total")} value={String(replicas.length)} />
+        <ReplicaStat icon={<ShieldCheck size={18} />} label={t("setup.replicas.active")} value={String(replicas.filter((replica) => !replica.revoked).length)} tone="success" />
+        <ReplicaStat icon={<Boxes size={18} />} label={t("setup.replicas.availableObjects")} value={String(replicas.reduce((total, replica) => total + replica.availableObjects, 0))} />
       </section>
+
+      <div className="replicas-page__layout">
+        <section className="settings-card replica-create-card">
+          <div className="settings-card__header">
+            <div className="settings-card__title-group">
+              <div className="settings-card__title-icon"><KeyRound size={20} aria-hidden="true" /></div>
+              <div>
+                <h2>{t("setup.replicas.credentials")}</h2>
+                <p>{t("setup.replicas.credentialsDescription")}</p>
+              </div>
+            </div>
+          </div>
+          <form className="replica-create-form" onSubmit={handleSubmit}>
+            <label>
+              <span>{t("setup.replicas.name")}</span>
+              <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("setup.replicas.namePlaceholder")} aria-label={t("setup.replicas.name")} />
+            </label>
+            <label>
+              <span>{t("setup.replicas.allowedBuckets")}</span>
+              <input value={allowedBuckets} onChange={(event) => setAllowedBuckets(event.target.value)} placeholder={t("setup.replicas.allowedBucketsPlaceholder")} aria-label={t("setup.replicas.allowedBuckets")} />
+            </label>
+            <p className="replica-create-form__hint">{t("setup.replicas.allowedBucketsHint")}</p>
+            <Button type="submit" loading={submitting} disabled={!name.trim() || !allowedBuckets.trim()} icon={<Plus size={17} aria-hidden="true" />}>
+              {t("setup.replicas.create")}
+            </Button>
+          </form>
+          <ErrorMessage message={error} />
+          {created ? <CreatedReplicaToken created={created} onCopy={() => void navigator.clipboard?.writeText(created.token)} /> : null}
+        </section>
+
+        <section className="settings-card replica-list-card">
+          <div className="settings-card__header">
+            <div className="settings-card__title-group">
+              <div className="settings-card__title-icon"><Activity size={20} aria-hidden="true" /></div>
+              <div>
+                <h2>{t("setup.replicas.registeredTitle")}</h2>
+                <p>{t("setup.replicas.registeredDescription")}</p>
+              </div>
+            </div>
+          </div>
+          {loading ? (
+            <div className="settings-loading">{t("setup.common.loading")}</div>
+          ) : replicas.length === 0 ? (
+            <EmptyState icon={<ServerCog size={22} />} title={t("setup.replicas.emptyTitle")} description={t("setup.replicas.emptyDescription")} />
+          ) : (
+            <div className="replica-list">
+              {replicas.map((replica) => (
+                <article className="replica-card" data-revoked={replica.revoked} key={replica.id}>
+                  <div className="replica-card__heading">
+                    <div className="replica-card__identity">
+                      <span className="replica-card__icon" aria-hidden="true"><ServerCog size={18} /></span>
+                      <div>
+                        <h3>{replica.name}</h3>
+                        <code>{replica.id}</code>
+                      </div>
+                    </div>
+                    <StatusBadge active={!replica.revoked} activeLabel={t("setup.settings.s3.active")} revokedLabel={t("setup.settings.s3.revoked")} />
+                  </div>
+                  <div className="replica-card__metrics">
+                    <ReplicaDetail label={t("setup.replicas.availableObjects")} value={String(replica.availableObjects)} />
+                    <ReplicaDetail label={t("setup.replicas.lastSeenAt")} value={replica.lastSeenAt ? formatDate(replica.lastSeenAt, i18n.language) : t("setup.replicas.neverSeen")} />
+                    <ReplicaDetail label={t("setup.replicas.createdAt")} value={formatDate(replica.createdAt, i18n.language)} />
+                  </div>
+                  <div className="replica-card__footer">
+                    <div className="replica-bucket-tags" aria-label={t("setup.replicas.allowedBuckets")}>
+                      {replica.allowedBuckets.map((bucket) => <span key={bucket}>{bucket}</span>)}
+                    </div>
+                    {!replica.revoked ? (
+                      <button className="settings-revoke-button" type="button" title={t("setup.replicas.revoke")} aria-label={t("setup.replicas.revoke")} disabled={revoking === replica.id} onClick={() => setRevokeConfirmation({ id: replica.id, name: replica.name })}>
+                        <Ban size={16} aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
       {revokeConfirmation ? (
         <ConfirmDialog
           title={t("setup.replicas.confirmRevokeTitle")}
@@ -174,6 +180,27 @@ export function ReplicasPage() {
         />
       ) : null}
     </div>
+  );
+}
+
+function ReplicaStat({ icon, label, value, tone = "default" }: { icon: ReactNode; label: string; value: string; tone?: "default" | "success" }) {
+  return <div className="replica-summary" data-tone={tone}>{icon}<span>{label}</span><strong>{value}</strong></div>;
+}
+
+function ReplicaDetail({ label, value }: { label: string; value: string }) {
+  return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function CreatedReplicaToken({ created, onCopy }: { created: CreatedReplicaCredential; onCopy: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <section className="secret-panel" role="status">
+      <strong>{t("setup.replicas.createdTitle")}</strong>
+      <dl>
+        <div><dt>{t("setup.replicas.replicaId")}</dt><dd><code>{created.replica.id}</code></dd></div>
+        <div><dt>{t("setup.replicas.token")}</dt><dd><code>{created.token}</code><button className="icon-button" type="button" title={t("setup.replicas.copyToken")} aria-label={t("setup.replicas.copyToken")} onClick={onCopy}><Copy size={16} aria-hidden="true" /></button></dd></div>
+      </dl>
+    </section>
   );
 }
 

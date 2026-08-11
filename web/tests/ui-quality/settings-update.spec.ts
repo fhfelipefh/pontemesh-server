@@ -11,3 +11,16 @@ test("confirms a server update before it is requested", async ({ page }) => {
   await page.getByTestId("confirm-dialog").getByRole("button", { name: "Update now" }).click();
   await expect(page.getByText("Update started. The service will restart when it finishes.")).toBeVisible();
 });
+
+test("shows and saves the maximum storage capacity setting", async ({ page }) => {
+  await installAdminApiFixtures(page);
+  await page.goto("/settings");
+
+  await expect(page.getByRole("heading", { name: "Storage capacity" })).toBeVisible();
+  await expect(page.getByLabel("Maximum usage limit")).toHaveValue("95");
+  await page.getByLabel("Maximum usage limit").fill("97");
+  await page.getByTestId("save-storage-capacity").click();
+
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Maximum usage limit")).toHaveValue("97");
+});

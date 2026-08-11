@@ -130,6 +130,16 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
     assets: objects,
     documents: objects.slice(1)
   };
+  let diskGuardSettings = {
+    enabled: true,
+    level: "OK",
+    usedPercent: 20,
+    availableBytes: 8_589_934_592,
+    totalBytes: 10_737_418_240,
+    warningPercent: 80,
+    degradedPercent: 90,
+    blockPercent: 95
+  };
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -182,6 +192,13 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
 
     if (path === "/api/admin/dashboard/summary") {
       return json(route, dashboardSummary);
+    }
+
+    if (path === "/api/admin/storage/disk-guard") {
+      if (request.method() === "PUT") {
+        diskGuardSettings = { ...diskGuardSettings, ...request.postDataJSON() };
+      }
+      return json(route, diskGuardSettings);
     }
 
     if (path === "/api/admin/logs/application") {

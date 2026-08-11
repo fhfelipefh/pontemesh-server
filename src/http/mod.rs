@@ -116,10 +116,18 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             get(admin::server_update_status).post(admin::request_server_update),
         )
         .route("/api/admin/system/resources", get(admin::system_resources))
+        .route(
+            "/api/admin/users",
+            get(admin::list_admin_users).post(admin::create_admin_user),
+        )
+        .route(
+            "/api/admin/users/me/credentials",
+            put(admin::update_my_credentials),
+        )
         .route("/api/admin/storage/status", get(admin::storage_status))
         .route(
             "/api/admin/storage/disk-guard",
-            get(admin::disk_guard_status),
+            get(admin::disk_guard_status).put(admin::update_disk_guard),
         )
         .route("/api/admin/gc/status", get(admin::gc_status))
         .route("/api/admin/gc/dry-run", post(admin::gc_dry_run))

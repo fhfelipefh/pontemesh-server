@@ -299,14 +299,21 @@
     },
     "replicas": {
       "title": "Réplicas",
+      "description": "Autorize nós auxiliares para sincronizar e servir conteúdo dentro dos escopos definidos pelo Origin.",
+      "summaryLabel": "Resumo das réplicas",
+      "total": "Total cadastradas",
+      "active": "Ativas",
       "credentials": "Credenciais de réplica",
+      "credentialsDescription": "Crie uma credencial exclusiva para o pareamento seguro de uma Replica/Edge.",
       "name": "Nome da réplica",
       "namePlaceholder": "edge-1",
       "allowedBuckets": "Buckets permitidos",
       "allowedBucketsPlaceholder": "media, documents",
+      "allowedBucketsHint": "Informe os buckets separados por vírgula. A réplica só poderá anunciar e sincronizar esses escopos.",
       "availableObjects": "Objetos disponíveis",
       "lastSeenAt": "Último anúncio",
       "neverSeen": "Nunca",
+      "createdAt": "Criada em",
       "create": "Criar réplica",
       "createdTitle": "Token de réplica criado",
       "replicaId": "ID da réplica",
@@ -315,10 +322,13 @@
       "revoke": "Revogar réplica",
       "confirmRevokeTitle": "Revogar réplica",
       "confirmRevokeDescription": "{{name}}",
+      "registeredTitle": "Réplicas cadastradas",
+      "registeredDescription": "Acompanhe as réplicas autorizadas e seus escopos de sincronização.",
       "loadFailed": "Falha ao carregar réplicas.",
       "createFailed": "Falha ao criar réplica.",
       "revokeFailed": "Falha ao revogar réplica.",
-      "emptyTitle": "Nenhuma réplica."
+      "emptyTitle": "Nenhuma réplica cadastrada.",
+      "emptyDescription": "Crie a primeira credencial para conectar uma Replica/Edge autorizada ao Origin."
     },
     "settings": {
       "title": "Configurações",
@@ -327,6 +337,19 @@
         "name": "Nome da instância",
         "loadFailed": "Falha ao carregar o nome da instância.",
         "saveFailed": "Falha ao salvar o nome da instância."
+      },
+      "storage": {
+        "title": "Capacidade do storage",
+        "description": "Defina quando o servidor deve alertar, operar em modo degradado e bloquear novas gravações.",
+        "enabled": "Proteger o limite de capacidade",
+        "currentUsage": "Uso atual do disco",
+        "warningPercent": "Alerta de uso",
+        "degradedPercent": "Modo degradado",
+        "blockPercent": "Limite máximo de uso",
+        "invalidThresholds": "Use percentuais crescentes: alerta < degradado < limite máximo.",
+        "saved": "Salvo",
+        "loadFailed": "Falha ao carregar a configuração de capacidade.",
+        "saveFailed": "Falha ao salvar a configuração de capacidade."
       },
       "update": {
         "title": "Atualização do servidor",
@@ -348,6 +371,19 @@
         "imported": "{{count}} políticas de bucket importadas. {{skipped}} ignoradas.",
         "exportFailed": "Falha ao exportar configuração.",
         "importFailed": "Falha ao importar configuração."
+      },
+      "users": {
+        "title": "Contas administradoras",
+        "help": "A alteração exige sua senha atual e encerra todas as sessões ativas.",
+        "username": "Novo usuário",
+        "currentPassword": "Senha atual",
+        "newPassword": "Nova senha",
+        "newUsername": "Usuário do novo administrador",
+        "update": "Atualizar minhas credenciais",
+        "create": "Criar administrador",
+        "loadFailed": "Falha ao carregar contas administradoras.",
+        "updateFailed": "Falha ao atualizar credenciais.",
+        "createFailed": "Falha ao criar administrador."
       },
       "applications": {
         "title": "Credenciais de aplicação",
