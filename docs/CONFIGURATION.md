@@ -77,6 +77,23 @@ PONTEMESH_PUBLIC_S3_URL=https://s3.example.com
 Não é necessário nem recomendado expor diretamente `8080` ou `9000` quando um
 proxy reverso local encaminha os endpoints públicos.
 
+### Atualização supervisionada
+
+Instalações nativas com systemd devem definir:
+
+```text
+PONTEMESH_UPDATE_REQUEST_FILE=/var/lib/pontemesh-server/home/state/update-request.json
+```
+
+O arquivo conecta a confirmação do painel à unidade `pontemesh-update.path`.
+Somente a unidade privilegiada faz download, troca o link da versão, reinicia o
+serviço, verifica `/api/setup/status` e executa rollback. O processo web não deve
+ter permissão de escrita em `/opt/pontemesh-server`.
+
+Quando nginx publica o painel, use a configuração de contingência em
+`deploy/nginx`. Ela mantém uma página estática com HTTP `503` disponível caso o
+upstream em `127.0.0.1:8080` pare de responder.
+
 ### Capacidade do storage
 
 O bloco `[storage.guards]` define limites percentuais sobre a capacidade do

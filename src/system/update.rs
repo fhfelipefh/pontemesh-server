@@ -2,11 +2,11 @@ use crate::config::PontemeshHome;
 use anyhow::{Context, bail};
 use flate2::read::GzDecoder;
 use reqwest::{Client, redirect::Policy};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
-    io,
+    io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
@@ -44,6 +44,15 @@ struct ManifestAsset {
     sha256: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SupervisedUpdateRequest<'a> {
+    schema: u8,
+    repository: &'a str,
+    version: &'a str,
+    release_url: &'a str,
+}
+
 pub async fn latest_release() -> anyhow::Result<GithubRelease> {
     update_client()?
         .get(format!(
@@ -63,6 +72,9 @@ pub async fn stage_and_spawn(
     release: &GithubRelease,
     version: &str,
 ) -> anyhow::Result<()> {
+    let current_executable =
+        std::env::current_exe().context("failed to locate the running executable")?;
+    ensure_update_target_writable(&current_executable)?;
     let stage_dir = paths.state_dir().join("updates").join(version);
     tokio::fs::create_dir_all(&stage_dir)
         .await
@@ -106,8 +118,6 @@ pub async fn stage_and_spawn(
     .await
     .context("update extraction task failed")??;
 
-    let current_executable =
-        std::env::current_exe().context("failed to locate the running executable")?;
     let permissions = fs::metadata(&current_executable)?.permissions();
     fs::set_permissions(&staged_executable, permissions)
         .context("failed to apply executable permissions to staged update")?;
@@ -134,6 +144,73 @@ pub async fn stage_and_spawn(
         std::process::exit(0);
     });
     Ok(())
+}
+
+pub fn queue_supervised_update(
+    request_path: &Path,
+    release: &GithubRelease,
+    version: &str,
+) -> anyhow::Result<()> {
+    if !request_path.is_absolute() {
+        bail!("PONTEMESH_UPDATE_REQUEST_FILE must be an absolute path");
+    }
+    let parent = request_path
+        .parent()
+        .filter(|path| path.is_dir())
+        .context("PONTEMESH_UPDATE_REQUEST_FILE parent directory does not exist")?;
+    let temporary = parent.join(format!(".update-request-{}.tmp", uuid::Uuid::new_v4()));
+    let payload = SupervisedUpdateRequest {
+        schema: 1,
+        repository: UPDATE_REPOSITORY,
+        version,
+        release_url: &release.html_url,
+    };
+    let result = (|| -> anyhow::Result<()> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut output = options
+            .open(&temporary)
+            .with_context(|| format!("failed to create update request {}", temporary.display()))?;
+        serde_json::to_writer(&mut output, &payload)?;
+        output.write_all(b"\n")?;
+        output.sync_all()?;
+        fs::rename(&temporary, request_path).with_context(|| {
+            format!(
+                "failed to publish supervised update request {}",
+                request_path.display()
+            )
+        })?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn ensure_update_target_writable(current_executable: &Path) -> anyhow::Result<()> {
+    let parent = current_executable
+        .parent()
+        .filter(|path| path.is_dir())
+        .context("current executable parent directory does not exist")?;
+    let probe = parent.join(format!(".pontemesh-update-probe-{}", uuid::Uuid::new_v4()));
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .with_context(|| {
+            format!(
+                "installation directory {} is not writable; configure PONTEMESH_UPDATE_REQUEST_FILE for a supervised update",
+                parent.display()
+            )
+        })?;
+    fs::remove_file(&probe)
+        .with_context(|| format!("failed to remove update write probe {}", probe.display()))
 }
 
 pub fn run_apply_helper(args: &[String]) -> anyhow::Result<()> {
@@ -363,5 +440,47 @@ mod tests {
 
         assert!(validate_manifest(&manifest, "0.3.6", &platform_asset_name("0.3.6")).is_ok());
         assert!(validate_manifest(&manifest, "0.3.7", &platform_asset_name("0.3.6")).is_err());
+    }
+
+    #[test]
+    fn writes_a_supervised_update_request_atomically() {
+        let directory =
+            std::env::temp_dir().join(format!("pontemesh-update-request-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).expect("temporary directory");
+        let request_path = directory.join("request.json");
+        let release = GithubRelease {
+            tag_name: "v0.3.8".to_owned(),
+            html_url: "https://github.com/fhfelipefh/pontemesh-server/releases/tag/v0.3.8"
+                .to_owned(),
+            assets: Vec::new(),
+        };
+
+        queue_supervised_update(&request_path, &release, "0.3.8").expect("queued update");
+
+        let payload: serde_json::Value =
+            serde_json::from_slice(&fs::read(&request_path).expect("request file"))
+                .expect("request JSON");
+        assert_eq!(payload["schema"], 1);
+        assert_eq!(payload["repository"], UPDATE_REPOSITORY);
+        assert_eq!(payload["version"], "0.3.8");
+        assert_eq!(payload["releaseUrl"], release.html_url);
+        assert_eq!(
+            fs::read_dir(&directory)
+                .expect("temporary directory")
+                .count(),
+            1
+        );
+        fs::remove_dir_all(directory).expect("temporary directory cleanup");
+    }
+
+    #[test]
+    fn rejects_a_relative_supervised_update_request_path() {
+        let release = GithubRelease {
+            tag_name: "v0.3.8".to_owned(),
+            html_url: "https://example.invalid/v0.3.8".to_owned(),
+            assets: Vec::new(),
+        };
+
+        assert!(queue_supervised_update(Path::new("request.json"), &release, "0.3.8").is_err());
     }
 }

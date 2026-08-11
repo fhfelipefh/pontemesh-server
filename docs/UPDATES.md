@@ -73,9 +73,10 @@ binary switch still requires a controlled restart.
 
 The Settings page can check the latest stable release of the official Ponte Mesh
 Server repository and show a manual update action to administrators. After an
-explicit confirmation, the built-in updater selects the current platform asset,
-validates the release manifest, size, and SHA-256, stages the new executable, and
-uses a detached copy of the current binary to replace and restart the service.
+explicit confirmation, a supervised installation queues the request through
+`PONTEMESH_UPDATE_REQUEST_FILE`. The application writes the request atomically
+and remains running while the service manager downloads and verifies the release.
+The deployment layer owns the restart, health check, and rollback.
 
 Deployments may override the built-in updater with `PONTEMESH_UPDATE_COMMAND`
 set to an absolute trusted executable. The command is never supplied by the
@@ -86,8 +87,27 @@ configured executable with the fixed
 and verify the release manifest and checksum before replacing the executable and
 restarting the service. The request is recorded in the administrative audit log.
 
+The systemd units under `deploy/systemd` connect
+`/var/lib/pontemesh-server/home/state/update-request.json` to the privileged
+`pontemesh-update.service`. The update service removes the marker before running,
+switches releases atomically, waits for `/api/setup/status`, and restores the
+previous release when the health check fails. The application service must not
+receive write access to `/opt/pontemesh-server`.
+
+The built-in executable replacement remains available only for writable,
+standalone installations. It performs a write preflight before staging an asset;
+a read-only installation fails without stopping the running process.
+
 Containers do not replace their own image. For Docker or Kubernetes deployments,
 configure the command as a deployment-specific helper that performs the image
 rollout after verification. Native installations can use the built-in updater;
 read-only filesystems and container image replacement still require an external
 deployment helper.
+
+## Reverse-proxy contingency page
+
+The nginx example under `deploy/nginx` intercepts only web-panel upstream
+`502`, `503`, and `504` responses and returns a static diagnostic page with HTTP
+`503`. The file is served by nginx itself, so it remains available when the
+server or PostgreSQL is unavailable. S3-compatible traffic must keep its protocol
+response behavior and must not use the HTML fallback.

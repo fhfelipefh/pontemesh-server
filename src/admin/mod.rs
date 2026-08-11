@@ -295,6 +295,7 @@ pub async fn update_instance(
 }
 
 const UPDATE_COMMAND_ENV: &str = "PONTEMESH_UPDATE_COMMAND";
+const UPDATE_REQUEST_FILE_ENV: &str = "PONTEMESH_UPDATE_REQUEST_FILE";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -349,7 +350,14 @@ pub async fn request_server_update(
                     .map_err(anyhow::Error::new)
             }
         }
-        _ => update::stage_and_spawn(&state.paths, &release, &status.latest_version).await,
+        _ => match std::env::var(UPDATE_REQUEST_FILE_ENV) {
+            Ok(request_path) if !request_path.trim().is_empty() => update::queue_supervised_update(
+                &PathBuf::from(request_path),
+                &release,
+                &status.latest_version,
+            ),
+            _ => update::stage_and_spawn(&state.paths, &release, &status.latest_version).await,
+        },
     };
     if let Err(error) = update_result {
         audit::failure(

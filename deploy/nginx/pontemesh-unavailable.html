@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Ponte Mesh temporariamente indisponível</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0d1729; color: #f4f7fb; }
+    main { width: min(42rem, calc(100% - 3rem)); padding: 2rem; border: 1px solid #2b3d58; border-radius: 1rem; background: #111d31; box-shadow: 0 1.5rem 4rem #050a1280; }
+    h1 { margin: 0 0 1rem; font-size: clamp(1.5rem, 4vw, 2.25rem); }
+    p, li { color: #c9d5e7; line-height: 1.6; }
+    code { color: #8fc2ff; overflow-wrap: anywhere; }
+    .status { display: inline-block; margin-bottom: 1rem; color: #8fc2ff; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="status">Serviço temporariamente indisponível</span>
+    <h1>O Ponte Mesh não conseguiu responder.</h1>
+    <p>Uma atualização pode estar em andamento. Aguarde 30 segundos e tente novamente.</p>
+    <p>Se o problema continuar, o operador deve verificar:</p>
+    <ul>
+      <li><code>systemctl status pontemesh-server</code></li>
+      <li><code>journalctl -u pontemesh-server -n 100</code></li>
+      <li>conectividade com o PostgreSQL e espaço disponível em disco</li>
+    </ul>
+  </main>
+</body>
+</html>
