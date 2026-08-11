@@ -16,7 +16,7 @@ use aes_gcm::{
 use anyhow::{Context, bail};
 use axum::{
     Extension,
-    body::Body,
+    body::{Body, to_bytes},
     extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::Response,
@@ -30,6 +30,8 @@ use sha2::{Digest, Sha256};
 use std::{cmp, fs, path::PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{info, warn};
+
+const MAX_IN_MEMORY_ENCRYPTED_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct ListObjectsQuery {
@@ -78,6 +80,20 @@ pub async fn list_buckets(
 ) -> Response {
     match state.catalog.list_buckets().await {
         Ok(buckets) => {
+            let mut authorized = Vec::new();
+            for bucket in buckets {
+                if authorize_bucket_action(
+                    &state,
+                    &bucket.name,
+                    &identity.access_key_id,
+                    "s3:ListAllMyBuckets",
+                )
+                .await
+                .is_ok()
+                {
+                    authorized.push(bucket);
+                }
+            }
             record_origin_audit(
                 &state,
                 "s3_list_buckets",
@@ -86,7 +102,7 @@ pub async fn list_buckets(
                 "list buckets",
             )
             .await;
-            s3_xml_response(StatusCode::OK, list_buckets_xml(&buckets))
+            s3_xml_response(StatusCode::OK, list_buckets_xml(&authorized))
         }
         Err(error) => s3_internal_error(error),
     }
@@ -126,8 +142,19 @@ async fn create_bucket_inner_response(
 
 pub async fn head_bucket(
     State(state): State<AppState>,
+    Extension(identity): Extension<S3Identity>,
     Path(bucket_name): Path<String>,
 ) -> Response {
+    if let Err(error) = authorize_bucket_action(
+        &state,
+        &bucket_name,
+        &identity.access_key_id,
+        "s3:ListBucket",
+    )
+    .await
+    {
+        return s3_bad_request(error, Some(&bucket_name), None);
+    }
     match state.catalog.get_bucket(&bucket_name).await {
         Ok(Some(_)) => Response::builder()
             .status(StatusCode::OK)
@@ -147,9 +174,36 @@ pub async fn head_bucket(
 
 pub async fn list_objects(
     State(state): State<AppState>,
+    Extension(identity): Extension<S3Identity>,
     Path(bucket_name): Path<String>,
     Query(query): Query<ListObjectsQuery>,
 ) -> Response {
+    let action = if query.location.is_some() {
+        "s3:GetBucketLocation"
+    } else if query.versioning.is_some() {
+        "s3:GetBucketVersioning"
+    } else if query.versions.is_some() {
+        "s3:ListBucketVersions"
+    } else if query.lifecycle.is_some() {
+        "s3:GetLifecycleConfiguration"
+    } else if query.encryption.is_some() {
+        "s3:GetEncryptionConfiguration"
+    } else if query.object_lock.is_some() {
+        "s3:GetBucketObjectLockConfiguration"
+    } else if query.notification.is_some() {
+        "s3:GetBucketNotification"
+    } else if query.policy.is_some() {
+        "s3:GetBucketPolicy"
+    } else if query.uploads.is_some() {
+        "s3:ListBucketMultipartUploads"
+    } else {
+        "s3:ListBucket"
+    };
+    if let Err(error) =
+        authorize_bucket_action(&state, &bucket_name, &identity.access_key_id, action).await
+    {
+        return s3_bad_request(error, Some(&bucket_name), None);
+    }
     if query.location.is_some() {
         return match state.catalog.get_bucket(&bucket_name).await {
             Ok(Some(_)) => s3_xml_response(StatusCode::OK, bucket_location_xml()),
@@ -297,10 +351,30 @@ pub async fn post_bucket(
     body: Body,
 ) -> Response {
     if query.delete.is_some() {
+        if let Err(error) = authorize_bucket_action(
+            &state,
+            &bucket_name,
+            &identity.access_key_id,
+            "s3:DeleteObject",
+        )
+        .await
+        {
+            return s3_bad_request(error, Some(&bucket_name), None);
+        }
         return delete_objects(state, identity, bucket_name, body).await;
     }
 
     if query.lifecycle.is_some() {
+        if let Err(error) = authorize_bucket_action(
+            &state,
+            &bucket_name,
+            &identity.access_key_id,
+            "s3:PutLifecycleConfiguration",
+        )
+        .await
+        {
+            return s3_bad_request(error, Some(&bucket_name), None);
+        }
         return match state.catalog.apply_s3_lifecycle(&bucket_name).await {
             Ok(result) => s3_xml_response(
                 StatusCode::OK,
@@ -329,6 +403,28 @@ pub async fn put_bucket(
     Query(query): Query<ListObjectsQuery>,
     body: Body,
 ) -> Response {
+    let policy_action = if query.versioning.is_some() {
+        Some("s3:PutBucketVersioning")
+    } else if query.lifecycle.is_some() {
+        Some("s3:PutLifecycleConfiguration")
+    } else if query.encryption.is_some() {
+        Some("s3:PutEncryptionConfiguration")
+    } else if query.object_lock.is_some() {
+        Some("s3:PutBucketObjectLockConfiguration")
+    } else if query.notification.is_some() {
+        Some("s3:PutBucketNotification")
+    } else if query.policy.is_some() {
+        Some("s3:PutBucketPolicy")
+    } else {
+        None
+    };
+    if let Some(action) = policy_action {
+        if let Err(error) =
+            authorize_bucket_action(&state, &bucket_name, &identity.access_key_id, action).await
+        {
+            return s3_bad_request(error, Some(&bucket_name), None);
+        }
+    }
     if query.versioning.is_some() {
         return put_bucket_versioning(state, identity, bucket_name, body).await;
     }
@@ -364,6 +460,16 @@ pub async fn put_object(
     Query(query): Query<ObjectMultipartQuery>,
     body: Body,
 ) -> Response {
+    if let Err(error) = authorize_bucket_action(
+        &state,
+        &bucket_name,
+        &identity.access_key_id,
+        "s3:PutObject",
+    )
+    .await
+    {
+        return s3_bad_request(error, Some(&bucket_name), Some(&object_key));
+    }
     if query.tagging.is_some() {
         return put_object_tagging(state, identity, bucket_name, object_key, body).await;
     }
@@ -501,9 +607,20 @@ pub async fn post_object(
 
 pub async fn head_object(
     State(state): State<AppState>,
+    Extension(identity): Extension<S3Identity>,
     Path((bucket_name, object_key)): Path<(String, String)>,
     Query(query): Query<ObjectMultipartQuery>,
 ) -> Response {
+    if let Err(error) = authorize_bucket_action(
+        &state,
+        &bucket_name,
+        &identity.access_key_id,
+        "s3:GetObject",
+    )
+    .await
+    {
+        return s3_bad_request(error, Some(&bucket_name), Some(&object_key));
+    }
     match state
         .catalog
         .get_object_record_version(&bucket_name, &object_key, query.version_id.as_deref())
@@ -537,6 +654,16 @@ pub async fn get_object(
     Path((bucket_name, object_key)): Path<(String, String)>,
     Query(query): Query<ObjectMultipartQuery>,
 ) -> Response {
+    if let Err(error) = authorize_bucket_action(
+        &state,
+        &bucket_name,
+        &identity.access_key_id,
+        "s3:GetObject",
+    )
+    .await
+    {
+        return s3_bad_request(error, Some(&bucket_name), Some(&object_key));
+    }
     if query.tagging.is_some() {
         return get_object_tagging(state, identity, bucket_name, object_key).await;
     }
@@ -612,6 +739,16 @@ pub async fn delete_object(
     Query(query): Query<ObjectMultipartQuery>,
     Path((bucket_name, object_key)): Path<(String, String)>,
 ) -> Response {
+    if let Err(error) = authorize_bucket_action(
+        &state,
+        &bucket_name,
+        &identity.access_key_id,
+        "s3:DeleteObject",
+    )
+    .await
+    {
+        return s3_bad_request(error, Some(&bucket_name), Some(&object_key));
+    }
     if query.tagging.is_some() {
         return delete_object_tagging(state, identity, bucket_name, object_key).await;
     }
@@ -697,6 +834,16 @@ pub async fn delete_bucket(
     Extension(identity): Extension<S3Identity>,
     Path(bucket_name): Path<String>,
 ) -> Response {
+    if let Err(error) = authorize_bucket_action(
+        &state,
+        &bucket_name,
+        &identity.access_key_id,
+        "s3:DeleteBucket",
+    )
+    .await
+    {
+        return s3_bad_request(error, Some(&bucket_name), None);
+    }
     match state.catalog.delete_bucket(&bucket_name).await {
         Ok(()) => {
             record_origin_audit(
@@ -724,6 +871,16 @@ async fn initiate_multipart_upload(
     bucket_name: String,
     object_key: String,
 ) -> Response {
+    if let Err(error) = authorize_bucket_action(
+        &state,
+        &bucket_name,
+        &identity.access_key_id,
+        "s3:PutObject",
+    )
+    .await
+    {
+        return s3_bad_request(error, Some(&bucket_name), Some(&object_key));
+    }
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -2426,11 +2583,12 @@ async fn parse_object_tagging(body: Body) -> anyhow::Result<Vec<S3ObjectTag>> {
 }
 
 async fn parse_delete_objects(body: Body) -> anyhow::Result<Vec<String>> {
-    let bytes = body
-        .collect()
+    const MAX_DELETE_OBJECTS_BODY_BYTES: usize = 1024 * 1024;
+    const MAX_DELETE_OBJECTS_KEYS: usize = 1000;
+
+    let bytes = to_bytes(body, MAX_DELETE_OBJECTS_BODY_BYTES)
         .await
-        .context("failed to read DeleteObjects body")?
-        .to_bytes();
+        .context("DeleteObjects body exceeds the 1 MiB limit")?;
     let xml = std::str::from_utf8(&bytes).context("DeleteObjects body is not UTF-8")?;
     let mut keys = Vec::new();
     for object_block in xml.split("<Object>").skip(1) {
@@ -2439,6 +2597,9 @@ async fn parse_delete_objects(body: Body) -> anyhow::Result<Vec<String>> {
             .map(|(object, _)| object)
             .ok_or_else(|| anyhow::anyhow!("invalid DeleteObjects XML"))?;
         keys.push(xml_unescape(xml_tag_value(object_block, "Key")?));
+        if keys.len() > MAX_DELETE_OBJECTS_KEYS {
+            bail!("DeleteObjects cannot include more than 1000 objects");
+        }
     }
     if keys.is_empty() {
         bail!("DeleteObjects must include at least one Object");
@@ -2507,6 +2668,37 @@ async fn get_object_inner(
         .ok_or_else(|| anyhow::anyhow!("object not found"))?;
     if object.state != "AVAILABLE" || object.is_delete_marker {
         bail!("object is not available");
+    }
+    if object.encryption_algorithm.is_none() {
+        let path = PathBuf::from(&object.storage_path);
+        let metadata = tokio::fs::metadata(&path)
+            .await
+            .with_context(|| format!("failed to inspect object data {}", object.storage_path))?;
+        let total_size = metadata.len();
+        let range = match headers.get(header::RANGE) {
+            Some(value) => Some(parse_range(
+                value.to_str().context("Range header is not valid UTF-8")?,
+                total_size,
+            )?),
+            None => None,
+        };
+        let (body, _, content_length) =
+            crate::system::streaming::file_body(&path, range.map(|value| (value.start, value.end)))
+                .await?;
+        let status = if range.is_some() {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            StatusCode::OK
+        };
+        return Ok(ServedObjectResponse {
+            response: object_stream_response(&object, status, body, content_length, range),
+            bytes_served: i64::try_from(content_length).context("object response is too large")?,
+            range: range.map(|value| (value.start, value.end)),
+            status_code: status.as_u16(),
+        });
+    }
+    if object.size_bytes > MAX_IN_MEMORY_ENCRYPTED_OBJECT_BYTES as i64 {
+        bail!("encrypted object exceeds the safe in-memory response limit");
     }
     let bytes = read_object_plaintext(&object)
         .with_context(|| format!("failed to read object data {}", object.storage_path))?;
@@ -2598,6 +2790,34 @@ fn object_body_response(
     builder
         .body(Body::from(bytes))
         .expect("valid object body response")
+}
+
+fn object_stream_response(
+    object: &ObjectRecord,
+    status: StatusCode,
+    body: Body,
+    content_length: u64,
+    range: Option<ResolvedRange>,
+) -> Response {
+    let mut builder = Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, object.content_type.as_str())
+        .header(header::CONTENT_LENGTH, content_length.to_string())
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header("ETag", format!("\"{}\"", object.sha256))
+        .header("Last-Modified", object.created_at.as_str())
+        .header("x-amz-version-id", object.version_id.as_str())
+        .header("x-amz-request-id", request_id())
+        .header("x-amz-bucket-region", "us-east-1")
+        .header("x-pontemesh-object-state", object.state.as_str());
+    builder = add_s3_metadata_headers(builder, object);
+    if let Some(range) = range {
+        builder = builder.header(
+            header::CONTENT_RANGE,
+            format!("bytes {}-{}/{}", range.start, range.end, object.size_bytes),
+        );
+    }
+    builder.body(body).expect("valid streaming object response")
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3297,6 +3517,12 @@ fn encrypt_file_in_place(
     object_sha256: &str,
     encryption: &ObjectEncryption,
 ) -> anyhow::Result<()> {
+    let size = fs::metadata(path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?
+        .len();
+    if size > MAX_IN_MEMORY_ENCRYPTED_OBJECT_BYTES {
+        bail!("encrypted objects cannot exceed 64 MiB");
+    }
     let plaintext = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     let cipher = Aes256Gcm::new_from_slice(&sse_key(object_sha256)?)
         .context("failed to initialize object encryption")?;
@@ -3494,6 +3720,16 @@ fn authorize_s3_action(
     Ok(())
 }
 
+async fn authorize_bucket_action(
+    state: &AppState,
+    bucket_name: &str,
+    principal: &str,
+    action: &str,
+) -> anyhow::Result<()> {
+    let policy = state.catalog.get_bucket_policy(bucket_name).await?;
+    authorize_s3_action(&policy, principal, action)
+}
+
 fn statement_matches(statement: &serde_json::Value, principal: &str, action: &str) -> bool {
     json_string_or_array_matches(
         statement.get("Action").or_else(|| statement.get("action")),
@@ -3624,7 +3860,23 @@ async fn record_origin_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::to_bytes;
+
+    #[tokio::test]
+    async fn delete_objects_rejects_oversized_bodies_and_more_than_one_thousand_keys() {
+        let oversized = format!(
+            "<Delete><Object><Key>{}</Key></Object></Delete>",
+            "a".repeat(1024 * 1024)
+        );
+        assert!(parse_delete_objects(Body::from(oversized)).await.is_err());
+
+        let too_many = format!(
+            "<Delete>{}</Delete>",
+            (0..1001)
+                .map(|index| format!("<Object><Key>key-{index}</Key></Object>"))
+                .collect::<String>()
+        );
+        assert!(parse_delete_objects(Body::from(too_many)).await.is_err());
+    }
 
     #[test]
     fn list_buckets_xml_uses_s3_result_shape_and_escapes_names() {

@@ -1906,7 +1906,7 @@ async fn upload_object_inner(
         .await
         .with_context(|| format!("failed to finalize object data {}", object_path.display()))?;
 
-    state
+    let result = state
         .catalog
         .insert_object(NewObject {
             bucket_name: bucket_name.to_owned(),
@@ -1927,7 +1927,11 @@ async fn upload_object_inner(
             user_metadata: None,
             created_by: None,
         })
-        .await
+        .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&object_path).await;
+    }
+    result
 }
 
 struct UploadedObjectFile {
@@ -1950,9 +1954,13 @@ async fn persist_uploaded_file(
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| "application/octet-stream".to_owned());
     let temp_path = bucket_dir.join(format!(".upload-{}.part", uuid::Uuid::new_v4()));
-    let mut output = tokio::fs::File::create(&temp_path)
+    let mut output = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
         .await
         .with_context(|| format!("failed to create upload file {}", temp_path.display()))?;
+    crate::security::secrets::restrict_secret_file(&temp_path)?;
     let mut object_hasher = Sha256::new();
     let mut fragment_hasher = Sha256::new();
     let mut fragments = Vec::new();

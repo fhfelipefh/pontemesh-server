@@ -20,11 +20,11 @@ export type CompleteSetupRequest = {
 
 export type SetupStatusResponse = {
   setupRequired: boolean;
-  serverVersion: string;
-  internalWebPort: number;
-  internalS3Port: number;
-  publicWebUrl: string | null;
-  publicS3Url: string | null;
+  serverVersion?: string;
+  internalWebPort?: number;
+  internalS3Port?: number;
+  publicWebUrl?: string | null;
+  publicS3Url?: string | null;
 };
 
 export type InitialS3AccessKey = {

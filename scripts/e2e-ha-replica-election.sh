@@ -6,7 +6,7 @@ COMPOSE_PROJECT_NAME="pontemesh-ha-e2e"
 COMPOSE_FILE="docker/docker-compose.e2e-ha.yml"
 ORIGIN_URL="http://127.0.0.1:18180"
 ADMIN_USER="admin"
-ADMIN_PASS="correct-password"
+ADMIN_PASS="PonteMeshHaE2e123!"
 BUCKET="e2e-bucket"
 KEY="folder/ha-object.bin"
 PAYLOAD="/tmp/pontemesh-ha-payload.bin"
@@ -21,7 +21,7 @@ Usage: $0 [--keep-running] [--reset]
 Runs a full high-availability E2E scenario with 1 Origin and 5 Replica/Edge
 instances. The test creates a bucket, uploads an object, registers 5 replicas,
 waits until every replica synchronizes the object, validates serving from all
-replicas, stops the Origin, then validates degraded data-plane leadership.
+replicas, stops the Origin, then validates fail-closed authorization.
 
 Options:
   --keep-running  Leave the Compose project running after the test.
@@ -259,24 +259,16 @@ done
 availability="$(curl --silent --show-error --fail -H "authorization: Bearer $app_token" "$ORIGIN_URL/pontemesh/objects/$BUCKET/availability/$KEY")"
 replica_sources="$(printf '%s' "$availability" | json_get 'replicaSources')"
 
-log "Stopping Origin to test degraded leader behavior"
+log "Stopping Origin to test fail-closed authorization"
 compose stop origin-server >/dev/null
 sleep 2
-degraded_ok=0
-degraded_unavailable=0
-leader_port=""
+origin_unavailable=0
 for i in 1 2 3 4 5; do
   out="/tmp/pontemesh-replica-$i-degraded.bin"
   headers="/tmp/pontemesh-replica-$i-degraded.headers"
   code="$(curl --silent --show-error --dump-header "$headers" --output "$out" --write-out '%{http_code}' -H "authorization: Bearer $package_token" "http://127.0.0.1:1818$i/pontemesh/replica/access-packages/$package_id/objects/$BUCKET/$KEY" || true)"
-  if [ "$code" = "200" ]; then
-    got_sha="$(sha256sum "$out" | awk '{print $1}')"
-    grep -qi '^x-pontemesh-degraded-leader: true' "$headers"
-    [ "$got_sha" = "$payload_sha" ]
-    degraded_ok=$((degraded_ok + 1))
-    leader_port="1818$i"
-  elif [ "$code" = "503" ]; then
-    degraded_unavailable=$((degraded_unavailable + 1))
+  if [ "$code" = "503" ] && grep -qi 'Origin is unavailable' "$out"; then
+    origin_unavailable=$((origin_unavailable + 1))
   else
     printf 'unexpected degraded response from replica-%s: %s\n' "$i" "$code" >&2
     cat "$headers" >&2 || true
@@ -284,10 +276,10 @@ for i in 1 2 3 4 5; do
   fi
 done
 
-printf '\nRESULT payload_size=%s payload_sha=%s synced_replicas=%s normal_serves=%s package_sources=%s origin_availability_replica_sources=%s degraded_leaders=%s degraded_standbys=%s leader_port=%s\n' \
-  "$payload_size" "$payload_sha" "$synced" "$normal_ok" "$source_count" "$replica_sources" "$degraded_ok" "$degraded_unavailable" "$leader_port"
+printf '\nRESULT payload_size=%s payload_sha=%s synced_replicas=%s normal_serves=%s package_sources=%s origin_availability_replica_sources=%s origin_unavailable_denials=%s\n' \
+  "$payload_size" "$payload_sha" "$synced" "$normal_ok" "$source_count" "$replica_sources" "$origin_unavailable"
 
-if [ "$synced" -ne 5 ] || [ "$normal_ok" -ne 5 ] || [ "$replica_sources" -ne 5 ] || [ "$degraded_ok" -ne 1 ] || [ "$degraded_unavailable" -ne 4 ]; then
+if [ "$synced" -ne 5 ] || [ "$normal_ok" -ne 5 ] || [ "$replica_sources" -ne 5 ] || [ "$origin_unavailable" -ne 5 ]; then
   printf 'HA replica election E2E assertions failed\n' >&2
   exit 1
 fi

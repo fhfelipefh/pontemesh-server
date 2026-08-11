@@ -6,6 +6,7 @@ use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Request, State},
     handler::Handler,
+    http::{HeaderValue, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{any, delete, get, post, put},
@@ -57,6 +58,7 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
         .route("/health/ready", get(health::readiness))
         .fallback(web_assets::serve)
         .with_state(state)
+        .layer(middleware::from_fn(security_headers))
         .layer(TraceLayer::new_for_http())
 }
 
@@ -98,7 +100,35 @@ pub fn s3_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catalo
             require_origin_instance,
         ))
         .with_state(state)
+        .layer(middleware::from_fn(security_headers))
         .layer(TraceLayer::new_for_http())
+}
+
+async fn security_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"),
+    );
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    headers.insert(
+        "permissions-policy",
+        HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+    );
+    headers.insert(
+        header::STRICT_TRANSPORT_SECURITY,
+        HeaderValue::from_static("max-age=31536000"),
+    );
+    response
 }
 
 fn admin_routes(state: AppState) -> Router<AppState> {
@@ -477,6 +507,22 @@ mod tests {
         };
         let _guard = ctx.guard;
         let app = ctx.app.clone();
+
+        let setup_status = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/setup/status")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(setup_status.status(), StatusCode::OK);
+        assert_eq!(
+            json_body(setup_status).await,
+            serde_json::json!({ "setupRequired": false })
+        );
 
         let unauthenticated = app
             .clone()
@@ -1234,6 +1280,7 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(unsigned.status(), StatusCode::FORBIDDEN);
+        assert_eq!(header_value(&unsigned, "x-content-type-options"), "nosniff");
         assert!(
             response_text(unsigned)
                 .await
@@ -2850,7 +2897,7 @@ mod tests {
         assert!(
             response_text(after_revoke)
                 .await
-                .contains("<Code>InvalidAccessKeyId</Code>")
+                .contains("<Code>SignatureDoesNotMatch</Code>")
         );
     }
 
@@ -3249,7 +3296,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replica_edge_serves_cached_authorized_object_when_origin_is_unavailable() {
+    async fn replica_edge_denies_cached_object_when_origin_is_unavailable() {
         let Some(ctx) =
             TestContext::new_with_role("replica-edge-degraded-serve", InstanceRole::ReplicaEdge)
                 .await
@@ -3285,20 +3332,12 @@ mod tests {
             )
             .await
             .expect("router response");
-        assert_eq!(degraded.status(), StatusCode::OK);
-        assert_eq!(
-            header_value(&degraded, "x-pontemesh-degraded-leader"),
-            "true"
+        assert_eq!(degraded.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(
+            response_text(degraded)
+                .await
+                .contains("Origin is unavailable")
         );
-        assert_eq!(
-            header_value(&degraded, "x-pontemesh-origin-revalidation"),
-            "unavailable"
-        );
-        assert_eq!(
-            header_value(&degraded, "x-pontemesh-election-leader-id"),
-            "replica-test"
-        );
-        assert_eq!(response_bytes(degraded).await.as_ref(), object_bytes);
 
         write_replica_local_state(
             &storage_path,
@@ -3326,7 +3365,7 @@ mod tests {
             not_leader_body["error"]
                 .as_str()
                 .expect("error text")
-                .contains("not_elected_leader")
+                .contains("Origin is unavailable")
         );
     }
 

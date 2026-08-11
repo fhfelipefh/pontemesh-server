@@ -6,7 +6,8 @@ use crate::{
     },
     http::AppState,
     security::{
-        password::hash_admin_password, random::secure_url_token,
+        password::{hash_admin_password, validate_admin_password},
+        random::secure_url_token,
         s3_secret::s3_secret_encryption_key,
     },
     setup::token,
@@ -43,10 +44,15 @@ pub struct UnlockResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SetupStatusResponse {
     setup_required: bool,
-    server_version: &'static str,
-    internal_web_port: u16,
-    internal_s3_port: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    server_version: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    internal_web_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    internal_s3_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     public_web_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     public_s3_url: Option<String>,
 }
 
@@ -77,6 +83,10 @@ pub struct ErrorResponse {
 }
 
 pub async fn status(State(state): State<AppState>) -> Response {
+    let setup_required = state.setup.is_required(&state.paths);
+    if !setup_required {
+        return Json(serde_json::json!({ "setupRequired": false })).into_response();
+    }
     let web_bind_addr = crate::config::load_http_bind_addr(&state.paths)
         .unwrap_or_else(|_| crate::config::default_web_bind_addr());
     let s3_bind_addr = crate::config::load_s3_bind_addr(&state.paths)
@@ -88,17 +98,17 @@ pub async fn status(State(state): State<AppState>) -> Response {
         .ok()
         .flatten();
     Json(SetupStatusResponse {
-        setup_required: state.setup.is_required(&state.paths),
-        server_version: env!("CARGO_PKG_VERSION"),
-        internal_web_port: web_bind_addr.port(),
-        internal_s3_port: s3_bind_addr.port(),
+        setup_required,
+        server_version: Some(env!("CARGO_PKG_VERSION")),
+        internal_web_port: Some(web_bind_addr.port()),
+        internal_s3_port: Some(s3_bind_addr.port()),
         public_web_url,
         public_s3_url,
     })
     .into_response()
 }
 
-pub async fn unlock(State(state): State<AppState>, body: Bytes) -> Response {
+pub async fn unlock(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
     if !state.setup.is_required(&state.paths) {
         return setup_not_available();
     }
@@ -115,8 +125,12 @@ pub async fn unlock(State(state): State<AppState>, body: Bytes) -> Response {
 
             let mut response =
                 (StatusCode::OK, Json(UnlockResponse { unlocked: true })).into_response();
-            let cookie =
-                format!("{SETUP_SESSION_COOKIE}={session}; Path=/; HttpOnly; SameSite=Strict");
+            let secure = request_uses_https(&headers)
+                .then_some("; Secure")
+                .unwrap_or("");
+            let cookie = format!(
+                "{SETUP_SESSION_COOKIE}={session}; Path=/; HttpOnly; SameSite=Strict{secure}"
+            );
             response.headers_mut().insert(
                 header::SET_COOKIE,
                 HeaderValue::from_str(&cookie).expect("valid setup cookie"),
@@ -181,9 +195,7 @@ pub(crate) async fn complete_setup(
     let instance_name = non_empty(payload.instance_name, "instanceName")?;
     let admin_username = non_empty(payload.admin_username, "adminUsername")?;
     let admin_password = non_empty(payload.admin_password, "adminPassword")?;
-    if admin_password.len() < 8 {
-        bail!("adminPassword must have at least 8 characters");
-    }
+    validate_setup_admin_password(&admin_password)?;
 
     let role = match payload.role.as_str() {
         "origin" => InstanceRole::Origin,
@@ -278,9 +290,7 @@ pub(crate) async fn complete_setup(
         webhook: Default::default(),
     };
 
-    let config_toml = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;
-    fs::write(state.paths.config_file(), config_toml)
-        .with_context(|| format!("failed to write {}", state.paths.config_file().display()))?;
+    crate::config::write_instance_config(&state.paths, &config)?;
 
     token::invalidate_initial_admin_token(&state.paths)?;
     fs::write(
@@ -389,6 +399,10 @@ fn non_empty(value: String, field: &str) -> anyhow::Result<String> {
     Ok(trimmed.to_owned())
 }
 
+fn validate_setup_admin_password(password: &str) -> anyhow::Result<()> {
+    validate_admin_password(password).context("adminPassword does not meet the password policy")
+}
+
 fn non_empty_option(value: Option<String>, field: &str) -> anyhow::Result<String> {
     non_empty(
         value.ok_or_else(|| anyhow::anyhow!("{field} is required for replica-edge setup"))?,
@@ -414,6 +428,20 @@ fn read_setup_session(headers: &HeaderMap) -> Option<String> {
 
 fn clear_setup_cookie() -> HeaderValue {
     HeaderValue::from_static("pm_setup_unlock=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+}
+
+fn request_uses_https(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("https"))
+        || headers
+            .get(header::HOST)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|host| {
+                let host = host.split(':').next().unwrap_or(host);
+                host != "localhost" && host != "127.0.0.1" && host != "[::1]"
+            })
 }
 
 pub async fn api_not_found() -> Response {
@@ -476,12 +504,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn setup_uses_the_full_admin_password_policy() {
+        assert!(validate_setup_admin_password("weakpass").is_err());
+        assert!(validate_setup_admin_password("StrongSetup123!").is_ok());
+    }
+
+    #[test]
     fn setup_status_serializes_the_compiled_server_version() {
         let response = SetupStatusResponse {
             setup_required: true,
-            server_version: env!("CARGO_PKG_VERSION"),
-            internal_web_port: 8080,
-            internal_s3_port: 9000,
+            server_version: Some(env!("CARGO_PKG_VERSION")),
+            internal_web_port: Some(8080),
+            internal_s3_port: Some(9000),
             public_web_url: Some("https://origin.example.com".to_owned()),
             public_s3_url: Some("https://origin.example.com:9443".to_owned()),
         };

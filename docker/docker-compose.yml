@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
     environment:
       PONTEMESH_HOME: /var/pontemesh_home
-      PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@postgres:5432/pontemesh
+      PONTEMESH_DATABASE_URL: postgres://pontemesh:${PONTEMESH_POSTGRES_PASSWORD:?Set PONTEMESH_POSTGRES_PASSWORD}@postgres:5432/pontemesh
       PONTEMESH_WEB_PORT: 8080
       PONTEMESH_S3_PORT: 9000
       PONTEMESH_S3_BOOTSTRAP_ACCESS_KEY_ID: ${PONTEMESH_S3_BOOTSTRAP_ACCESS_KEY_ID:-}
@@ -43,7 +43,7 @@ services:
     environment:
       POSTGRES_DB: pontemesh
       POSTGRES_USER: pontemesh
-      POSTGRES_PASSWORD: pontemesh
+      POSTGRES_PASSWORD: ${PONTEMESH_POSTGRES_PASSWORD:?Set PONTEMESH_POSTGRES_PASSWORD}
     volumes:
       - pontemesh_postgres:/var/lib/postgresql
     healthcheck:

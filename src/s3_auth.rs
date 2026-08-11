@@ -328,10 +328,7 @@ struct S3AuthError {
 
 impl S3AuthError {
     fn invalid_access_key() -> Self {
-        Self {
-            code: "InvalidAccessKeyId",
-            message: "The access key id does not exist.".to_owned(),
-        }
+        Self::signature("The request signature could not be verified.")
     }
 
     fn signature(message: impl Into<String>) -> Self {
@@ -377,6 +374,20 @@ fn canonical_request(
         payload_hash,
         &canonical_query(uri.query().unwrap_or("")),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_access_keys_do_not_have_a_distinct_public_error() {
+        let unknown = S3AuthError::invalid_access_key();
+        let invalid = S3AuthError::signature("The request signature could not be verified.");
+
+        assert_eq!(unknown.code(), invalid.code());
+        assert_eq!(unknown.message(), invalid.message());
+    }
 }
 
 fn canonical_request_with_query(

@@ -47,6 +47,10 @@ Configurações esperadas:
 
 O Origin deve ser configurado como autoridade central do sistema. Ele é responsável por autenticar, autorizar, emitir pacotes de acesso, gerar manifestos, controlar disponibilidade e aplicar políticas de revogação.
 
+O Compose operacional exige `PONTEMESH_POSTGRES_PASSWORD` sem valor padrão. Defina
+uma senha exclusiva antes de executar `docker compose`; arquivos E2E e scripts de CI
+usam redes efêmeras e não devem ser reutilizados como configuração operacional.
+
 O Origin atende às operações fundamentais de objeto e coordena a distribuição híbrida quando houver política aplicável.
 
 Em ambientes com Docker, proxy reverso ou múltiplas instâncias, `PONTEMESH_PUBLIC_WEB_URL` e `PONTEMESH_PUBLIC_S3_URL` podem ser definidos para que access packages, fontes autorizadas e fallback retornem endpoints alcançáveis pelo cliente externo, em vez de nomes internos da rede de containers.

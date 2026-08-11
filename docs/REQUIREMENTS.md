@@ -144,7 +144,12 @@ O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a
 * **RF98:** O sistema deve permitir integração administrativa por painel, API e MCP.
 * **RF99:** Um administrador autenticado deve poder solicitar uma atualização manual do servidor pelo painel após confirmação explícita, sem depender da configuração de atualização automática.
 * **RF100:** O sistema deve permitir configurar um webhook operacional HTTP/HTTPS, enviado por POST conforme expressão cron de cinco campos, com payload documentado e sem segredos.
-* **RF99:** Eventos MCP devem ser registrados para auditoria.
+* **RF101:** O sistema deve aplicar autorização S3 por ação em operações de bucket, objeto, configuração, multipart e remoção em lote que possuam recurso existente.
+* **RF102:** O sistema deve transmitir objetos grandes incrementalmente nos fluxos S3, pacote de acesso e sincronização de Replica/Edge, sem materializar o objeto completo em memória.
+* **RF103:** `DeleteObjects` deve aceitar no máximo 1 MiB e 1.000 chaves e rejeitar a requisição inteira quando um limite for excedido.
+* **RF104:** O status público não deve expor versão, portas internas ou endpoints configurados depois que o setup for concluído.
+* **RF105:** O setup inicial deve exigir senha administrativa forte e a criação de credenciais de aplicação deve rejeitar escopos fora da lista suportada.
+* **RF106:** Eventos MCP devem ser registrados para auditoria.
 
 ## Requisitos não funcionais
 

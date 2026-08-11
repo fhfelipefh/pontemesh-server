@@ -20,7 +20,6 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use std::fs;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -475,26 +474,27 @@ async fn get_object_with_access_package_inner(
     if object.state != "AVAILABLE" {
         bail!("object is not available");
     }
-    let bytes = fs::read(&object.storage_path)
-        .map_err(|_| anyhow::anyhow!("object data is unavailable"))?;
-    let total_size = bytes.len() as u64;
-    let (status, body, range) = if let Some(range_header) = headers.get(header::RANGE) {
+    let path = std::path::Path::new(&object.storage_path);
+    let total_size = tokio::fs::metadata(path)
+        .await
+        .map_err(|_| anyhow::anyhow!("object data is unavailable"))?
+        .len();
+    let range = if let Some(range_header) = headers.get(header::RANGE) {
         let range_header = range_header
             .to_str()
             .map_err(|_| anyhow::anyhow!("Range header is not valid UTF-8"))?;
-        let range = parse_range(range_header, total_size)?;
-        let start = usize::try_from(range.start)
-            .map_err(|_| anyhow::anyhow!("range start is too large"))?;
-        let end =
-            usize::try_from(range.end).map_err(|_| anyhow::anyhow!("range end is too large"))?;
-        (
-            StatusCode::PARTIAL_CONTENT,
-            bytes[start..=end].to_vec(),
-            Some(range),
-        )
+        Some(parse_range(range_header, total_size)?)
     } else {
-        (StatusCode::OK, bytes, None)
+        None
     };
+    let status = if range.is_some() {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    };
+    let (body, _, content_length) =
+        crate::system::streaming::file_body(path, range.map(|value| (value.start, value.end)))
+            .await?;
 
     state
         .catalog
@@ -502,7 +502,8 @@ async fn get_object_with_access_package_inner(
             Some(&authorization.application_id),
             &authorization.bucket_name,
             &authorization.object_key,
-            i64::try_from(body.len()).map_err(|_| anyhow::anyhow!("response body is too large"))?,
+            i64::try_from(content_length)
+                .map_err(|_| anyhow::anyhow!("response body is too large"))?,
             range.map(|value| (value.start, value.end)),
             status.as_u16(),
         )
@@ -522,7 +523,13 @@ async fn get_object_with_access_package_inner(
     )
     .await;
 
-    Ok(object_body_response(&object, status, body, range))
+    Ok(object_body_response(
+        &object,
+        status,
+        body,
+        content_length,
+        range,
+    ))
 }
 
 async fn create_access_package_inner(
@@ -1288,10 +1295,7 @@ fn url_component(value: &str) -> String {
 }
 
 fn has_scope(application: &ApplicationIdentity, required: &str) -> bool {
-    application
-        .scopes
-        .iter()
-        .any(|scope| scope == "*" || scope == required)
+    application.scopes.iter().any(|scope| scope == required)
 }
 
 fn read_bearer_token(headers: &HeaderMap) -> Option<String> {
@@ -1349,13 +1353,14 @@ fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
 fn object_body_response(
     object: &ObjectRecord,
     status: StatusCode,
-    bytes: Vec<u8>,
+    body: Body,
+    content_length: u64,
     range: Option<ResolvedRange>,
 ) -> Response {
     let mut builder = Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, object.content_type.as_str())
-        .header(header::CONTENT_LENGTH, bytes.len().to_string())
+        .header(header::CONTENT_LENGTH, content_length.to_string())
         .header(header::ACCEPT_RANGES, "bytes")
         .header("ETag", format!("\"{}\"", object.sha256))
         .header("x-pontemesh-object-state", object.state.as_str());
@@ -1366,7 +1371,7 @@ fn object_body_response(
         );
     }
     builder
-        .body(Body::from(bytes))
+        .body(body)
         .expect("valid access package object response")
 }
 
@@ -1426,4 +1431,20 @@ fn forbidden(message: &str) -> Response {
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wildcard_is_not_an_application_scope() {
+        let application = ApplicationIdentity {
+            id: "app-1".to_owned(),
+            name: "restricted".to_owned(),
+            scopes: vec!["*".to_owned()],
+        };
+
+        assert!(!has_scope(&application, "pontemesh:manifest:read"));
+    }
 }

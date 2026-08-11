@@ -662,7 +662,17 @@ async fn load_state(storage_path: &Path) -> anyhow::Result<ReplicaLocalState> {
 async fn save_state(storage_path: &Path, state: &ReplicaLocalState) -> anyhow::Result<()> {
     fs::create_dir_all(replica_root(storage_path)).await?;
     let bytes = serde_json::to_vec_pretty(state)?;
-    fs::write(state_path(storage_path), bytes).await?;
+    let target = state_path(storage_path);
+    let temporary = target.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4().simple()));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .await?;
+    file.write_all(&bytes).await?;
+    file.sync_all().await?;
+    drop(file);
+    fs::rename(&temporary, &target).await?;
     Ok(())
 }
 

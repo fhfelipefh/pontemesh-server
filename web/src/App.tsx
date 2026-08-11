@@ -29,11 +29,11 @@ function SetupRoutes() {
     getSetupStatus()
       .then((status) => {
         setSetupRequired(status.setupRequired);
-        setServerVersion(status.serverVersion);
-        setInternalWebPort(status.internalWebPort);
-        setInternalS3Port(status.internalS3Port);
-        setPublicWebUrl(status.publicWebUrl);
-        setPublicS3Url(status.publicS3Url);
+        setServerVersion(status.serverVersion ?? null);
+        setInternalWebPort(status.internalWebPort ?? 8080);
+        setInternalS3Port(status.internalS3Port ?? 9000);
+        setPublicWebUrl(status.publicWebUrl ?? null);
+        setPublicS3Url(status.publicS3Url ?? null);
       })
       .catch(() => {
         setSetupRequired(false);

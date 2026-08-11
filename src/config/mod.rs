@@ -491,13 +491,18 @@ pub fn load_instance_config(paths: &PontemeshHome) -> anyhow::Result<InstanceCon
     toml::from_str(&raw_config).context("failed to parse Ponte Mesh config.toml")
 }
 
+pub fn write_instance_config(paths: &PontemeshHome, config: &InstanceConfig) -> anyhow::Result<()> {
+    let serialized = toml::to_string_pretty(config).context("failed to serialize config.toml")?;
+    fs::write(paths.config_file(), serialized)
+        .with_context(|| format!("failed to write {}", paths.config_file().display()))?;
+    crate::security::secrets::restrict_secret_file(&paths.config_file())
+}
+
 pub fn update_instance_name(paths: &PontemeshHome, name: &str) -> anyhow::Result<InstanceConfig> {
     let name = validate_instance_name(name)?;
     let mut config = load_instance_config(paths)?;
     config.instance.name = name;
-    let serialized = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;
-    fs::write(paths.config_file(), serialized)
-        .with_context(|| format!("failed to write {}", paths.config_file().display()))?;
+    write_instance_config(paths, &config)?;
     Ok(config)
 }
 
@@ -508,9 +513,7 @@ pub fn update_storage_guards(
     validate_storage_guards(&guards)?;
     let mut config = load_instance_config(paths)?;
     config.storage.guards = guards;
-    let serialized = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;
-    fs::write(paths.config_file(), serialized)
-        .with_context(|| format!("failed to write {}", paths.config_file().display()))?;
+    write_instance_config(paths, &config)?;
     Ok(config)
 }
 
@@ -520,9 +523,7 @@ pub fn update_webhook(
 ) -> anyhow::Result<InstanceConfig> {
     let mut config = load_instance_config(paths)?;
     config.webhook = webhook;
-    let serialized = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;
-    fs::write(paths.config_file(), serialized)
-        .with_context(|| format!("failed to write {}", paths.config_file().display()))?;
+    write_instance_config(paths, &config)?;
     Ok(config)
 }
 

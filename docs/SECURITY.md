@@ -378,6 +378,8 @@ Controles esperados:
 * autenticação para operações protegidas;
 * autorização por bucket e objeto;
 * validação de escopo por operação;
+* aplicação da política de bucket em listagem, consulta, configuração, multipart e remoção em lote, não apenas em operações de objeto;
+* falhas de access key desconhecida e de assinatura inválida com resposta pública indistinguível;
 * suporte a URLs temporárias ou mecanismo equivalente;
 * restrição de métodos e cabeçalhos aceitos;
 * validação de `Range`;
@@ -386,6 +388,12 @@ Controles esperados:
 * respostas consistentes sem vazar existência de objetos quando a política não permitir;
 * auditoria de operações sensíveis;
 * proteção contra enumeração de buckets e objetos.
+
+Respostas de objetos grandes devem ser transmitidas de forma incremental. Caminhos
+que exijam transformação autenticada em memória devem possuir limite explícito e
+falhar antes da alocação quando o formato armazenado não permitir streaming seguro.
+
+`DeleteObjects` aceita no máximo 1 MiB de XML e 1.000 chaves por requisição.
 
 A compatibilidade S3-like não deve enfraquecer os requisitos próprios do Ponte Mesh.
 
@@ -511,6 +519,9 @@ Operações via MCP devem exigir:
 * limites operacionais;
 * rastreabilidade da ação executada.
 
+Escopos recebidos na criação de credenciais de aplicação devem ser normalizados e
+comparados com uma lista fechada. O curinga `*` não é um escopo válido.
+
 MCP não deve permitir bypass das regras do Origin.
 
 Se uma ação não seria permitida pela API administrativa normal, também não deve ser permitida via MCP.
@@ -542,6 +553,14 @@ Regras recomendadas:
 * não retornar segredos em respostas de erro;
 * não expor segredos em métricas;
 * não usar segredos de desenvolvimento em produção.
+
+Arquivos de configuração que contenham credencial de Replica/Edge devem ser
+gravados com permissão `0600` em sistemas Unix. O Compose operacional não deve
+possuir senha padrão de banco; ela deve ser fornecida explicitamente pelo operador.
+
+Senhas e credenciais literais usadas somente em redes efêmeras de CI não são
+segredos de produção, mas devem permanecer isoladas, descartáveis e sem reutilização
+em exemplos operacionais.
 
 ## Logs e auditoria
 
@@ -607,6 +626,7 @@ Devem ser validados:
 * políticas;
 * filtros de consulta;
 * parâmetros administrativos.
+* nomes de credenciais e tokens, limitados a 255 caracteres;
 
 A validação deve evitar:
 
@@ -640,6 +660,23 @@ Controles possíveis:
 * bloqueio temporário de fontes suspeitas.
 
 Os limites devem evitar que fallback, ranges, sincronização ou emissão de pacotes sejam usados para sobrecarregar o Origin.
+
+Quando o Origin não puder revalidar um pacote de acesso, a Replica/Edge deve negar
+novas entregas. Disponibilidade degradada não pode prevalecer sobre revogação.
+
+## Segurança do painel HTTP e setup
+
+O painel deve emitir CSP com `frame-ancestors 'none'`, proteção contra framing,
+MIME sniffing, referrer excessivo e APIs de navegador não utilizadas. HSTS deve ser
+emitido para a superfície publicada por HTTPS.
+
+O setup inicial usa a mesma política forte de senha das contas administrativas. O
+cookie de desbloqueio recebe `Secure` fora de localhost ou quando HTTPS for indicado.
+Depois da conclusão, `/api/setup/status` revela somente que o setup não é necessário;
+versão, portas internas e URLs configuradas não permanecem públicas.
+
+Cabeçalhos de proxy não são fonte confiável de IP de auditoria sem configuração
+explícita de proxies confiáveis. Na ausência dessa configuração, devem ser ignorados.
 
 ## Políticas de fallback seguro
 

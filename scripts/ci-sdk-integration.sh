@@ -10,6 +10,7 @@ POSTGRES="pontemesh-postgres-$RUN_ID"
 ORIGIN="pontemesh-origin-$RUN_ID"
 ORIGIN_URL="http://127.0.0.1:18080"
 WORK="$(mktemp -d)"
+ADMIN_PASSWORD="${PONTEMESH_SDK_INTEGRATION_ADMIN_PASSWORD:-Pm$(openssl rand -hex 16)!Aa1}"
 
 cleanup() {
   docker rm -f "$ORIGIN" "$POSTGRES" >/dev/null 2>&1 || true
@@ -45,10 +46,10 @@ token="$(docker exec "$ORIGIN" cat /var/pontemesh_home/secrets/initialAdminToken
 curl --silent --fail -c "$WORK/setup.cookies" -H 'content-type: application/json' \
   -d "{\"token\":\"$token\"}" "$ORIGIN_URL/api/setup/unlock" >/dev/null
 curl --silent --fail -b "$WORK/setup.cookies" -H 'content-type: application/json' \
-  -d '{"instanceName":"SDK integration","role":"origin","adminUsername":"admin","adminPassword":"integration-password","httpPort":8080,"internalStoragePath":"/var/pontemesh_home/storage"}' \
+  -d "{\"instanceName\":\"SDK integration\",\"role\":\"origin\",\"adminUsername\":\"admin\",\"adminPassword\":\"$ADMIN_PASSWORD\",\"httpPort\":8080,\"internalStoragePath\":\"/var/pontemesh_home/storage\"}" \
   "$ORIGIN_URL/api/setup/complete" >/dev/null
 curl --silent --fail -c "$WORK/admin.cookies" -H 'content-type: application/json' \
-  -d '{"username":"admin","password":"integration-password"}' "$ORIGIN_URL/api/auth/login" >/dev/null
+  -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASSWORD\"}" "$ORIGIN_URL/api/auth/login" >/dev/null
 curl --silent --fail -b "$WORK/admin.cookies" -H 'content-type: application/json' \
   -d '{"name":"sdk-integration"}' "$ORIGIN_URL/api/admin/buckets" >/dev/null
 printf 'Ponte Mesh live Server and SDK integration\n' > "$WORK/object.bin"

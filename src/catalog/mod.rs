@@ -2971,12 +2971,8 @@ impl Catalog {
         scopes: Vec<String>,
     ) -> anyhow::Result<CreatedApplicationCredential> {
         let name = name.trim();
-        if name.is_empty() {
-            bail!("application name cannot be empty");
-        }
-        if scopes.is_empty() {
-            bail!("application credential must include at least one scope");
-        }
+        validate_credential_name(name, "application name")?;
+        let scopes = validate_application_scopes(&scopes)?;
 
         let token = secure_url_token("pm_app_", 32);
         let token_hash = hash_bearer_token(&token);
@@ -3131,9 +3127,7 @@ impl Catalog {
         created_by_user_id: Option<&str>,
     ) -> anyhow::Result<CreatedMcpAccessToken> {
         let name = name.trim();
-        if name.is_empty() {
-            bail!("MCP token name cannot be empty");
-        }
+        validate_credential_name(name, "MCP token name")?;
         let scopes = validate_mcp_scopes(scopes)?;
         let secret = secure_url_token("pm_mcp_", 32);
         let token_prefix = secret.chars().take(14).collect::<String>();
@@ -3307,6 +3301,12 @@ impl Catalog {
         let secret_access_key = secure_url_token("", 40);
         let secret_key_hash = hash_bearer_token(&secret_access_key);
         let normalized_name = name.and_then(normalize_optional_name);
+        if normalized_name
+            .as_deref()
+            .is_some_and(|name| name.chars().count() > 255)
+        {
+            bail!("S3 access key name cannot exceed 255 characters");
+        }
         let row = query(
             r#"
             INSERT INTO s3_access_keys (
@@ -3551,9 +3551,7 @@ impl Catalog {
         allowed_buckets: Vec<String>,
     ) -> anyhow::Result<CreatedReplicaCredential> {
         let name = name.trim();
-        if name.is_empty() {
-            bail!("replica name cannot be empty");
-        }
+        validate_credential_name(name, "replica name")?;
         if allowed_buckets.is_empty() {
             bail!("replica must include at least one allowed bucket");
         }
@@ -6304,6 +6302,21 @@ mod tests {
     }
 
     #[test]
+    fn application_scopes_are_closed_and_credential_names_are_bounded() {
+        assert_eq!(
+            validate_application_scopes(&[
+                " pontemesh:manifest:read ".to_owned(),
+                "PONTEMESH:MANIFEST:READ".to_owned(),
+            ])
+            .expect("valid application scopes"),
+            vec!["pontemesh:manifest:read"]
+        );
+        assert!(validate_application_scopes(&["*".to_owned()]).is_err());
+        assert!(validate_application_scopes(&["unknown".to_owned()]).is_err());
+        assert!(validate_credential_name(&"a".repeat(256), "token name").is_err());
+    }
+
+    #[test]
     fn object_manifest_fragments_cover_object_ranges_and_hashes() {
         let manifest = build_object_manifest(b"abcdef", 2).expect("manifest");
 
@@ -6478,4 +6491,42 @@ fn validate_mcp_scopes(scopes: &[String]) -> anyhow::Result<Vec<String>> {
         normalized.insert(0, "read".to_owned());
     }
     Ok(normalized)
+}
+
+fn validate_application_scopes(scopes: &[String]) -> anyhow::Result<Vec<String>> {
+    const ALLOWED: [&str; 7] = [
+        "origin:objects:read",
+        "origin:objects:write",
+        "pontemesh:access-package:create",
+        "pontemesh:manifest:read",
+        "pontemesh:sources:read",
+        "pontemesh:availability:read",
+        "pontemesh:policies:read",
+    ];
+
+    let mut normalized = Vec::new();
+    for scope in scopes {
+        let scope = scope.trim().to_ascii_lowercase();
+        if !ALLOWED.contains(&scope.as_str()) {
+            bail!("invalid application scope: {scope}");
+        }
+        if !normalized.contains(&scope) {
+            normalized.push(scope);
+        }
+    }
+
+    if normalized.is_empty() {
+        bail!("application credential must include at least one scope");
+    }
+    Ok(normalized)
+}
+
+fn validate_credential_name(name: &str, field: &str) -> anyhow::Result<()> {
+    if name.is_empty() {
+        bail!("{field} cannot be empty");
+    }
+    if name.chars().count() > 255 {
+        bail!("{field} cannot exceed 255 characters");
+    }
+    Ok(())
 }

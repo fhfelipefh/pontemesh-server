@@ -104,7 +104,7 @@ cargo build
 The server requires PostgreSQL. The following variable is mandatory:
 
 ```text
-PONTEMESH_DATABASE_URL=postgres://pontemesh:pontemesh@postgres:5432/pontemesh
+PONTEMESH_DATABASE_URL=postgres://pontemesh:${PONTEMESH_POSTGRES_PASSWORD}@postgres:5432/pontemesh
 ```
 
 In Docker, `postgres` is the service name on the dedicated network. When running directly outside Docker, replace the URL host with an address through which the process can reach PostgreSQL.
@@ -168,10 +168,10 @@ ports `8080` or `9000` directly.
 You can also run the server with Docker:
 
 ```bash
-docker compose -p ponte-mesh -f docker/docker-compose.yml up -d --build
+PONTEMESH_POSTGRES_PASSWORD='replace-with-a-strong-password' docker compose -p ponte-mesh -f docker/docker-compose.yml up -d --build
 ```
 
-The `docker-compose.yml` file starts PostgreSQL and passes `PONTEMESH_DATABASE_URL=postgres://pontemesh:pontemesh@postgres:5432/pontemesh` to the server.
+The `docker-compose.yml` file requires `PONTEMESH_POSTGRES_PASSWORD`, starts PostgreSQL, and passes the resulting database URL to the server.
 
 There is a single Docker image: `pontemesh-server`. Environments with an Origin and one or more replicas must run multiple instances of the same image, each with its own `PONTEMESH_HOME`, persisted database and configuration, and network parameters.
 

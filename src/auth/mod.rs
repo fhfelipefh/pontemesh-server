@@ -600,17 +600,8 @@ fn user_agent(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
-fn client_ip(headers: &HeaderMap) -> Option<IpAddr> {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .or_else(|| {
-            headers
-                .get("x-real-ip")
-                .and_then(|value| value.to_str().ok())
-        })
-        .and_then(|value| value.trim().parse().ok())
+fn client_ip(_headers: &HeaderMap) -> Option<IpAddr> {
+    None
 }
 
 fn bad_request(error: anyhow::Error) -> Response {
