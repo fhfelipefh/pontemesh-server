@@ -22,10 +22,12 @@ test.describe("Objects page", () => {
     await expect(page.getByRole("heading", { name: /objects|objetos/i })).toBeVisible();
     await expect(page.getByTestId("objects-bucket-select")).toHaveValue("assets");
     await expect(page.getByTestId("object-list")).toBeVisible();
+    await page.getByTestId("object-row-dir").getByRole("button", { name: "images" }).click();
     await expect(page.getByText("images/logo.png")).toBeVisible();
 
     await page.getByTestId("objects-bucket-select").selectOption("documents");
     await expect(page).toHaveURL(/\/objects\?bucket=documents$/);
+    await page.getByTestId("object-row-dir").getByRole("button", { name: "docs" }).click();
 
     await page.getByTestId("object-search-input").fill("readme");
     await page.getByTestId("object-search-input").press("Enter");
@@ -55,6 +57,8 @@ test.describe("Objects page", () => {
     await page.getByRole("button", { name: /close upload|fechar upload/i }).click();
     await expect(page.getByRole("complementary", { name: /uploads/i })).toBeHidden();
 
+    await page.getByTestId("object-row-dir").getByRole("button", { name: "docs" }).click();
+    await expect(page.getByText("docs/readme.txt")).toBeVisible();
     await page.getByTestId("object-row").first().getByRole("button", { name: /delete|excluir/i }).click();
     await expect(page.getByTestId("confirm-dialog")).toBeVisible();
     await page.getByTestId("confirm-dialog").getByRole("button", { name: /confirm|confirmar/i }).click();

@@ -2586,6 +2586,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 32px;
   background: transparent;
   border: 0;
   color: var(--pm-accent-cyan-blue);
@@ -2593,7 +2594,7 @@
   font-size: 0.9rem;
   font-weight: 700;
   min-width: 0;
-  padding: 0;
+  padding: 4px 0;
   text-align: left;
   width: 100%;
   overflow: hidden;

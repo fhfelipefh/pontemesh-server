@@ -209,11 +209,12 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
         return json(route, objects[0]);
       }
       const query = url.searchParams.get("query")?.toLowerCase() ?? "";
+      const prefix = url.searchParams.get("prefix") ?? "";
       const bucketObjects = fixtureObjectsByBucket[bucketName] ?? [];
       const filteredObjects = query
         ? bucketObjects.filter((object) => object.key.toLowerCase().includes(query))
         : bucketObjects;
-      return json(route, pageResponse(filteredObjects));
+      return json(route, objectsPageResponse(filteredObjects, prefix));
     }
 
     if (path.match(/^\/api\/admin\/buckets\/[^/]+\/policy$/)) {
@@ -345,6 +346,27 @@ function pageResponse<T>(items: T[]) {
     pageSize: 20,
     totalItems: items.length,
     totalPages: 1
+  };
+}
+
+function objectsPageResponse(items: typeof objects, prefix: string) {
+  const normalizedPrefix = prefix && !prefix.endsWith("/") ? `${prefix}/` : prefix;
+  const commonPrefixes = new Set<string>();
+  const files = items.filter((object) => {
+    if (!object.key.startsWith(normalizedPrefix)) {
+      return false;
+    }
+    const remainder = object.key.slice(normalizedPrefix.length);
+    const separatorIndex = remainder.indexOf("/");
+    if (separatorIndex >= 0) {
+      commonPrefixes.add(`${normalizedPrefix}${remainder.slice(0, separatorIndex + 1)}`);
+      return false;
+    }
+    return true;
+  });
+  return {
+    ...pageResponse(files),
+    commonPrefixes: [...commonPrefixes]
   };
 }
 
