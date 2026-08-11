@@ -274,7 +274,11 @@
       "emptyTitle": "No objects.",
       "noResultsTitle": "No objects found.",
       "confirmDeleteTitle": "Delete object",
-      "confirmDeleteDescription": "{{key}}"
+      "confirmDeleteDescription": "{{key}}",
+      "directory": "Directory",
+      "goUp": "Go up one level",
+      "breadcrumbLabel": "Folder navigation",
+      "breadcrumbRoot": "Bucket root"
     },
     "metrics": {
       "title": "Origin traffic",

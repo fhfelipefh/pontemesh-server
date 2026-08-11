@@ -46,12 +46,14 @@ pub struct ObjectSummary {
     pub created_at: String,
     pub updated_at: String,
     pub state: String,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaginatedObjects {
     pub items: Vec<ObjectSummary>,
+    pub common_prefixes: Vec<String>,
     pub page: u32,
     pub page_size: u32,
     pub total_items: i64,
@@ -98,6 +100,8 @@ pub struct ObjectRecord {
     pub legal_hold: bool,
     pub created_at: String,
     pub state: String,
+    pub user_metadata: Option<serde_json::Value>,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,6 +221,8 @@ pub struct NewObject {
     pub retain_until: Option<chrono::DateTime<chrono::Utc>>,
     pub legal_hold: bool,
     pub manifest: NewObjectManifest,
+    pub user_metadata: Option<serde_json::Value>,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -229,6 +235,7 @@ pub struct ObjectVersionSummary {
     pub size_bytes: i64,
     pub sha256: String,
     pub last_modified: String,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +305,7 @@ pub struct MultipartUploadRecord {
     pub object_key: String,
     pub content_type: String,
     pub initiated_at: String,
+    pub user_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -821,6 +829,10 @@ impl Catalog {
 
     #[cfg(test)]
     pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    pub fn db_pool(&self) -> &PgPool {
         &self.pool
     }
 
@@ -1562,7 +1574,8 @@ impl Catalog {
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
                 v.s3_version_id, v.is_delete_marker,
-                v.created_at, v.created_at AS updated_at, o.state
+                v.created_at, v.created_at AS updated_at, o.state,
+                v.created_by
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.id = o.current_version_id
@@ -1637,11 +1650,20 @@ impl Catalog {
         &self,
         bucket_name: &str,
         query_text: Option<&str>,
+        prefix: Option<&str>,
         page: u32,
         page_size: u32,
     ) -> anyhow::Result<PaginatedObjects> {
         validate_bucket_name(bucket_name)?;
         let normalized_query = normalize_optional_name(query_text.unwrap_or(""));
+        let effective_prefix: Option<String> = prefix.filter(|p| !p.is_empty()).map(|p| {
+            if p.ends_with('/') {
+                p.to_owned()
+            } else {
+                format!("{p}/")
+            }
+        });
+
         let bucket_id: Option<String> =
             query_scalar("SELECT id::text FROM buckets WHERE name = $1 AND deleted_at IS NULL")
                 .bind(bucket_name)
@@ -1650,48 +1672,42 @@ impl Catalog {
                 .context("failed to load bucket")?;
         let bucket_id =
             bucket_id.ok_or_else(|| anyhow::anyhow!("bucket not found: {bucket_name}"))?;
-        let total: i64 = query_scalar(
-            r#"
-            SELECT COUNT(*)::bigint
-            FROM objects o
-            WHERE o.bucket_id = $1::uuid
-              AND o.deleted_at IS NULL
-              AND ($2::text IS NULL OR o.object_key ILIKE '%' || $2 || '%')
-            "#,
-        )
-        .bind(&bucket_id)
-        .bind(normalized_query.as_deref())
-        .fetch_one(&self.pool)
-        .await
-        .context("failed to count objects")?;
-        let total_pages = total_pages(total, page_size);
-        let page = page.min(total_pages).max(1);
-        let offset = i64::from(page.saturating_sub(1)) * i64::from(page_size);
-        let limit = i64::from(page_size);
+
         let rows = query(
             r#"
             SELECT o.object_key, v.size_bytes, v.content_type, v.object_hash,
                 v.s3_version_id, v.is_delete_marker,
-                v.created_at, v.created_at AS updated_at, o.state
+                v.created_at, v.created_at AS updated_at, o.state,
+                v.created_by
             FROM objects o
             JOIN object_versions v ON v.id = o.current_version_id
             WHERE o.bucket_id = $1::uuid
               AND o.deleted_at IS NULL
-              AND ($2::text IS NULL OR o.object_key ILIKE '%' || $2 || '%')
-            ORDER BY v.created_at DESC, o.object_key ASC
-            LIMIT $3 OFFSET $4
+              AND ($2::text IS NULL OR o.object_key LIKE $2 || '%')
+              AND ($3::text IS NULL OR o.object_key ILIKE '%' || $3 || '%')
+            ORDER BY o.object_key ASC
             "#,
         )
         .bind(&bucket_id)
+        .bind(effective_prefix.as_deref())
         .bind(normalized_query.as_deref())
-        .bind(limit)
-        .bind(offset)
         .fetch_all(&self.pool)
         .await
         .context("failed to list objects")?;
 
+        let delimiter = "/";
+        let prefix_str = effective_prefix.as_deref().unwrap_or("");
+        let (paged_items, common_prefixes, total, total_pages, page) = split_and_paginate(
+            rows.into_iter().map(object_summary_from_row).collect(),
+            prefix_str,
+            delimiter,
+            page,
+            page_size,
+        );
+
         Ok(PaginatedObjects {
-            items: rows.into_iter().map(object_summary_from_row).collect(),
+            items: paged_items,
+            common_prefixes,
             page,
             page_size,
             total_items: total,
@@ -1761,9 +1777,9 @@ impl Catalog {
                 hash_algorithm, object_hash, storage_path, s3_version_id,
                 checksum_sha256, checksum_crc32, encryption_algorithm,
                 encryption_key_id, encryption_nonce, object_lock_mode,
-                retain_until, legal_hold
+                retain_until, legal_hold, user_metadata, created_by
             )
-            VALUES ($1::uuid, $2, $3, $4, 'SHA-256', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1::uuid, $2, $3, $4, 'SHA-256', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             RETURNING id::text, created_at
             "#,
         )
@@ -1782,6 +1798,8 @@ impl Catalog {
         .bind(object.object_lock_mode.as_deref())
         .bind(object.retain_until)
         .bind(object.legal_hold)
+        .bind(object.user_metadata.as_ref())
+        .bind(object.created_by.as_deref())
         .fetch_one(&mut *tx)
         .await
         .context("failed to register object version")?;
@@ -1869,6 +1887,7 @@ impl Catalog {
             created_at: format_datetime(version_row.get("created_at")),
             updated_at: format_datetime(version_row.get("created_at")),
             state: "AVAILABLE".to_owned(),
+            created_by: object.created_by,
         })
     }
 
@@ -1895,7 +1914,8 @@ impl Catalog {
                 v.storage_path, v.s3_version_id, v.is_delete_marker,
                 v.checksum_sha256, v.checksum_crc32, v.encryption_algorithm,
                 v.encryption_key_id, v.encryption_nonce, v.object_lock_mode,
-                v.retain_until, v.legal_hold, v.created_at, o.state
+                v.retain_until, v.legal_hold, v.created_at, o.state,
+                v.user_metadata, v.created_by
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.object_id = o.id
@@ -2115,6 +2135,7 @@ impl Catalog {
         object_key: &str,
         content_type: &str,
         initiated_by: &str,
+        user_metadata: Option<serde_json::Value>,
     ) -> anyhow::Result<MultipartUploadRecord> {
         validate_bucket_name(bucket_name)?;
         validate_object_key(object_key)?;
@@ -2123,18 +2144,19 @@ impl Catalog {
         }
         let row = query(
             r#"
-            INSERT INTO s3_multipart_uploads (bucket_id, object_key, content_type, initiated_by)
-            SELECT id, $2, $3, $4
+            INSERT INTO s3_multipart_uploads (bucket_id, object_key, content_type, initiated_by, user_metadata)
+            SELECT id, $2, $3, $4, $5
             FROM buckets
             WHERE name = $1 AND deleted_at IS NULL
             RETURNING id::text AS upload_id, $1::text AS bucket_name, object_key,
-                content_type, initiated_at
+                content_type, initiated_at, user_metadata
             "#,
         )
         .bind(bucket_name)
         .bind(object_key)
         .bind(content_type)
         .bind(initiated_by)
+        .bind(user_metadata.as_ref())
         .fetch_optional(&self.pool)
         .await
         .context("failed to create multipart upload")?;
@@ -2155,7 +2177,7 @@ impl Catalog {
         let row = query(
             r#"
             SELECT u.id::text AS upload_id, b.name AS bucket_name, u.object_key,
-                u.content_type, u.initiated_at
+                u.content_type, u.initiated_at, u.user_metadata
             FROM s3_multipart_uploads u
             JOIN buckets b ON b.id = u.bucket_id
             WHERE u.id = $1::uuid
@@ -2183,7 +2205,7 @@ impl Catalog {
         let rows = query(
             r#"
             SELECT u.id::text AS upload_id, b.name AS bucket_name, u.object_key,
-                u.content_type, u.initiated_at
+                u.content_type, u.initiated_at, u.user_metadata
             FROM s3_multipart_uploads u
             JOIN buckets b ON b.id = u.bucket_id
             WHERE b.name = $1
@@ -2483,7 +2505,7 @@ impl Catalog {
             r#"
             SELECT o.object_key, v.s3_version_id, v.is_delete_marker,
                 (o.current_version_id = v.id) AS is_latest,
-                v.size_bytes, v.object_hash, v.created_at
+                v.size_bytes, v.object_hash, v.created_at, v.created_by
             FROM objects o
             JOIN buckets b ON b.id = o.bucket_id
             JOIN object_versions v ON v.object_id = o.id
@@ -2507,6 +2529,7 @@ impl Catalog {
                 size_bytes: row.get("size_bytes"),
                 sha256: row.get("object_hash"),
                 last_modified: format_datetime(row.get("created_at")),
+                created_by: row.try_get("created_by").ok().flatten(),
             })
             .collect())
     }
@@ -3760,6 +3783,8 @@ impl Catalog {
                 legal_hold: false,
                 created_at: format_datetime(row.get("created_at")),
                 state: row.get("state"),
+                user_metadata: None,
+                created_by: None,
             },
             bucket_name: row.get("bucket_name"),
             object_key: row.get("object_key"),
@@ -5312,6 +5337,7 @@ fn object_summary_from_row(row: PgRow) -> ObjectSummary {
         created_at: format_datetime(row.get("created_at")),
         updated_at: format_datetime(row.get("updated_at")),
         state: row.get("state"),
+        created_by: row.try_get("created_by").ok().flatten(),
     }
 }
 
@@ -5338,6 +5364,8 @@ fn object_record_from_row(row: PgRow) -> ObjectRecord {
         legal_hold: row.get("legal_hold"),
         created_at: format_datetime(row.get("created_at")),
         state: row.get("state"),
+        user_metadata: row.try_get("user_metadata").ok().flatten(),
+        created_by: row.try_get("created_by").ok().flatten(),
     }
 }
 
@@ -5396,6 +5424,7 @@ fn multipart_upload_from_row(row: PgRow) -> MultipartUploadRecord {
         object_key: row.get("object_key"),
         content_type: row.get("content_type"),
         initiated_at: format_datetime(row.get("initiated_at")),
+        user_metadata: row.try_get("user_metadata").ok().flatten(),
     }
 }
 
@@ -6101,6 +6130,35 @@ pub fn build_object_manifest(
     })
 }
 
+fn split_and_paginate(
+    objects: Vec<ObjectSummary>,
+    prefix: &str,
+    delimiter: &str,
+    page: u32,
+    page_size: u32,
+) -> (Vec<ObjectSummary>, Vec<String>, i64, u32, u32) {
+    let mut common_prefixes: Vec<String> = Vec::new();
+    let mut file_items: Vec<ObjectSummary> = Vec::new();
+    for object in objects {
+        match common_prefix_for_key(prefix, delimiter, &object.key) {
+            Some(cp) => {
+                if !common_prefixes.contains(&cp) {
+                    common_prefixes.push(cp);
+                }
+            }
+            None => file_items.push(object),
+        }
+    }
+    let total = i64::try_from(file_items.len()).unwrap_or(i64::MAX);
+    let pages = total_pages(total, page_size);
+    let clamped_page = page.min(pages).max(1);
+    let offset = usize::try_from(clamped_page.saturating_sub(1)).unwrap_or(0)
+        * usize::try_from(page_size).unwrap_or(20);
+    let limit = usize::try_from(page_size).unwrap_or(20);
+    let paged = file_items.into_iter().skip(offset).take(limit).collect();
+    (paged, common_prefixes, total, pages, clamped_page)
+}
+
 fn map_unique_violation(message: &'static str) -> impl Fn(sqlx_core::Error) -> anyhow::Error {
     move |error| match &error {
         sqlx_core::Error::Database(database_error)
@@ -6208,6 +6266,118 @@ mod tests {
             expose_prompts: true,
             allow_localhost_only: true,
         }
+    }
+
+    fn make_object(key: &str) -> ObjectSummary {
+        ObjectSummary {
+            key: key.to_string(),
+            size_bytes: 100,
+            content_type: "application/octet-stream".to_string(),
+            sha256: "abc".to_string(),
+            version_id: None,
+            is_delete_marker: false,
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            state: "AVAILABLE".to_string(),
+            created_by: None,
+        }
+    }
+
+    #[test]
+    fn common_prefix_for_key_returns_none_when_no_delimiter_in_rest() {
+        assert_eq!(common_prefix_for_key("", "/", "file.txt"), None);
+        assert_eq!(common_prefix_for_key("a/", "/", "a/file.txt"), None);
+    }
+
+    #[test]
+    fn common_prefix_for_key_returns_prefix_up_to_and_including_delimiter() {
+        assert_eq!(
+            common_prefix_for_key("", "/", "folder/file.txt"),
+            Some("folder/".to_string())
+        );
+        assert_eq!(
+            common_prefix_for_key("a/", "/", "a/b/file.txt"),
+            Some("a/b/".to_string())
+        );
+        assert_eq!(
+            common_prefix_for_key("a/", "/", "a/b/c/file.txt"),
+            Some("a/b/".to_string())
+        );
+    }
+
+    #[test]
+    fn common_prefix_for_key_returns_none_when_key_does_not_start_with_prefix() {
+        assert_eq!(common_prefix_for_key("x/", "/", "y/file.txt"), None);
+    }
+
+    #[test]
+    fn split_and_paginate_separates_files_from_subdirectories() {
+        let objects = vec![
+            make_object("docs/readme.md"),
+            make_object("docs/guide.md"),
+            make_object("images/logo.png"),
+            make_object("root.txt"),
+        ];
+        let (files, prefixes, total, _pages, _page) = split_and_paginate(objects, "", "/", 1, 20);
+
+        assert_eq!(total, 1);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].key, "root.txt");
+        assert_eq!(prefixes.len(), 2);
+        assert!(prefixes.contains(&"docs/".to_string()));
+        assert!(prefixes.contains(&"images/".to_string()));
+    }
+
+    #[test]
+    fn split_and_paginate_deduplicates_common_prefixes() {
+        let objects = vec![
+            make_object("a/file1.txt"),
+            make_object("a/file2.txt"),
+            make_object("a/file3.txt"),
+        ];
+        let (_files, prefixes, _total, _pages, _page) = split_and_paginate(objects, "", "/", 1, 20);
+
+        assert_eq!(prefixes, vec!["a/".to_string()]);
+    }
+
+    #[test]
+    fn split_and_paginate_paginates_file_items_only() {
+        let objects: Vec<ObjectSummary> = (0..25)
+            .map(|i| make_object(&format!("file{i:02}.txt")))
+            .collect();
+
+        let (page1, _, total, total_pages, page_num) =
+            split_and_paginate(objects.clone(), "", "/", 1, 10);
+        assert_eq!(total, 25);
+        assert_eq!(total_pages, 3);
+        assert_eq!(page_num, 1);
+        assert_eq!(page1.len(), 10);
+        assert_eq!(page1[0].key, "file00.txt");
+
+        let (page3, _, _, _, _) = split_and_paginate(objects, "", "/", 3, 10);
+        assert_eq!(page3.len(), 5);
+        assert_eq!(page3[0].key, "file20.txt");
+    }
+
+    #[test]
+    fn split_and_paginate_clamps_page_to_last_when_out_of_bounds() {
+        let objects: Vec<ObjectSummary> = (0..5)
+            .map(|i| make_object(&format!("file{i}.txt")))
+            .collect();
+
+        let (items, _, _, _, page_num) = split_and_paginate(objects, "", "/", 99, 10);
+        assert_eq!(page_num, 1);
+        assert_eq!(items.len(), 5);
+    }
+
+    #[test]
+    fn split_and_paginate_with_prefix_only_counts_direct_children() {
+        let objects = vec![make_object("a/b/deep.txt"), make_object("a/direct.txt")];
+        let (files, prefixes, total, _, _) = split_and_paginate(objects, "a/", "/", 1, 20);
+
+        assert_eq!(total, 1);
+        assert_eq!(files[0].key, "a/direct.txt");
+        assert_eq!(prefixes, vec!["a/b/".to_string()]);
     }
 }
 

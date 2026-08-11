@@ -271,8 +271,10 @@ pub(crate) async fn complete_setup(
         },
         storage: StorageSection {
             local: LocalStorageSection { path: storage_path },
+            guards: Default::default(),
         },
         replica,
+        gc: Default::default(),
     };
 
     let config_toml = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;

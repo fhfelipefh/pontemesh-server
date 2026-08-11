@@ -274,7 +274,11 @@
       "emptyTitle": "Nenhum objeto.",
       "noResultsTitle": "Nenhum objeto encontrado.",
       "confirmDeleteTitle": "Excluir objeto",
-      "confirmDeleteDescription": "{{key}}"
+      "confirmDeleteDescription": "{{key}}",
+      "directory": "Diret\u00f3rio",
+      "goUp": "Subir um n\u00edvel",
+      "breadcrumbLabel": "Navega\u00e7\u00e3o de pastas",
+      "breadcrumbRoot": "Raiz do bucket"
     },
     "metrics": {
       "title": "Tráfego do Origin",

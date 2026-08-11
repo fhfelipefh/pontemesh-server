@@ -8,7 +8,7 @@ use crate::{
     config::{self, InstanceRole},
     http::AppState,
     security::s3_secret::s3_secret_encryption_key,
-    system::{application_logs, environment, resources, storage},
+    system::{application_logs, disk_guard, environment, resources, storage},
 };
 use anyhow::Context;
 use axum::{
@@ -83,6 +83,7 @@ pub struct ListBucketsQuery {
 #[serde(rename_all = "camelCase")]
 pub struct ListObjectsQuery {
     query: Option<String>,
+    prefix: Option<String>,
     page: Option<u32>,
     page_size: Option<u32>,
 }
@@ -310,6 +311,58 @@ pub async fn storage_status(
                 "storage status requested",
             );
             Json(status).into_response()
+        }
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn disk_guard_status(State(state): State<AppState>) -> Response {
+    match config::configured_storage_dir(&state.paths) {
+        Ok(path) => {
+            let guards = config::load_instance_config(&state.paths)
+                .map(|c| c.storage.guards)
+                .unwrap_or_default();
+            Json(disk_guard::check(&path, &guards)).into_response()
+        }
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn gc_status(State(state): State<AppState>) -> Response {
+    match config::configured_storage_dir(&state.paths) {
+        Ok(storage_dir) => {
+            match crate::gc::candidate::pending_stats(state.catalog.db_pool()).await {
+                Ok((pending_candidates, pending_bytes)) => {
+                    let gc_config = config::load_instance_config(&state.paths)
+                        .map(|c| c.gc)
+                        .unwrap_or_default();
+                    Json(serde_json::json!({
+                        "enabled": gc_config.enabled,
+                        "state": "IDLE",
+                        "pendingCandidates": pending_candidates,
+                        "pendingBytes": pending_bytes,
+                        "storageDir": storage_dir.display().to_string(),
+                        "gracePeriodSeconds": gc_config.grace_period_seconds,
+                        "quarantinePeriodSeconds": gc_config.quarantine_period_seconds,
+                        "batchSize": gc_config.batch_size,
+                    }))
+                    .into_response()
+                }
+                Err(error) => internal_error(error),
+            }
+        }
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn gc_dry_run(State(state): State<AppState>) -> Response {
+    match config::configured_storage_dir(&state.paths) {
+        Ok(storage_dir) => {
+            match crate::gc::scheduler::trigger_dry_run(state.catalog.db_pool(), &storage_dir).await
+            {
+                Ok(result) => Json(result).into_response(),
+                Err(error) => internal_error(error),
+            }
         }
         Err(error) => internal_error(error),
     }
@@ -904,7 +957,13 @@ pub async fn list_objects(
     let (page, page_size) = normalize_storage_pagination(query.page, query.page_size);
     match state
         .catalog
-        .list_objects_page(&bucket_name, query.query.as_deref(), page, page_size)
+        .list_objects_page(
+            &bucket_name,
+            query.query.as_deref(),
+            query.prefix.as_deref(),
+            page,
+            page_size,
+        )
         .await
     {
         Ok(objects) => Json(objects).into_response(),
@@ -1419,6 +1478,9 @@ async fn upload_object_inner(
     let mut uploaded_file: Option<UploadedObjectFile> = None;
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
     let storage_path = config::configured_storage_dir(&state.paths)?;
+    if let Ok(guards) = config::load_instance_config(&state.paths).map(|c| c.storage.guards) {
+        crate::system::disk_guard::enforce(&storage_path, &guards)?;
+    }
     let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
     fs::create_dir_all(&bucket_dir).with_context(|| {
         format!(
@@ -1480,6 +1542,8 @@ async fn upload_object_inner(
             retain_until: None,
             legal_hold: false,
             manifest: uploaded_file.manifest,
+            user_metadata: None,
+            created_by: None,
         })
         .await
 }

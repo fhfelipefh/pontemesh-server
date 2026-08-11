@@ -100,10 +100,18 @@ export type PaginatedResponse<T> = {
   totalPages: number;
 };
 
+export type ObjectsPage = PaginatedResponse<ObjectSummary> & {
+  commonPrefixes: string[];
+};
+
 export type PageParams = {
   query?: string;
   page: number;
   pageSize: number;
+};
+
+export type ObjectPageParams = PageParams & {
+  prefix?: string;
 };
 
 export async function listBuckets(params: PageParams): Promise<PaginatedResponse<BucketSummary>> {
@@ -188,14 +196,14 @@ export async function bulkUpdateBucketPolicies(
   return response.json() as Promise<BulkBucketPolicyResult>;
 }
 
-export async function listObjects(bucketName: string, params: PageParams): Promise<PaginatedResponse<ObjectSummary>> {
-  const response = await fetch(`/api/admin/buckets/${encodeURIComponent(bucketName)}/objects${paginationQuery(params)}`, {
+export async function listObjects(bucketName: string, params: ObjectPageParams): Promise<ObjectsPage> {
+  const response = await fetch(`/api/admin/buckets/${encodeURIComponent(bucketName)}/objects${objectPaginationQuery(params)}`, {
     headers: {
       accept: "application/json"
     }
   });
   await ensureOk(response);
-  return response.json() as Promise<PaginatedResponse<ObjectSummary>>;
+  return response.json() as Promise<ObjectsPage>;
 }
 
 export async function uploadObject(bucketName: string, file: File, key?: string): Promise<ObjectSummary> {
@@ -282,6 +290,20 @@ function paginationQuery({ query, page, pageSize }: PageParams): string {
   const trimmedQuery = query?.trim();
   if (trimmedQuery) {
     params.set("query", trimmedQuery);
+  }
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  return `?${params.toString()}`;
+}
+
+function objectPaginationQuery({ query, page, pageSize, prefix }: ObjectPageParams): string {
+  const params = new URLSearchParams();
+  const trimmedQuery = query?.trim();
+  if (trimmedQuery) {
+    params.set("query", trimmedQuery);
+  }
+  if (prefix) {
+    params.set("prefix", prefix);
   }
   params.set("page", String(page));
   params.set("pageSize", String(pageSize));

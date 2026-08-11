@@ -1,9 +1,8 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Download, Search, Trash2, UploadCloud, X } from "lucide-react";
+import { ChevronRight, Download, Folder, Home, Search, Trash2, UploadCloud, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
-  ObjectSummary,
-  PaginatedResponse,
+  ObjectsPage,
   getObjectDownloadUrl,
   listObjects,
   uploadObjectWithProgress
@@ -12,7 +11,8 @@ import { Button } from "./Button";
 import { EmptyState, PageSizeSelect, Pagination } from "./AdminListControls";
 import { ErrorMessage } from "./ErrorMessage";
 import { useUploadProgress } from "./uploadProgressContext";
-import { emptyPage, formatBytes, formatDate } from "../utils/adminFormat";
+import { emptyObjectsPage, formatBytes, formatDate } from "../utils/adminFormat";
+import { buildBreadcrumb, navigateUpFrom, prefixLabel } from "../utils/objectNavigation";
 
 const OBJECT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -33,7 +33,8 @@ export function ObjectManager({
 }: ObjectManagerProps) {
   const { t } = useTranslation();
   const uploadProgress = useUploadProgress();
-  const [objectsPage, setObjectsPage] = useState<PaginatedResponse<ObjectSummary>>(emptyPage(20));
+  const [objectsPage, setObjectsPage] = useState<ObjectsPage>(emptyObjectsPage(20));
+  const [currentPrefix, setCurrentPrefix] = useState("");
   const [objectQuery, setObjectQuery] = useState("");
   const [objectSearch, setObjectSearch] = useState("");
   const [objectPageNumber, setObjectPageNumber] = useState(1);
@@ -62,6 +63,7 @@ export function ObjectManager({
     try {
       setObjectsPage(await listObjects(bucketName, {
         query: objectSearch,
+        prefix: currentPrefix || undefined,
         page: objectPageNumber,
         pageSize: objectPageSize
       }));
@@ -70,15 +72,22 @@ export function ObjectManager({
     } finally {
       setLoadingObjects(false);
     }
-  }, [bucketName, objectPageNumber, objectPageSize, objectSearch, t]);
+  }, [bucketName, currentPrefix, objectPageNumber, objectPageSize, objectSearch, t]);
 
   useEffect(() => {
+    setCurrentPrefix("");
     setObjectPageNumber(1);
     setObjectQuery("");
     setObjectSearch("");
     setUploadModalOpen(false);
     resetUploadForm();
   }, [bucketName, resetUploadForm]);
+
+  useEffect(() => {
+    setObjectPageNumber(1);
+    setObjectQuery("");
+    setObjectSearch("");
+  }, [currentPrefix]);
 
   useEffect(() => {
     refreshObjects();
@@ -124,6 +133,7 @@ export function ObjectManager({
 
   function openUploadModal() {
     setUploadError("");
+    setObjectKey(currentPrefix);
     setUploadModalOpen(true);
   }
 
@@ -135,8 +145,21 @@ export function ObjectManager({
     resetUploadForm();
   }
 
+  function navigateToPrefix(prefix: string) {
+    setCurrentPrefix(prefix);
+  }
+
+  function navigateUp() {
+    if (!currentPrefix) return;
+    setCurrentPrefix(navigateUpFrom(currentPrefix));
+  }
+
+  const breadcrumbSegments = buildBreadcrumb(currentPrefix);
+
   const objectSearchActive = objectSearch.trim().length > 0;
-  const hasObjects = objectsPage.items.length > 0;
+  const hasDirectories = objectsPage.commonPrefixes.length > 0;
+  const hasFiles = objectsPage.items.length > 0;
+  const hasContent = hasDirectories || hasFiles;
 
   return (
     <div className="object-manager">
@@ -173,13 +196,47 @@ export function ObjectManager({
         </Button>
       </div>
 
+      {currentPrefix ? (
+        <nav className="objects-breadcrumb" aria-label={t("setup.objects.breadcrumbLabel")}>
+          <button
+            className="objects-breadcrumb-item objects-breadcrumb-root"
+            type="button"
+            onClick={() => navigateToPrefix("")}
+            aria-label={t("setup.objects.breadcrumbRoot")}
+          >
+            <Home size={14} aria-hidden="true" />
+          </button>
+          {breadcrumbSegments.map((segment, index) => {
+            const isLast = index === breadcrumbSegments.length - 1;
+            return (
+              <span key={segment.prefix} className="objects-breadcrumb-segment">
+                <ChevronRight size={13} className="objects-breadcrumb-sep" aria-hidden="true" />
+                {isLast ? (
+                  <span className="objects-breadcrumb-item objects-breadcrumb-item--current" aria-current="page">
+                    {segment.label}
+                  </span>
+                ) : (
+                  <button
+                    className="objects-breadcrumb-item"
+                    type="button"
+                    onClick={() => navigateToPrefix(segment.prefix)}
+                  >
+                    {segment.label}
+                  </button>
+                )}
+              </span>
+            );
+          })}
+        </nav>
+      ) : null}
+
       <ErrorMessage message={objectError || externalError} />
 
       <section className="objects-table-card" data-testid="objects-table-card">
         <div className="objects-table-container">
           {loadingObjects ? (
             <div className="admin-loading">{t("setup.objects.loading")}</div>
-          ) : !hasObjects ? (
+          ) : !hasContent ? (
             <EmptyState
               title={objectSearchActive ? t("setup.objects.noResultsTitle") : t("setup.objects.emptyTitle")}
             >
@@ -203,6 +260,55 @@ export function ObjectManager({
                 <span role="columnheader">{t("setup.objects.updatedAt")}</span>
                 <span role="columnheader">{t("setup.common.actions")}</span>
               </div>
+
+              {currentPrefix && !objectSearchActive ? (
+                <div
+                  className="objects-table-row objects-table-row--dir objects-table-row--up"
+                  role="row"
+                  data-testid="object-row-up"
+                >
+                  <button
+                    className="objects-dir-cell"
+                    type="button"
+                    onClick={navigateUp}
+                    aria-label={t("setup.objects.goUp")}
+                  >
+                    <Folder size={15} aria-hidden="true" />
+                    <span>..</span>
+                  </button>
+                  <span role="cell" />
+                  <span role="cell" />
+                  <span role="cell" />
+                  <span role="cell" />
+                </div>
+              ) : null}
+
+              {objectsPage.commonPrefixes.map((prefix) => {
+                const label = prefixLabel(prefix, currentPrefix);
+                return (
+                  <div
+                    className="objects-table-row objects-table-row--dir"
+                    role="row"
+                    key={prefix}
+                    data-testid="object-row-dir"
+                  >
+                    <button
+                      className="objects-dir-cell"
+                      type="button"
+                      onClick={() => navigateToPrefix(prefix)}
+                      title={prefix}
+                    >
+                      <Folder size={15} aria-hidden="true" />
+                      <span>{label}</span>
+                    </button>
+                    <span role="cell">—</span>
+                    <span role="cell">{t("setup.objects.directory")}</span>
+                    <span role="cell">—</span>
+                    <span className="objects-table-actions" role="cell" />
+                  </div>
+                );
+              })}
+
               {objectsPage.items.map((object) => (
                 <div className="objects-table-row" data-testid="object-row" role="row" key={object.key}>
                   <span role="cell" title={object.key}>{object.key}</span>

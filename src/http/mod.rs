@@ -1,6 +1,6 @@
 use crate::{
-    admin, auth, catalog::Catalog, config::PontemeshHome, mcp, mesh, origin, replica, s3_auth,
-    setup, web_assets,
+    admin, auth, catalog::Catalog, config::PontemeshHome, health, mcp, mesh, origin, replica,
+    s3_auth, setup, web_assets,
 };
 use axum::{
     Json, Router,
@@ -53,6 +53,8 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
         .nest("/pontemesh", pontemesh_routes(state.clone()))
         .merge(admin_routes(state.clone()))
         .route("/api/{*path}", any(setup::routes::api_not_found))
+        .route("/health/live", get(health::liveness))
+        .route("/health/ready", get(health::readiness))
         .fallback(web_assets::serve)
         .with_state(state)
         .layer(TraceLayer::new_for_http())
@@ -111,6 +113,12 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         )
         .route("/api/admin/system/resources", get(admin::system_resources))
         .route("/api/admin/storage/status", get(admin::storage_status))
+        .route(
+            "/api/admin/storage/disk-guard",
+            get(admin::disk_guard_status),
+        )
+        .route("/api/admin/gc/status", get(admin::gc_status))
+        .route("/api/admin/gc/dry-run", post(admin::gc_dry_run))
         .route("/api/admin/audit-events", get(admin::list_audit_events))
         .route("/api/admin/logs/application", get(admin::application_logs))
         .route(
@@ -5122,6 +5130,7 @@ mod tests {
                 local: LocalStorageSection {
                     path: paths.storage_dir(),
                 },
+                guards: Default::default(),
             },
             replica: (role == InstanceRole::ReplicaEdge).then(|| crate::config::ReplicaSection {
                 origin_base_url: "https://origin.example.com".to_owned(),
@@ -5131,6 +5140,7 @@ mod tests {
                 sync_interval_seconds: Some(30),
                 health_interval_seconds: Some(30),
             }),
+            gc: Default::default(),
         };
         let raw_config = toml::to_string(&config).expect("serialize config");
         fs::write(paths.config_file(), raw_config).expect("write config");

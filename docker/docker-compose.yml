@@ -6,6 +6,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.local
     image: pontemesh-server:local
+    restart: unless-stopped
     environment:
       PONTEMESH_HOME: /var/pontemesh_home
       PONTEMESH_DATABASE_URL: postgres://pontemesh:pontemesh@postgres:5432/pontemesh
@@ -24,6 +25,12 @@ services:
       #
       # On Windows, use a bind mount such as:
       # - D:/PonteMesh:/var/pontemesh_home
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,6 +39,7 @@ services:
 
   postgres:
     image: postgres:18
+    restart: unless-stopped
     environment:
       POSTGRES_DB: pontemesh
       POSTGRES_USER: pontemesh

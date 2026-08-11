@@ -25,6 +25,11 @@ RUN useradd --system --create-home --home-dir /nonexistent --shell /usr/sbin/nol
     && mkdir -p /var/pontemesh_home \
     && chown -R pontemesh:pontemesh /var/pontemesh_home
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=rust-build /app/target/release/pontemesh-server /usr/local/bin/pontemesh-server
 COPY --from=rust-build /app/migrations ./migrations
