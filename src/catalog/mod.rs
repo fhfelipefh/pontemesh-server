@@ -1656,9 +1656,13 @@ impl Catalog {
     ) -> anyhow::Result<PaginatedObjects> {
         validate_bucket_name(bucket_name)?;
         let normalized_query = normalize_optional_name(query_text.unwrap_or(""));
-        let effective_prefix: Option<String> = prefix
-            .filter(|p| !p.is_empty())
-            .map(|p| if p.ends_with('/') { p.to_owned() } else { format!("{p}/") });
+        let effective_prefix: Option<String> = prefix.filter(|p| !p.is_empty()).map(|p| {
+            if p.ends_with('/') {
+                p.to_owned()
+            } else {
+                format!("{p}/")
+            }
+        });
 
         let bucket_id: Option<String> =
             query_scalar("SELECT id::text FROM buckets WHERE name = $1 AND deleted_at IS NULL")
@@ -1693,8 +1697,13 @@ impl Catalog {
 
         let delimiter = "/";
         let prefix_str = effective_prefix.as_deref().unwrap_or("");
-        let (paged_items, common_prefixes, total, total_pages, page) =
-            split_and_paginate(rows.into_iter().map(object_summary_from_row).collect(), prefix_str, delimiter, page, page_size);
+        let (paged_items, common_prefixes, total, total_pages, page) = split_and_paginate(
+            rows.into_iter().map(object_summary_from_row).collect(),
+            prefix_str,
+            delimiter,
+            page,
+            page_size,
+        );
 
         Ok(PaginatedObjects {
             items: paged_items,
@@ -6309,8 +6318,7 @@ mod tests {
             make_object("images/logo.png"),
             make_object("root.txt"),
         ];
-        let (files, prefixes, total, _pages, _page) =
-            split_and_paginate(objects, "", "/", 1, 20);
+        let (files, prefixes, total, _pages, _page) = split_and_paginate(objects, "", "/", 1, 20);
 
         assert_eq!(total, 1);
         assert_eq!(files.len(), 1);
@@ -6327,8 +6335,7 @@ mod tests {
             make_object("a/file2.txt"),
             make_object("a/file3.txt"),
         ];
-        let (_files, prefixes, _total, _pages, _page) =
-            split_and_paginate(objects, "", "/", 1, 20);
+        let (_files, prefixes, _total, _pages, _page) = split_and_paginate(objects, "", "/", 1, 20);
 
         assert_eq!(prefixes, vec!["a/".to_string()]);
     }
@@ -6365,12 +6372,8 @@ mod tests {
 
     #[test]
     fn split_and_paginate_with_prefix_only_counts_direct_children() {
-        let objects = vec![
-            make_object("a/b/deep.txt"),
-            make_object("a/direct.txt"),
-        ];
-        let (files, prefixes, total, _, _) =
-            split_and_paginate(objects, "a/", "/", 1, 20);
+        let objects = vec![make_object("a/b/deep.txt"), make_object("a/direct.txt")];
+        let (files, prefixes, total, _, _) = split_and_paginate(objects, "a/", "/", 1, 20);
 
         assert_eq!(total, 1);
         assert_eq!(files[0].key, "a/direct.txt");

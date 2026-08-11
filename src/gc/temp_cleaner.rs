@@ -1,7 +1,10 @@
 use std::path::Path;
 use tracing::{info, warn};
 
-pub async fn clean_stale_temp_files(storage_dir: &Path, max_age_seconds: u64) -> anyhow::Result<(u64, u64)> {
+pub async fn clean_stale_temp_files(
+    storage_dir: &Path,
+    max_age_seconds: u64,
+) -> anyhow::Result<(u64, u64)> {
     let mut count = 0u64;
     let mut bytes = 0u64;
 

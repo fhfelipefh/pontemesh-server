@@ -58,12 +58,18 @@ pub async fn sweep_candidate(
         return Ok(Some(0));
     }
 
-    let file_size = tokio::fs::metadata(&physical).await.map(|m| m.len()).unwrap_or(0);
+    let file_size = tokio::fs::metadata(&physical)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
 
     let quarantine_path = quarantine_dir.join(format!(
         "{}-{}",
         candidate.id,
-        physical.file_name().and_then(|n| n.to_str()).unwrap_or("blob")
+        physical
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("blob")
     ));
 
     if let Some(parent) = quarantine_path.parent() {
@@ -99,7 +105,10 @@ pub async fn sweep_candidate(
     Ok(Some(file_size))
 }
 
-pub async fn purge_quarantine(quarantine_dir: &Path, max_age_seconds: u64) -> anyhow::Result<(u64, u64)> {
+pub async fn purge_quarantine(
+    quarantine_dir: &Path,
+    max_age_seconds: u64,
+) -> anyhow::Result<(u64, u64)> {
     let mut count = 0u64;
     let mut bytes = 0u64;
 
@@ -113,14 +122,27 @@ pub async fn purge_quarantine(quarantine_dir: &Path, max_age_seconds: u64) -> an
 
     while let Ok(Some(entry)) = entries.next_entry().await {
         let path = entry.path();
-        let Ok(meta) = tokio::fs::metadata(&path).await else { continue };
-        if !meta.is_file() { continue }
-        if meta.modified().unwrap_or(std::time::UNIX_EPOCH) > cutoff { continue }
+        let Ok(meta) = tokio::fs::metadata(&path).await else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        if meta.modified().unwrap_or(std::time::UNIX_EPOCH) > cutoff {
+            continue;
+        }
         let size = meta.len();
         match tokio::fs::remove_file(&path).await {
-            Ok(()) => { count += 1; bytes += size; }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => { count += 1; }
-            Err(e) => warn!(path = %path.display(), error = %e, "gc: failed to delete quarantined file"),
+            Ok(()) => {
+                count += 1;
+                bytes += size;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                count += 1;
+            }
+            Err(e) => {
+                warn!(path = %path.display(), error = %e, "gc: failed to delete quarantined file")
+            }
         }
     }
 

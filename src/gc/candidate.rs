@@ -54,13 +54,12 @@ pub async fn enqueue_aborted_multipart_parts(
     grace_seconds: u64,
 ) -> anyhow::Result<()> {
     let grace = i64::try_from(grace_seconds).unwrap_or(7200);
-    let rows = query(
-        "SELECT storage_path FROM s3_multipart_upload_parts WHERE upload_id = $1::uuid",
-    )
-    .bind(upload_id)
-    .fetch_all(pool)
-    .await
-    .context("failed to list multipart parts for gc")?;
+    let rows =
+        query("SELECT storage_path FROM s3_multipart_upload_parts WHERE upload_id = $1::uuid")
+            .bind(upload_id)
+            .fetch_all(pool)
+            .await
+            .context("failed to list multipart parts for gc")?;
 
     for row in rows {
         let path: String = row.get("storage_path");
@@ -152,17 +151,24 @@ pub async fn mark_deleted(pool: &PgPool, id: &str, sweep_token: &str) -> anyhow:
     Ok(())
 }
 
-pub async fn mark_failed(pool: &PgPool, id: &str, max_retries: u32, error_msg: &str) -> anyhow::Result<()> {
-    let attempts: i32 = query_scalar(
-        "SELECT attempt_count FROM gc_candidates WHERE id = $1::uuid",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
-    .context("failed to check attempt count")?
-    .unwrap_or(0);
+pub async fn mark_failed(
+    pool: &PgPool,
+    id: &str,
+    max_retries: u32,
+    error_msg: &str,
+) -> anyhow::Result<()> {
+    let attempts: i32 = query_scalar("SELECT attempt_count FROM gc_candidates WHERE id = $1::uuid")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .context("failed to check attempt count")?
+        .unwrap_or(0);
 
-    let next_state = if attempts as u32 >= max_retries { STATE_FAILED } else { STATE_PENDING };
+    let next_state = if attempts as u32 >= max_retries {
+        STATE_FAILED
+    } else {
+        STATE_PENDING
+    };
 
     query(
         r#"

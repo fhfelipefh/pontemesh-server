@@ -248,16 +248,36 @@ impl Default for GcSection {
     }
 }
 
-fn default_gc_enabled() -> bool { true }
-fn default_candidate_scan_interval() -> u64 { 60 }
-fn default_grace_period() -> u64 { 7200 }
-fn default_quarantine_period() -> u64 { 86400 }
-fn default_gc_batch_size() -> usize { 100 }
-fn default_max_concurrent_io() -> usize { 4 }
-fn default_full_gc_interval() -> u64 { 86400 }
-fn default_sweep_lease() -> u64 { 300 }
-fn default_max_retries() -> u32 { 10 }
-fn default_temp_file_max_age() -> u64 { 3600 }
+fn default_gc_enabled() -> bool {
+    true
+}
+fn default_candidate_scan_interval() -> u64 {
+    60
+}
+fn default_grace_period() -> u64 {
+    7200
+}
+fn default_quarantine_period() -> u64 {
+    86400
+}
+fn default_gc_batch_size() -> usize {
+    100
+}
+fn default_max_concurrent_io() -> usize {
+    4
+}
+fn default_full_gc_interval() -> u64 {
+    86400
+}
+fn default_sweep_lease() -> u64 {
+    300
+}
+fn default_max_retries() -> u32 {
+    10
+}
+fn default_temp_file_max_age() -> u64 {
+    3600
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalStorageSection {

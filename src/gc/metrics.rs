@@ -1,6 +1,6 @@
 use serde::Serialize;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 #[derive(Debug, Default)]
 pub struct GcMetrics {
@@ -40,8 +40,10 @@ impl GcMetrics {
     }
 
     pub fn record_reclaimed(&self, objects: i64, bytes: i64) {
-        self.objects_reclaimed_total.fetch_add(objects, Ordering::Relaxed);
-        self.bytes_reclaimed_total.fetch_add(bytes, Ordering::Relaxed);
+        self.objects_reclaimed_total
+            .fetch_add(objects, Ordering::Relaxed);
+        self.bytes_reclaimed_total
+            .fetch_add(bytes, Ordering::Relaxed);
     }
 
     pub fn record_error(&self) {

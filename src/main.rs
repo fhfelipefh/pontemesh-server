@@ -93,7 +93,10 @@ async fn run_servers(
     tokio::try_join!(
         axum::serve(web_listener, web_app).with_graceful_shutdown(shutdown_signal()),
         axum::serve(s3_listener, s3_app).with_graceful_shutdown(shutdown_signal()),
-        async { gc_runtime.run().await; Ok(()) },
+        async {
+            gc_runtime.run().await;
+            Ok(())
+        },
     )
     .context("server listener failed")?;
 

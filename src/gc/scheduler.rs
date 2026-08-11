@@ -23,7 +23,12 @@ pub struct GcRuntime {
 }
 
 impl GcRuntime {
-    pub fn new(catalog: &Catalog, paths: PontemeshHome, config: GcConfig, metrics: SharedMetrics) -> Self {
+    pub fn new(
+        catalog: &Catalog,
+        paths: PontemeshHome,
+        config: GcConfig,
+        metrics: SharedMetrics,
+    ) -> Self {
         let pool = catalog.db_pool().clone();
         let status = Arc::new(Mutex::new(GcStatus {
             enabled: config.enabled,
@@ -37,7 +42,13 @@ impl GcRuntime {
             cycles_total: 0,
             errors_total: 0,
         }));
-        Self { pool, paths, config, metrics, status }
+        Self {
+            pool,
+            paths,
+            config,
+            metrics,
+            status,
+        }
     }
 
     pub fn current_status(&self) -> GcStatus {
@@ -72,7 +83,8 @@ impl GcRuntime {
                 warn!(error = %error, "gc: failed to reclaim expired leases");
             }
 
-            self.run_candidate_sweep(&storage_dir, &quarantine_dir).await;
+            self.run_candidate_sweep(&storage_dir, &quarantine_dir)
+                .await;
 
             if tokio::time::Instant::now() >= full_gc_due {
                 self.run_temp_cleanup(&storage_dir).await;
@@ -90,20 +102,15 @@ impl GcRuntime {
 
     async fn run_candidate_sweep(&self, storage_dir: &PathBuf, quarantine_dir: &PathBuf) {
         let batch_size = i64::try_from(self.config.batch_size).unwrap_or(100);
-        let candidates = match claim_batch(
-            &self.pool,
-            batch_size,
-            self.config.sweep_lease_seconds,
-        )
-        .await
-        {
-            Ok(c) => c,
-            Err(error) => {
-                warn!(error = %error, "gc: failed to claim candidate batch");
-                self.metrics.record_error();
-                return;
-            }
-        };
+        let candidates =
+            match claim_batch(&self.pool, batch_size, self.config.sweep_lease_seconds).await {
+                Ok(c) => c,
+                Err(error) => {
+                    warn!(error = %error, "gc: failed to claim candidate batch");
+                    self.metrics.record_error();
+                    return;
+                }
+            };
 
         if candidates.is_empty() {
             return;
@@ -148,12 +155,18 @@ impl GcRuntime {
         }
 
         if reclaimed_objects > 0 {
-            self.metrics.record_reclaimed(reclaimed_objects, reclaimed_bytes);
-            info!(objects = reclaimed_objects, bytes = reclaimed_bytes, "gc: sweep batch completed");
+            self.metrics
+                .record_reclaimed(reclaimed_objects, reclaimed_bytes);
+            info!(
+                objects = reclaimed_objects,
+                bytes = reclaimed_bytes,
+                "gc: sweep batch completed"
+            );
         }
 
         if let Ok(mut status) = self.status.lock() {
-            status.last_reclaimed_bytes = self.metrics.bytes_reclaimed_total.load(Ordering::Relaxed);
+            status.last_reclaimed_bytes =
+                self.metrics.bytes_reclaimed_total.load(Ordering::Relaxed);
             status.cycles_total = self.metrics.cycles_total.load(Ordering::Relaxed);
             status.errors_total = self.metrics.errors_total.load(Ordering::Relaxed);
         }
@@ -162,15 +175,23 @@ impl GcRuntime {
     async fn run_temp_cleanup(&self, storage_dir: &PathBuf) {
         match clean_stale_temp_files(storage_dir, self.config.temp_file_max_age_seconds).await {
             Ok((count, bytes)) if count > 0 => info!(count, bytes, "gc: stale temp files removed"),
-            Err(error) => { warn!(error = %error, "gc: temp file cleanup failed"); self.metrics.record_error(); }
+            Err(error) => {
+                warn!(error = %error, "gc: temp file cleanup failed");
+                self.metrics.record_error();
+            }
             _ => {}
         }
     }
 
     async fn run_quarantine_purge(&self, quarantine_dir: &PathBuf) {
         match purge_quarantine(quarantine_dir, self.config.quarantine_period_seconds).await {
-            Ok((count, bytes)) if count > 0 => info!(count, bytes, "gc: quarantined files permanently deleted"),
-            Err(error) => { warn!(error = %error, "gc: quarantine purge failed"); self.metrics.record_error(); }
+            Ok((count, bytes)) if count > 0 => {
+                info!(count, bytes, "gc: quarantined files permanently deleted")
+            }
+            Err(error) => {
+                warn!(error = %error, "gc: quarantine purge failed");
+                self.metrics.record_error();
+            }
             _ => {}
         }
     }
@@ -180,8 +201,7 @@ pub async fn trigger_dry_run(
     pool: &PgPool,
     storage_dir: &std::path::Path,
 ) -> anyhow::Result<crate::gc::admin::DryRunResult> {
-    let (pending_candidates, pending_bytes) =
-        crate::gc::candidate::pending_stats(pool).await?;
+    let (pending_candidates, pending_bytes) = crate::gc::candidate::pending_stats(pool).await?;
     let available_bytes = system::storage::filesystem_usage(storage_dir)
         .map(|(_, a)| a)
         .unwrap_or(0);

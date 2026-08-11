@@ -1,7 +1,7 @@
+use super::storage::filesystem_usage;
 use crate::config::StorageGuardsSection;
 use serde::Serialize;
 use std::path::Path;
-use super::storage::filesystem_usage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
