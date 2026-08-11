@@ -142,6 +142,8 @@ O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a
 * **RF96:** O sistema deve registrar eventos de autenticação, autorização, emissão de pacote de acesso, revogação, replicação, fallback e falhas.
 * **RF97:** O sistema deve auditar operações administrativas sensíveis.
 * **RF98:** O sistema deve permitir integração administrativa por painel, API e MCP.
+* **RF99:** Um administrador autenticado deve poder solicitar uma atualização manual do servidor pelo painel após confirmação explícita, sem depender da configuração de atualização automática.
+* **RF100:** O sistema deve permitir configurar um webhook operacional HTTP/HTTPS, enviado por POST conforme expressão cron de cinco campos, com payload documentado e sem segredos.
 * **RF99:** Eventos MCP devem ser registrados para auditoria.
 
 ## Requisitos não funcionais
@@ -190,6 +192,7 @@ O servidor deve atender aos papéis **Origin** e **Replica/Edge**, preservando a
 * **RNF27:** O sistema deve permitir auditar operações sensíveis.
 * **RNF28:** O sistema deve permitir correlação entre operações, objetos, buckets, fontes e sessões de transferência.
 * **RNF29:** Métricas não devem expor conteúdo dos objetos nem segredos.
+* **RNF29-A:** Webhooks operacionais devem usar timeout, limitar redirecionamentos, validar URL e nunca registrar a URL completa ou dados sensíveis em logs.
 
 ### Manutenibilidade e evolução
 

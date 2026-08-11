@@ -117,6 +117,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         )
         .route("/api/admin/system/resources", get(admin::system_resources))
         .route(
+            "/api/admin/operational-webhook",
+            get(admin::get_operational_webhook).put(admin::update_operational_webhook),
+        )
+        .route(
             "/api/admin/users",
             get(admin::list_admin_users).post(admin::create_admin_user),
         )
@@ -5153,6 +5157,7 @@ mod tests {
                 health_interval_seconds: Some(30),
             }),
             gc: Default::default(),
+            webhook: Default::default(),
         };
         let raw_config = toml::to_string(&config).expect("serialize config");
         fs::write(paths.config_file(), raw_config).expect("write config");

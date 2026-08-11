@@ -5,7 +5,6 @@ export type ServerUpdateStatus = {
   latestVersion: string;
   releaseUrl: string;
   updateAvailable: boolean;
-  automaticUpdateEnabled: boolean;
 };
 
 export async function getServerUpdateStatus(): Promise<ServerUpdateStatus> {

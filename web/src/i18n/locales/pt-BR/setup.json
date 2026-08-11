@@ -356,13 +356,24 @@
         "available": "Nova versão do Ponte Mesh Server disponível: {{version}}.",
         "current": "Ponte Mesh Server está atualizado ({{version}}).",
         "action": "Atualizar agora",
-        "notConfigured": "Atualização automática não configurada.",
         "restartPending": "Atualização iniciada. O serviço será reiniciado após a conclusão.",
         "confirmTitle": "Atualizar o servidor?",
         "confirmDescription": "A versão {{version}} será instalada e o serviço será reiniciado após a conclusão.",
         "confirmAction": "Atualizar agora",
         "loadFailed": "Falha ao verificar atualizações.",
         "requestFailed": "Falha ao iniciar a atualização."
+      },
+      "webhook": {
+        "title": "Webhook operacional",
+        "description": "Envie periodicamente o estado da instância por POST para uma automação como n8n.",
+        "enabled": "Enviar webhook operacional",
+        "url": "URL",
+        "cron": "Agendamento cron",
+        "cronHint": "Use cinco campos em UTC. Exemplo: */15 * * * * envia a cada 15 minutos.",
+        "payload": "Objeto JSON enviado",
+        "saved": "Salvo",
+        "loadFailed": "Falha ao carregar a configuração do webhook.",
+        "saveFailed": "Falha ao salvar a configuração do webhook."
       },
       "configuration": {
         "title": "Backup de configurações",

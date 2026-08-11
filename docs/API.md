@@ -245,6 +245,8 @@ Na implementação atual, o plano administrativo já expõe contratos para:
 
 ```http
 GET /api/admin/audit-events
+GET /api/admin/operational-webhook
+PUT /api/admin/operational-webhook
 GET /api/admin/configuration
 POST /api/admin/configuration
 GET /api/admin/mcp/settings
@@ -275,6 +277,11 @@ POST /api/admin/buckets/{bucket}/object-revocations/{objectKey}
 ```
 
 Essas rotas exigem sessão administrativa do painel.
+
+`GET /api/admin/operational-webhook` retorna a URL, o cron de cinco campos, o
+estado habilitado e uma prévia do objeto JSON enviado. `PUT` valida e persiste a
+mesma configuração. A entrega usa `POST` e o objeto de prévia permanece sem
+segredos.
 
 Os padrões da instância abrangem somente opções próprias da distribuição
 híbrida do Ponte Mesh. Novos buckets recebem uma cópia desses valores. A edição

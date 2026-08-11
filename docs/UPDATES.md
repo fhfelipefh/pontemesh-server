@@ -72,12 +72,15 @@ binary switch still requires a controlled restart.
 ## Update from the admin panel
 
 The Settings page can check the latest stable release of the official Ponte Mesh
-Server repository and show an update action to administrators. The action is
-available only when the deployment operator configures
-`PONTEMESH_UPDATE_COMMAND` with an absolute path to a trusted updater executable.
+Server repository and show a manual update action to administrators. After an
+explicit confirmation, the built-in updater selects the current platform asset,
+validates the release manifest, size, and SHA-256, stages the new executable, and
+uses a detached copy of the current binary to replace and restart the service.
 
-The command is never supplied by the browser. When an administrator confirms the
-update, the server starts that configured executable with the fixed
+Deployments may override the built-in updater with `PONTEMESH_UPDATE_COMMAND`
+set to an absolute trusted executable. The command is never supplied by the
+browser. When an administrator confirms the update, the server starts that
+configured executable with the fixed
 `PONTEMESH_UPDATE_VERSION`, `PONTEMESH_UPDATE_RELEASE_URL`, and
 `PONTEMESH_UPDATE_REPOSITORY` environment variables. The updater must download
 and verify the release manifest and checksum before replacing the executable and
@@ -85,5 +88,6 @@ restarting the service. The request is recorded in the administrative audit log.
 
 Containers do not replace their own image. For Docker or Kubernetes deployments,
 configure the command as a deployment-specific helper that performs the image
-rollout after verification. Without `PONTEMESH_UPDATE_COMMAND`, the panel can
-still report a newer release but cannot apply it.
+rollout after verification. Native installations can use the built-in updater;
+read-only filesystems and container image replacement still require an external
+deployment helper.

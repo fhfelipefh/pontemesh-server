@@ -128,6 +128,8 @@ pub struct InstanceConfig {
     pub replica: Option<ReplicaSection>,
     #[serde(default, rename = "garbage_collector")]
     pub gc: GcSection,
+    #[serde(default)]
+    pub webhook: WebhookSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +168,30 @@ pub struct StorageSection {
     pub local: LocalStorageSection,
     #[serde(default)]
     pub guards: StorageGuardsSection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookSection {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default = "default_webhook_cron")]
+    pub cron: String,
+}
+
+impl Default for WebhookSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: None,
+            cron: default_webhook_cron(),
+        }
+    }
+}
+
+fn default_webhook_cron() -> String {
+    "*/15 * * * *".to_owned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -482,6 +508,18 @@ pub fn update_storage_guards(
     validate_storage_guards(&guards)?;
     let mut config = load_instance_config(paths)?;
     config.storage.guards = guards;
+    let serialized = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;
+    fs::write(paths.config_file(), serialized)
+        .with_context(|| format!("failed to write {}", paths.config_file().display()))?;
+    Ok(config)
+}
+
+pub fn update_webhook(
+    paths: &PontemeshHome,
+    webhook: WebhookSection,
+) -> anyhow::Result<InstanceConfig> {
+    let mut config = load_instance_config(paths)?;
+    config.webhook = webhook;
     let serialized = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;
     fs::write(paths.config_file(), serialized)
         .with_context(|| format!("failed to write {}", paths.config_file().display()))?;

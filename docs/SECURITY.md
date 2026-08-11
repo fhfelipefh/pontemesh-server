@@ -52,7 +52,8 @@ Os principais objetivos de segurança são:
 * impedir uso indevido de pacotes de acesso, tickets ou URLs temporárias;
 * reduzir risco de replay em requisições sensíveis;
 * auditar ações administrativas, replicação, emissão de pacotes de acesso, revogações e falhas;
-* limitar atualizações solicitadas pelo painel a um atualizador confiável, configurado pelo operador, sem aceitar comandos do navegador;
+* limitar atualizações solicitadas pelo painel ao repositório oficial fixo, com artefato selecionado pela plataforma e validado pelo manifesto, tamanho e SHA-256; um comando externo confiável pode substituir o atualizador interno, mas nunca é recebido do navegador;
+* tratar webhooks operacionais como saída de rede administrativamente autorizada: aceitar somente HTTP/HTTPS com host, aplicar timeout e limite de redirecionamentos, não enviar segredos e não registrar a URL completa;
 * preservar previsibilidade operacional mesmo com peers instáveis, maliciosos ou indisponíveis;
 * garantir que falhas de configuração resultem em negação de acesso, não em permissão implícita.
 

@@ -36,13 +36,12 @@ export function ServerUpdateCard({ status, loading, requesting, error, restartPe
             data-testid="request-server-update"
             type="button"
             loading={requesting}
-            disabled={!status?.automaticUpdateEnabled || requesting}
+            disabled={requesting}
             icon={<RefreshCw size={17} aria-hidden="true" />}
             onClick={onUpdate}
           >
             {t("setup.settings.update.action")}
           </Button>
-          {!status?.automaticUpdateEnabled ? <span className="settings-muted-text">{t("setup.settings.update.notConfigured")}</span> : null}
         </div>
       ) : null}
     </SettingsSection>

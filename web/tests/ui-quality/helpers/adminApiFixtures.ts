@@ -140,6 +140,25 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
     degradedPercent: 90,
     blockPercent: 95
   };
+  let operationalWebhook = {
+    enabled: false,
+    url: "",
+    cron: "*/15 * * * *",
+    payloadPreview: {
+      schemaVersion: 1,
+      event: "pontemesh.operational_status",
+      generatedAt: now,
+      instance: {
+        name: dashboardSummary.instance.name,
+        role: dashboardSummary.instance.role,
+        version: "0.3.6"
+      },
+      storage: {
+        ...dashboardSummary.storage,
+        guard: diskGuardSettings
+      }
+    }
+  };
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -186,7 +205,7 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
         latestVersion: "0.3.4",
         releaseUrl: "https://github.com/fhfelipefh/pontemesh-server/releases/tag/v0.3.4",
         updateAvailable: true,
-        automaticUpdateEnabled: true
+        automaticUpdateEnabled: false
       });
     }
 
@@ -199,6 +218,16 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
         diskGuardSettings = { ...diskGuardSettings, ...request.postDataJSON() };
       }
       return json(route, diskGuardSettings);
+    }
+
+    if (path === "/api/admin/operational-webhook") {
+      if (request.method() === "PUT") {
+        operationalWebhook = {
+          ...operationalWebhook,
+          ...(request.postDataJSON() as Pick<typeof operationalWebhook, "enabled" | "url" | "cron">)
+        };
+      }
+      return json(route, operationalWebhook);
     }
 
     if (path === "/api/admin/users") {

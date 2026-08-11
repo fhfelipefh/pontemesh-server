@@ -28,6 +28,9 @@ async fn main() -> anyhow::Result<()> {
     let paths = config::PontemeshHome::from_env()?;
     paths.ensure_layout()?;
     let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if args.first().is_some_and(|arg| arg == "apply-staged-update") {
+        return system::update::run_apply_helper(&args[1..]);
+    }
     if args.first().is_some_and(|arg| arg == "setup-agent") {
         let options = setup::agent::SetupAgentOptions::parse(&args[1..])?;
         return setup::agent::run(paths, options).await;
@@ -88,6 +91,7 @@ async fn run_servers(
         .map(|c| gc::config::GcConfig::from(c.gc))
         .unwrap_or_default();
     let gc_metrics = gc::metrics::new_shared();
+    let webhook_paths = paths.clone();
     let gc_runtime = gc::scheduler::GcRuntime::new(&catalog, paths, gc_config, gc_metrics);
 
     tokio::try_join!(
@@ -95,6 +99,10 @@ async fn run_servers(
         axum::serve(s3_listener, s3_app).with_graceful_shutdown(shutdown_signal()),
         async {
             gc_runtime.run().await;
+            Ok(())
+        },
+        async {
+            system::webhook::run(webhook_paths).await;
             Ok(())
         },
     )

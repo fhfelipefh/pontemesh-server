@@ -94,6 +94,26 @@ degraded_percent = 90.0
 block_percent = 95.0
 ```
 
+### Webhook operacional
+
+O bloco `[webhook]` configura uma entrega periódica de estado operacional. O
+servidor envia `POST` com JSON para uma URL HTTP/HTTPS definida por um
+administrador, conforme uma expressão cron de cinco campos avaliada em UTC. O recurso permanece
+desabilitado por padrão e sua configuração é persistida no `config.toml`.
+
+```toml
+[webhook]
+enabled = false
+url = "https://automation.example.net/webhook/pontemesh"
+cron = "*/15 * * * *"
+```
+
+O payload contém versão do esquema, tipo do evento, horário, identificação da
+instância e estado do storage/limites de capacidade. Credenciais, tokens,
+segredos, nomes de objetos e conteúdo armazenado não fazem parte da entrega. A
+URL pode apontar para automações administradas pelo operador, inclusive serviços
+locais, e por isso somente sessões administrativas podem consultá-la ou alterá-la.
+
 Ao usar um IP como endpoint S3 público, configure clientes S3-compatible para o
 estilo de URL path. O estilo virtual-host transforma o bucket em subdomínio e,
 por exemplo, tentaria resolver `bucket.134.65.234.41`, o que não é um hostname

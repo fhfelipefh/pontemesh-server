@@ -3,3 +3,5 @@ pub mod disk_guard;
 pub mod environment;
 pub mod resources;
 pub mod storage;
+pub mod update;
+pub mod webhook;

@@ -34,16 +34,23 @@ import {
 } from "../api/mcpApi";
 import { ConfigurationImportResult, exportConfiguration, importConfiguration } from "../api/configurationApi";
 import { DiskGuardSettings, getDiskGuardSettings, updateDiskGuardSettings } from "../api/storageApi";
+import {
+  OperationalWebhookSettings,
+  getOperationalWebhook,
+  updateOperationalWebhook
+} from "../api/webhookApi";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
 import { CredentialTable } from "../components/settings/CredentialTable";
 import { EmptyState } from "../components/settings/EmptyState";
 import { IconButton } from "../components/settings/IconButton";
 import { InfoBox } from "../components/settings/InfoBox";
+import { OperationalWebhookCard } from "../components/settings/OperationalWebhookCard";
 import { S3CredentialsCard } from "../components/settings/S3CredentialsCard";
 import { ServerUpdateCard } from "../components/settings/ServerUpdateCard";
 import { SettingsSection } from "../components/settings/SettingsSection";
 import { StatusBadge } from "../components/settings/StatusBadge";
+import { ToggleRow } from "../components/settings/ToggleRow";
 
 const S3_KEYS_PAGE_SIZE = 10;
 
@@ -98,6 +105,11 @@ export function SettingsPage() {
   const [savingDiskGuard, setSavingDiskGuard] = useState(false);
   const [diskGuardError, setDiskGuardError] = useState("");
   const [diskGuardSaved, setDiskGuardSaved] = useState(false);
+  const [operationalWebhook, setOperationalWebhook] = useState<OperationalWebhookSettings | null>(null);
+  const [loadingOperationalWebhook, setLoadingOperationalWebhook] = useState(true);
+  const [savingOperationalWebhook, setSavingOperationalWebhook] = useState(false);
+  const [operationalWebhookSaved, setOperationalWebhookSaved] = useState(false);
+  const [operationalWebhookError, setOperationalWebhookError] = useState("");
   const [serverUpdate, setServerUpdate] = useState<ServerUpdateStatus | null>(null);
   const [loadingServerUpdate, setLoadingServerUpdate] = useState(true);
   const [requestingServerUpdate, setRequestingServerUpdate] = useState(false);
@@ -132,6 +144,13 @@ export function SettingsPage() {
       .then(setDiskGuard)
       .catch((loadError) => setDiskGuardError(loadError instanceof Error ? loadError.message : t("setup.settings.storage.loadFailed")))
       .finally(() => setLoadingDiskGuard(false));
+  }, [t]);
+
+  useEffect(() => {
+    getOperationalWebhook()
+      .then(setOperationalWebhook)
+      .catch((loadError) => setOperationalWebhookError(loadError instanceof Error ? loadError.message : t("setup.settings.webhook.loadFailed")))
+      .finally(() => setLoadingOperationalWebhook(false));
   }, [t]);
 
   async function handleRequestServerUpdate() {
@@ -185,6 +204,28 @@ export function SettingsPage() {
       setDiskGuardError(saveError instanceof Error ? saveError.message : t("setup.settings.storage.saveFailed"));
     } finally {
       setSavingDiskGuard(false);
+    }
+  }
+
+  async function handleSaveOperationalWebhook() {
+    if (!operationalWebhook) {
+      return;
+    }
+    setSavingOperationalWebhook(true);
+    setOperationalWebhookError("");
+    setOperationalWebhookSaved(false);
+    try {
+      const saved = await updateOperationalWebhook({
+        enabled: operationalWebhook.enabled,
+        url: operationalWebhook.url,
+        cron: operationalWebhook.cron
+      });
+      setOperationalWebhook(saved);
+      setOperationalWebhookSaved(true);
+    } catch (saveError) {
+      setOperationalWebhookError(saveError instanceof Error ? saveError.message : t("setup.settings.webhook.saveFailed"));
+    } finally {
+      setSavingOperationalWebhook(false);
     }
   }
 
@@ -473,6 +514,18 @@ export function SettingsPage() {
             setDiskGuard(nextSettings);
           }}
           onSave={() => void handleSaveDiskGuard()}
+        />
+        <OperationalWebhookCard
+          settings={operationalWebhook}
+          loading={loadingOperationalWebhook}
+          saving={savingOperationalWebhook}
+          saved={operationalWebhookSaved}
+          error={operationalWebhookError}
+          onChange={(settings) => {
+            setOperationalWebhookSaved(false);
+            setOperationalWebhook(settings);
+          }}
+          onSave={() => void handleSaveOperationalWebhook()}
         />
         <ServerUpdateCard
           status={serverUpdate}
@@ -1061,17 +1114,6 @@ function McpSummaryItem({ icon, label, value }: { icon: ReactNode; label: string
       {icon}
       <span>{label}</span>
       <strong>{value}</strong>
-    </div>
-  );
-}
-
-function ToggleRow({ label, checked, disabled = false, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange?: (checked: boolean) => void }) {
-  return (
-    <div className="settings-toggle-row">
-      <span>{label}</span>
-      <button type="button" role="switch" aria-checked={checked} aria-label={label} title={label} disabled={disabled} onClick={() => onChange?.(!checked)}>
-        <span aria-hidden="true" />
-      </button>
     </div>
   );
 }

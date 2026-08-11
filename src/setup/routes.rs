@@ -275,6 +275,7 @@ pub(crate) async fn complete_setup(
         },
         replica,
         gc: Default::default(),
+        webhook: Default::default(),
     };
 
     let config_toml = toml::to_string_pretty(&config).context("failed to serialize config.toml")?;

@@ -10,7 +10,7 @@ describe("serverUpdateApi", () => {
 
   it("loads the available server update", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({
-      currentVersion: "0.3.3", latestVersion: "0.3.4", releaseUrl: "https://example.test/release", updateAvailable: true, automaticUpdateEnabled: true
+      currentVersion: "0.3.3", latestVersion: "0.3.4", releaseUrl: "https://example.test/release", updateAvailable: true
     }));
 
     await expect(getServerUpdateStatus()).resolves.toMatchObject({ latestVersion: "0.3.4", updateAvailable: true });
