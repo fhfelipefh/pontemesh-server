@@ -2,6 +2,7 @@ import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Activity, Ban, Check, Copy, Download, KeyRound, Network, Plus, Save, Server, ShieldCheck, Upload, Wrench } from "lucide-react";
 import { getInstanceSummary, updateInstanceName } from "../api/dashboardApi";
+import { getServerUpdateStatus, requestServerUpdate, ServerUpdateStatus } from "../api/serverUpdateApi";
 import {
   ApplicationCredentialSummary,
   CreatedApplicationCredential,
@@ -38,6 +39,7 @@ import { EmptyState } from "../components/settings/EmptyState";
 import { IconButton } from "../components/settings/IconButton";
 import { InfoBox } from "../components/settings/InfoBox";
 import { S3CredentialsCard } from "../components/settings/S3CredentialsCard";
+import { ServerUpdateCard } from "../components/settings/ServerUpdateCard";
 import { SettingsSection } from "../components/settings/SettingsSection";
 import { StatusBadge } from "../components/settings/StatusBadge";
 
@@ -89,6 +91,12 @@ export function SettingsPage() {
   const [loadingInstance, setLoadingInstance] = useState(true);
   const [savingInstance, setSavingInstance] = useState(false);
   const [instanceError, setInstanceError] = useState("");
+  const [serverUpdate, setServerUpdate] = useState<ServerUpdateStatus | null>(null);
+  const [loadingServerUpdate, setLoadingServerUpdate] = useState(true);
+  const [requestingServerUpdate, setRequestingServerUpdate] = useState(false);
+  const [serverUpdateError, setServerUpdateError] = useState("");
+  const [serverUpdateConfirmation, setServerUpdateConfirmation] = useState(false);
+  const [restartPending, setRestartPending] = useState(false);
 
   useEffect(() => {
     getInstanceSummary()
@@ -96,6 +104,27 @@ export function SettingsPage() {
       .catch((loadError) => setInstanceError(loadError instanceof Error ? loadError.message : t("setup.settings.instance.loadFailed")))
       .finally(() => setLoadingInstance(false));
   }, [t]);
+
+  useEffect(() => {
+    getServerUpdateStatus()
+      .then(setServerUpdate)
+      .catch((loadError) => setServerUpdateError(loadError instanceof Error ? loadError.message : t("setup.settings.update.loadFailed")))
+      .finally(() => setLoadingServerUpdate(false));
+  }, [t]);
+
+  async function handleRequestServerUpdate() {
+    setRequestingServerUpdate(true);
+    setServerUpdateError("");
+    try {
+      await requestServerUpdate();
+      setRestartPending(true);
+      setServerUpdateConfirmation(false);
+    } catch (requestError) {
+      setServerUpdateError(requestError instanceof Error ? requestError.message : t("setup.settings.update.requestFailed"));
+    } finally {
+      setRequestingServerUpdate(false);
+    }
+  }
 
   async function handleRenameInstance() {
     if (!instanceName.trim()) {
@@ -366,6 +395,14 @@ export function SettingsPage() {
           </form>
           {instanceError ? <p className="error-message">{instanceError}</p> : null}
         </SettingsSection>
+        <ServerUpdateCard
+          status={serverUpdate}
+          loading={loadingServerUpdate}
+          requesting={requestingServerUpdate}
+          error={serverUpdateError}
+          restartPending={restartPending}
+          onUpdate={() => setServerUpdateConfirmation(true)}
+        />
         <McpSettingsCard
           settings={mcpSettings}
           status={mcpStatus}
@@ -455,6 +492,15 @@ export function SettingsPage() {
             }
             void handleRevokeMcpToken(destructiveConfirmation.id);
           }}
+        />
+      ) : null}
+      {serverUpdateConfirmation && serverUpdate ? (
+        <ConfirmDialog
+          title={t("setup.settings.update.confirmTitle")}
+          description={t("setup.settings.update.confirmDescription", { version: serverUpdate.latestVersion })}
+          confirmLabel={t("setup.settings.update.confirmAction")}
+          onCancel={() => setServerUpdateConfirmation(false)}
+          onConfirm={() => void handleRequestServerUpdate()}
         />
       ) : null}
     </div>

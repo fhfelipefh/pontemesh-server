@@ -20,7 +20,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, process::Command};
 use tokio::io::AsyncWriteExt;
 
 const DEFAULT_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 10;
@@ -279,6 +279,141 @@ pub async fn update_instance(
             }
         }
         Err(error) => bad_request(error),
+    }
+}
+
+const UPDATE_REPOSITORY: &str = "fhfelipefh/pontemesh-server";
+const UPDATE_COMMAND_ENV: &str = "PONTEMESH_UPDATE_COMMAND";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerUpdateStatus {
+    current_version: String,
+    latest_version: String,
+    release_url: String,
+    update_available: bool,
+    automatic_update_enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: String,
+}
+
+pub async fn server_update_status() -> Response {
+    match fetch_server_update_status().await {
+        Ok(status) => Json(status).into_response(),
+        Err(error) => (
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorResponse {
+                error: format!("failed to check the latest server release: {error}"),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn request_server_update(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+) -> Response {
+    let status = match fetch_server_update_status().await {
+        Ok(status) => status,
+        Err(error) => {
+            return internal_error(error.context("failed to check the latest server release"));
+        }
+    };
+    if !status.update_available {
+        return bad_request(anyhow::anyhow!("no newer server release is available"));
+    }
+
+    let command = match std::env::var(UPDATE_COMMAND_ENV) {
+        Ok(command) if !command.trim().is_empty() => PathBuf::from(command),
+        _ => return bad_request(anyhow::anyhow!("automatic updates are not configured")),
+    };
+    if !command.is_absolute() || !command.is_file() {
+        return bad_request(anyhow::anyhow!(
+            "PONTEMESH_UPDATE_COMMAND must be an absolute path to an updater executable"
+        ));
+    }
+
+    let spawn_result = Command::new(&command)
+        .env("PONTEMESH_UPDATE_VERSION", &status.latest_version)
+        .env("PONTEMESH_UPDATE_RELEASE_URL", &status.release_url)
+        .env("PONTEMESH_UPDATE_REPOSITORY", UPDATE_REPOSITORY)
+        .spawn();
+    if let Err(error) = spawn_result {
+        audit::failure(
+            "server_update_failed_to_start",
+            Some(&session.username),
+            &error.to_string(),
+        );
+        return internal_error(
+            anyhow::Error::new(error).context("failed to start configured updater"),
+        );
+    }
+
+    audit::event(
+        "server_update_requested",
+        Some(&session.username),
+        "success",
+        &format!("target_version={}", status.latest_version),
+    );
+    record_admin_audit(
+        &state,
+        "server_update_requested",
+        &session.username,
+        "success",
+        &format!("target_version={}", status.latest_version),
+    )
+    .await;
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "restartRequired": true })),
+    )
+        .into_response()
+}
+
+async fn fetch_server_update_status() -> anyhow::Result<ServerUpdateStatus> {
+    let release = reqwest::Client::new()
+        .get(format!(
+            "https://api.github.com/repos/{UPDATE_REPOSITORY}/releases/latest"
+        ))
+        .header(reqwest::header::USER_AGENT, "pontemesh-server-update-check")
+        .send()
+        .await?
+        .error_for_status()?
+        .json::<GithubRelease>()
+        .await?;
+    let current_version = env!("CARGO_PKG_VERSION").to_owned();
+    let latest_version = release.tag_name.trim_start_matches('v').to_owned();
+    let update_available = is_newer_version(&latest_version, &current_version);
+
+    Ok(ServerUpdateStatus {
+        current_version,
+        latest_version,
+        release_url: release.html_url,
+        update_available,
+        automatic_update_enabled: std::env::var(UPDATE_COMMAND_ENV)
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty()),
+    })
+}
+
+fn is_newer_version(candidate: &str, current: &str) -> bool {
+    fn parse(value: &str) -> Option<[u64; 3]> {
+        let mut parts = value.split('-').next()?.split('.');
+        Some([
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+        ])
+    }
+
+    match (parse(candidate), parse(current)) {
+        (Some(candidate), Some(current)) => candidate > current,
+        _ => false,
     }
 }
 
@@ -1761,6 +1896,13 @@ fn internal_error(error: anyhow::Error) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identifies_a_newer_stable_server_version() {
+        assert!(is_newer_version("0.3.4", "0.3.3"));
+        assert!(!is_newer_version("0.3.3", "0.3.3"));
+        assert!(!is_newer_version("not-a-version", "0.3.3"));
+    }
 
     #[test]
     fn s3_access_key_pagination_defaults_to_first_page() {

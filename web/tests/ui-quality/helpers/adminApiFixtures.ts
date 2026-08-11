@@ -167,6 +167,19 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
       return json(route, { ...dashboardSummary.instance, name: fixtureInstanceName });
     }
 
+    if (path === "/api/admin/system/update") {
+      if (request.method() === "POST") {
+        return json(route, { restartRequired: true }, 202);
+      }
+      return json(route, {
+        currentVersion: "0.3.3",
+        latestVersion: "0.3.4",
+        releaseUrl: "https://github.com/fhfelipefh/pontemesh-server/releases/tag/v0.3.4",
+        updateAvailable: true,
+        automaticUpdateEnabled: true
+      });
+    }
+
     if (path === "/api/admin/dashboard/summary") {
       return json(route, dashboardSummary);
     }

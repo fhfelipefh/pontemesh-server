@@ -6,11 +6,13 @@ import { Button } from "./Button";
 export function ConfirmDialog({
   title,
   description,
+  confirmLabel,
   onCancel,
   onConfirm
 }: {
   title: string;
   description?: string;
+  confirmLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -39,7 +41,7 @@ export function ConfirmDialog({
             {t("setup.common.cancel")}
           </button>
           <Button className="settings-modal__primary button--danger" type="button" onClick={onConfirm} icon={<Trash2 size={17} aria-hidden="true" />}>
-            {t("setup.common.confirm")}
+            {confirmLabel ?? t("setup.common.confirm")}
           </Button>
         </div>
       </div>

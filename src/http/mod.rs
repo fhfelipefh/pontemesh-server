@@ -111,6 +111,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             "/api/admin/instance",
             get(admin::instance_summary).put(admin::update_instance),
         )
+        .route(
+            "/api/admin/system/update",
+            get(admin::server_update_status).post(admin::request_server_update),
+        )
         .route("/api/admin/system/resources", get(admin::system_resources))
         .route("/api/admin/storage/status", get(admin::storage_status))
         .route(

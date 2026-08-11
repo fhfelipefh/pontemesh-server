@@ -328,6 +328,19 @@
         "loadFailed": "Failed to load the instance name.",
         "saveFailed": "Failed to save the instance name."
       },
+      "update": {
+        "title": "Server update",
+        "available": "A new Ponte Mesh Server version is available: {{version}}.",
+        "current": "Ponte Mesh Server is up to date ({{version}}).",
+        "action": "Update now",
+        "notConfigured": "Automatic updates are not configured.",
+        "restartPending": "Update started. The service will restart when it finishes.",
+        "confirmTitle": "Update the server?",
+        "confirmDescription": "Version {{version}} will be installed and the service will restart when it finishes.",
+        "confirmAction": "Update now",
+        "loadFailed": "Failed to check for updates.",
+        "requestFailed": "Failed to start the update."
+      },
       "configuration": {
         "title": "Configuration backup",
         "export": "Export JSON",
