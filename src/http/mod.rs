@@ -3030,6 +3030,115 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_object_list_hides_versioned_delete_markers() {
+        let Some(ctx) = TestContext::new("admin-versioned-object-delete").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let admin_cookie = login_cookie(app.clone()).await;
+
+        let create_bucket = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/buckets")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"name":"versioned-admin-objects"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_bucket.status(), StatusCode::CREATED);
+
+        let boundary = "pontemesh-versioned-delete-boundary";
+        let object_body = b"versioned admin object";
+        let upload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/buckets/versioned-admin-objects/objects")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(multipart_body(
+                        boundary,
+                        "object.txt",
+                        object_body,
+                    )))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(upload.status(), StatusCode::CREATED);
+
+        let versioning = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/buckets/versioned-admin-objects/policy")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":true,"allowPeerSharing":false,"sourceSelectionStrategy":"ORIGIN_REPLICA_EDGE","fragmentPriorityStrategy":"MANIFEST_ORDER","failureThreshold":3,"fallbackMode":"ORIGIN_RANGE","s3VersioningEnabled":true}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(versioning.status(), StatusCode::OK);
+
+        let listed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/versioned-admin-objects/objects?page=1&pageSize=20")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(listed.status(), StatusCode::OK);
+        assert!(response_text(listed).await.contains(r#""sizeBytes":22"#));
+
+        let delete = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/api/admin/buckets/versioned-admin-objects/objects/object.txt")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(delete.status(), StatusCode::OK);
+
+        let list_after_delete = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/versioned-admin-objects/objects?page=1&pageSize=20")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(list_after_delete.status(), StatusCode::OK);
+        let body = response_text(list_after_delete).await;
+        assert!(body.contains(r#""items":[]"#));
+        assert!(body.contains(r#""totalItems":0"#));
+    }
+
+    #[tokio::test]
     async fn admin_object_routes_require_session_and_handle_multipart_lifecycle() {
         let Some(ctx) = TestContext::new("admin-object-routes").await else {
             return;

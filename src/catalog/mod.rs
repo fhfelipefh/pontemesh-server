@@ -1089,13 +1089,13 @@ impl Catalog {
             SELECT
                 b.name,
                 b.created_at,
-                COUNT(o.id)::bigint AS object_count,
+                COUNT(v.id)::bigint AS object_count,
                 COALESCE(SUM(v.size_bytes), 0)::bigint AS total_bytes
             FROM buckets b
             LEFT JOIN objects o
                 ON o.bucket_id = b.id AND o.deleted_at IS NULL
             LEFT JOIN object_versions v
-                ON v.id = o.current_version_id
+                ON v.id = o.current_version_id AND NOT v.is_delete_marker
             WHERE b.deleted_at IS NULL
             GROUP BY b.id, b.name, b.created_at
             ORDER BY b.created_at DESC, b.name ASC
@@ -1144,13 +1144,13 @@ impl Catalog {
             SELECT
                 b.name,
                 b.created_at,
-                COUNT(o.id)::bigint AS object_count,
+                COUNT(v.id)::bigint AS object_count,
                 COALESCE(SUM(v.size_bytes), 0)::bigint AS total_bytes
             FROM buckets b
             LEFT JOIN objects o
                 ON o.bucket_id = b.id AND o.deleted_at IS NULL
             LEFT JOIN object_versions v
-                ON v.id = o.current_version_id
+                ON v.id = o.current_version_id AND NOT v.is_delete_marker
             WHERE b.deleted_at IS NULL
               AND ($1::text IS NULL OR b.name ILIKE '%' || $1 || '%')
             GROUP BY b.id, b.name, b.created_at
@@ -1189,13 +1189,13 @@ impl Catalog {
             SELECT
                 b.name,
                 b.created_at,
-                COUNT(o.id)::bigint AS object_count,
+                COUNT(v.id)::bigint AS object_count,
                 COALESCE(SUM(v.size_bytes), 0)::bigint AS total_bytes
             FROM buckets b
             LEFT JOIN objects o
                 ON o.bucket_id = b.id AND o.deleted_at IS NULL
             LEFT JOIN object_versions v
-                ON v.id = o.current_version_id
+                ON v.id = o.current_version_id AND NOT v.is_delete_marker
             WHERE b.name = $1 AND b.deleted_at IS NULL
             GROUP BY b.id, b.name, b.created_at
             "#,
@@ -1658,6 +1658,7 @@ impl Catalog {
             WHERE b.name = $1
               AND b.deleted_at IS NULL
               AND o.deleted_at IS NULL
+              AND NOT v.is_delete_marker
               AND o.object_key LIKE $2 || '%'
               AND ($3::text IS NULL OR o.object_key > $3)
             ORDER BY o.object_key ASC
@@ -1759,6 +1760,7 @@ impl Catalog {
             JOIN object_versions v ON v.id = o.current_version_id
             WHERE o.bucket_id = $1::uuid
               AND o.deleted_at IS NULL
+              AND NOT v.is_delete_marker
               AND ($2::text IS NULL OR o.object_key LIKE $2 || '%')
               AND ($3::text IS NULL OR o.object_key ILIKE '%' || $3 || '%')
             ORDER BY o.object_key ASC
