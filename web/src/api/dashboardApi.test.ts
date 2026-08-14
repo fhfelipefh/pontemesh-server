@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getApplicationLogs, getInstanceSummary, updateInstanceName } from "./dashboardApi";
+import { getApplicationLogs, getInstanceSummary, updateInstanceSettings } from "./dashboardApi";
 import { HttpError } from "./http";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -20,8 +20,9 @@ describe("dashboardApi — instance and logs endpoints", () => {
         jsonResponse({
           name: "My Origin",
           role: "origin",
+          timezone: "America/Sao_Paulo",
           environment: "native",
-          version: "0.3.3",
+          version: "0.3.11",
           uptimeSeconds: 900
         })
       );
@@ -29,6 +30,7 @@ describe("dashboardApi — instance and logs endpoints", () => {
       const instance = await getInstanceSummary();
 
       expect(instance.role).toBe("origin");
+      expect(instance.timezone).toBe("America/Sao_Paulo");
       expect(instance.uptimeSeconds).toBe(900);
       expect(fetchMock).toHaveBeenCalledWith("/api/admin/instance", {
         headers: { accept: "application/json" }
@@ -47,39 +49,41 @@ describe("dashboardApi — instance and logs endpoints", () => {
     });
   });
 
-  describe("updateInstanceName", () => {
-    it("sends PUT with name to /api/admin/instance", async () => {
+  describe("updateInstanceSettings", () => {
+    it("sends PUT with name and timezone to /api/admin/instance", async () => {
       const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
         jsonResponse({
           name: "Renamed Origin",
           role: "origin",
+          timezone: "America/Sao_Paulo",
           environment: "container",
-          version: "0.3.3",
+          version: "0.3.11",
           uptimeSeconds: 100
         })
       );
 
-      const result = await updateInstanceName("Renamed Origin");
+      const result = await updateInstanceSettings("Renamed Origin", "America/Sao_Paulo");
 
       expect(result.name).toBe("Renamed Origin");
+      expect(result.timezone).toBe("America/Sao_Paulo");
       expect(fetchMock).toHaveBeenCalledWith("/api/admin/instance", {
         method: "PUT",
         headers: {
           accept: "application/json",
           "content-type": "application/json"
         },
-        body: JSON.stringify({ name: "Renamed Origin" })
+        body: JSON.stringify({ name: "Renamed Origin", timezone: "America/Sao_Paulo" })
       });
     });
 
-    it("surfaces 400 when name is invalid", async () => {
+    it("surfaces 400 when name or timezone is invalid", async () => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        jsonResponse({ error: "name is too long" }, 400)
+        jsonResponse({ error: "invalid timezone" }, 400)
       );
 
-      await expect(updateInstanceName("x".repeat(300))).rejects.toMatchObject({
+      await expect(updateInstanceSettings("Origin", "Invalid/Timezone")).rejects.toMatchObject({
         status: 400,
-        message: "name is too long"
+        message: "invalid timezone"
       } satisfies Partial<HttpError>);
     });
   });
