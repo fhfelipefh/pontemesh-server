@@ -69,7 +69,7 @@ export function getTimezoneOffsetString(timeZone: string, date = new Date()): st
       return val;
     }
   } catch {
-    // fallback
+    /* empty */
   }
   return "UTC+00:00";
 }
@@ -91,7 +91,7 @@ export function getAllTimezones(): string[] {
         return supported;
       }
     } catch {
-      // fallback to COMMON_TIMEZONES
+      /* empty */
     }
   }
   return COMMON_TIMEZONES;
@@ -101,7 +101,6 @@ export function getTimezoneOptions(date = new Date()): TimezoneOption[] {
   const zoneList = getAllTimezones();
   const optionsMap = new Map<string, TimezoneOption>();
 
-  // Ensure UTC and major common ones are included
   const allZones = Array.from(new Set(["UTC", ...COMMON_TIMEZONES, ...zoneList]));
 
   for (const timeZone of allZones) {

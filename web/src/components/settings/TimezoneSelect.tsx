@@ -29,7 +29,6 @@ export function TimezoneSelect({
     return allOptions.filter((option) => option.searchKey.includes(query));
   }, [allOptions, filter]);
 
-  // Ensure current value is in the options list
   const optionsToRender = useMemo(() => {
     if (value && !filteredOptions.some((opt) => opt.value === value)) {
       const currentOpt = allOptions.find((opt) => opt.value === value) ?? {
