@@ -49,6 +49,7 @@ pub struct DashboardSummary {
 pub struct InstanceSummary {
     pub name: String,
     pub role: InstanceRole,
+    pub timezone: String,
     pub environment: environment::RuntimeEnvironment,
     pub version: String,
     pub uptime_seconds: u64,
@@ -57,6 +58,7 @@ pub struct InstanceSummary {
 #[derive(Debug, Deserialize)]
 pub struct UpdateInstanceRequest {
     name: String,
+    timezone: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -269,20 +271,24 @@ pub async fn update_instance(
     Extension(session): Extension<AdminSession>,
     Json(request): Json<UpdateInstanceRequest>,
 ) -> Response {
-    match config::update_instance_name(&state.paths, &request.name) {
+    match config::update_instance_settings(
+        &state.paths,
+        &request.name,
+        request.timezone.as_deref(),
+    ) {
         Ok(_) => {
             audit::event(
-                "instance_name_updated",
+                "instance_settings_updated",
                 Some(&session.username),
                 "success",
-                "instance display name updated",
+                "instance settings updated",
             );
             record_admin_audit(
                 &state,
-                "instance_name_updated",
+                "instance_settings_updated",
                 &session.username,
                 "success",
-                "instance display name updated",
+                "instance settings updated",
             )
             .await;
             match build_instance_summary(&state) {
@@ -1843,6 +1849,7 @@ fn build_instance_summary(state: &AppState) -> anyhow::Result<InstanceSummary> {
     Ok(InstanceSummary {
         name: config.instance.name,
         role: config.instance.role,
+        timezone: config.instance.timezone,
         environment: environment::detect_environment(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
         uptime_seconds: state.started_at.elapsed().as_secs(),

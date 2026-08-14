@@ -1,9 +1,11 @@
 use anyhow::{Context, bail};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 pub const DEFAULT_PONTEMESH_HOME: &str = "/var/pontemesh_home";
@@ -136,6 +138,12 @@ pub struct InstanceConfig {
 pub struct InstanceSection {
     pub name: String,
     pub role: InstanceRole,
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
+}
+
+fn default_timezone() -> String {
+    "UTC".to_owned()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -498,12 +506,64 @@ pub fn write_instance_config(paths: &PontemeshHome, config: &InstanceConfig) -> 
     crate::security::secrets::restrict_secret_file(&paths.config_file())
 }
 
-pub fn update_instance_name(paths: &PontemeshHome, name: &str) -> anyhow::Result<InstanceConfig> {
+pub fn validate_timezone(timezone: &str) -> anyhow::Result<String> {
+    let tz_str = timezone.trim();
+    if tz_str.is_empty() {
+        bail!("timezone cannot be empty");
+    }
+    Tz::from_str(tz_str)
+        .map_err(|_| anyhow::anyhow!("invalid timezone '{tz_str}': must be a valid IANA timezone identifier"))?;
+    Ok(tz_str.to_owned())
+}
+
+pub fn update_instance_settings(
+    paths: &PontemeshHome,
+    name: &str,
+    timezone: Option<&str>,
+) -> anyhow::Result<InstanceConfig> {
     let name = validate_instance_name(name)?;
     let mut config = load_instance_config(paths)?;
     config.instance.name = name;
+    if let Some(tz) = timezone {
+        let tz = validate_timezone(tz)?;
+        config.instance.timezone = tz;
+    }
     write_instance_config(paths, &config)?;
     Ok(config)
+}
+
+pub fn update_instance_name(paths: &PontemeshHome, name: &str) -> anyhow::Result<InstanceConfig> {
+    update_instance_settings(paths, name, None)
+}
+
+pub fn format_datetime_in_timezone(
+    utc_dt: chrono::DateTime<chrono::Utc>,
+    tz_str: &str,
+) -> anyhow::Result<String> {
+    let validated = validate_timezone(tz_str)?;
+    let tz: Tz = validated
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid timezone '{tz_str}'"))?;
+    let local_dt = utc_dt.with_timezone(&tz);
+    Ok(local_dt.format("%d/%m/%Y %H:%M").to_string())
+}
+
+pub fn parse_local_datetime_to_utc(
+    local_naive_str: &str,
+    tz_str: &str,
+) -> anyhow::Result<chrono::DateTime<chrono::Utc>> {
+    use chrono::TimeZone;
+    let validated = validate_timezone(tz_str)?;
+    let tz: Tz = validated
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid timezone '{tz_str}'"))?;
+    let naive = chrono::NaiveDateTime::parse_from_str(local_naive_str, "%Y-%m-%d %H:%M:%S")
+        .with_context(|| format!("invalid datetime format '{local_naive_str}', expected YYYY-MM-DD HH:MM:SS"))?;
+    let local = tz
+        .from_local_datetime(&naive)
+        .single()
+        .ok_or_else(|| anyhow::anyhow!("ambiguous or non-existent local datetime '{local_naive_str}'"))?;
+    Ok(local.with_timezone(&chrono::Utc))
 }
 
 pub fn update_storage_guards(
@@ -661,6 +721,110 @@ fn validate_url(value: &str, field: &str) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn utc_to_configured_timezone_conversions() {
+        let utc_dt = chrono::DateTime::parse_from_rfc3339("2026-08-14T15:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        assert_eq!(
+            format_datetime_in_timezone(utc_dt, "America/Sao_Paulo").unwrap(),
+            "14/08/2026 12:00"
+        );
+        assert_eq!(
+            format_datetime_in_timezone(utc_dt, "America/New_York").unwrap(),
+            "14/08/2026 11:00"
+        );
+        assert_eq!(
+            format_datetime_in_timezone(utc_dt, "Europe/London").unwrap(),
+            "14/08/2026 16:00"
+        );
+        assert_eq!(
+            format_datetime_in_timezone(utc_dt, "UTC").unwrap(),
+            "14/08/2026 15:00"
+        );
+    }
+
+    #[test]
+    fn configured_timezone_to_utc_conversions() {
+        let utc_dt = parse_local_datetime_to_utc("2026-08-14 12:00:00", "America/Sao_Paulo").unwrap();
+        assert_eq!(utc_dt.to_rfc3339(), "2026-08-14T15:00:00+00:00");
+
+        let utc_ny = parse_local_datetime_to_utc("2026-08-14 11:00:00", "America/New_York").unwrap();
+        assert_eq!(utc_ny.to_rfc3339(), "2026-08-14T15:00:00+00:00");
+    }
+
+    #[test]
+    fn midnight_boundary_behavior() {
+        let utc_dt = chrono::DateTime::parse_from_rfc3339("2026-01-01T01:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        assert_eq!(
+            format_datetime_in_timezone(utc_dt, "America/Sao_Paulo").unwrap(),
+            "31/12/2025 22:00"
+        );
+    }
+
+    #[test]
+    fn os_timezone_isolation() {
+        unsafe { std::env::set_var("TZ", "Asia/Tokyo"); }
+        let utc_dt = chrono::DateTime::parse_from_rfc3339("2026-08-14T15:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        assert_eq!(
+            format_datetime_in_timezone(utc_dt, "America/Sao_Paulo").unwrap(),
+            "14/08/2026 12:00"
+        );
+
+        unsafe { std::env::set_var("TZ", "UTC"); }
+        assert_eq!(
+            format_datetime_in_timezone(utc_dt, "America/Sao_Paulo").unwrap(),
+            "14/08/2026 12:00"
+        );
+    }
+
+    #[test]
+    fn validates_timezones() {
+        assert_eq!(validate_timezone("America/Sao_Paulo").unwrap(), "America/Sao_Paulo");
+        assert_eq!(validate_timezone("UTC").unwrap(), "UTC");
+        assert_eq!(validate_timezone("Europe/London").unwrap(), "Europe/London");
+        assert!(validate_timezone("Invalid/Timezone").is_err());
+        assert!(validate_timezone("UTC-3").is_err());
+        assert!(validate_timezone("").is_err());
+    }
+
+    #[test]
+    fn updates_instance_settings_with_timezone() {
+        let home = test_home("instance-settings-timezone");
+        home.ensure_layout().expect("layout");
+        fs::write(
+            home.config_file(),
+            r#"
+[instance]
+name = "origin"
+role = "origin"
+
+[http]
+bind = "127.0.0.1"
+port = 8080
+
+[storage.local]
+path = "/tmp/pontemesh-origin-storage"
+"#,
+        )
+        .expect("config");
+
+        let loaded = load_instance_config(&home).expect("default config");
+        assert_eq!(loaded.instance.timezone, "UTC");
+
+        update_instance_settings(&home, "New Origin", Some("America/Sao_Paulo")).expect("update settings");
+        let updated = load_instance_config(&home).expect("updated config");
+        assert_eq!(updated.instance.name, "New Origin");
+        assert_eq!(updated.instance.timezone, "America/Sao_Paulo");
+    }
 
     #[test]
     fn validates_instance_names() {
