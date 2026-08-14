@@ -268,6 +268,7 @@ pub(crate) async fn complete_setup(
         instance: InstanceSection {
             name: instance_name,
             role,
+            timezone: "UTC".to_owned(),
         },
         http: HttpSection {
             bind: web_bind_addr.ip().to_string(),
