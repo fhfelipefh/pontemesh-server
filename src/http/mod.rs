@@ -5280,6 +5280,7 @@ mod tests {
             instance: InstanceSection {
                 name: "Test Origin".to_owned(),
                 role,
+                timezone: "UTC".to_owned(),
             },
             http: HttpSection {
                 bind: "127.0.0.1".to_owned(),
