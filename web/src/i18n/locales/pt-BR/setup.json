@@ -275,9 +275,9 @@
       "noResultsTitle": "Nenhum objeto encontrado.",
       "confirmDeleteTitle": "Excluir objeto",
       "confirmDeleteDescription": "{{key}}",
-      "directory": "Diret\u00f3rio",
-      "goUp": "Subir um n\u00edvel",
-      "breadcrumbLabel": "Navega\u00e7\u00e3o de pastas",
+      "directory": "Diretório",
+      "goUp": "Subir um nível",
+      "breadcrumbLabel": "Navegação de pastas",
       "breadcrumbRoot": "Raiz do bucket"
     },
     "metrics": {
@@ -335,8 +335,10 @@
       "instance": {
         "title": "Instância",
         "name": "Nome da instância",
-        "loadFailed": "Falha ao carregar o nome da instância.",
-        "saveFailed": "Falha ao salvar o nome da instância."
+        "timezone": "Fuso horário do servidor",
+        "timezoneHelp": "Fuso horário que o servidor deve utilizar para suas operações baseadas em data e hora.",
+        "loadFailed": "Falha ao carregar as configurações da instância.",
+        "saveFailed": "Falha ao salvar as configurações da instância."
       },
       "storage": {
         "title": "Capacidade do storage",
