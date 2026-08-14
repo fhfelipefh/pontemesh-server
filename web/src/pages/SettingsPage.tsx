@@ -2,7 +2,8 @@ import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Activity, Ban, Check, Copy, Download, HardDrive, KeyRound, LockKeyhole, Network, Plus, Save, Server, ShieldCheck, Upload, Users, Wrench } from "lucide-react";
 import { AdminUserSummary, createAdminUser, listAdminUsers, updateMyCredentials } from "../api/usersApi";
-import { getInstanceSummary, updateInstanceName } from "../api/dashboardApi";
+import { getInstanceSummary, updateInstanceSettings } from "../api/dashboardApi";
+import { TimezoneSelect } from "../components/settings/TimezoneSelect";
 import { getServerUpdateStatus, requestServerUpdate, ServerUpdateStatus } from "../api/serverUpdateApi";
 import {
   ApplicationCredentialSummary,
@@ -98,6 +99,7 @@ export function SettingsPage() {
   const [configurationError, setConfigurationError] = useState("");
   const [destructiveConfirmation, setDestructiveConfirmation] = useState<DestructiveConfirmation>(null);
   const [instanceName, setInstanceName] = useState("");
+  const [instanceTimezone, setInstanceTimezone] = useState("UTC");
   const [loadingInstance, setLoadingInstance] = useState(true);
   const [savingInstance, setSavingInstance] = useState(false);
   const [instanceError, setInstanceError] = useState("");
@@ -129,7 +131,12 @@ export function SettingsPage() {
 
   useEffect(() => {
     getInstanceSummary()
-      .then((summary) => setInstanceName(summary.name))
+      .then((summary) => {
+        setInstanceName(summary.name);
+        if (summary.timezone) {
+          setInstanceTimezone(summary.timezone);
+        }
+      })
       .catch((loadError) => setInstanceError(loadError instanceof Error ? loadError.message : t("setup.settings.instance.loadFailed")))
       .finally(() => setLoadingInstance(false));
   }, [t]);
@@ -169,15 +176,16 @@ export function SettingsPage() {
     }
   }
 
-  async function handleRenameInstance() {
+  async function handleSaveInstanceSettings() {
     if (!instanceName.trim()) {
       return;
     }
     setSavingInstance(true);
     setInstanceError("");
     try {
-      const summary = await updateInstanceName(instanceName.trim());
+      const summary = await updateInstanceSettings(instanceName.trim(), instanceTimezone);
       setInstanceName(summary.name);
+      setInstanceTimezone(summary.timezone);
       window.dispatchEvent(new CustomEvent("pontemesh:instance-updated", { detail: summary }));
     } catch (saveError) {
       setInstanceError(saveError instanceof Error ? saveError.message : t("setup.settings.instance.saveFailed"));
@@ -485,29 +493,40 @@ export function SettingsPage() {
           title={t("setup.settings.instance.title")}
           icon={<Server size={20} />}
         >
-          <form className="instance-name-form" onSubmit={(event) => {
+          <form className="instance-settings-form" onSubmit={(event) => {
             event.preventDefault();
-            void handleRenameInstance();
+            void handleSaveInstanceSettings();
           }}>
-            <label>
-              <span>{t("setup.settings.instance.name")}</span>
-              <input
-                data-testid="instance-name-input"
-                value={instanceName}
-                maxLength={100}
+            <div className="instance-settings-fields">
+              <label>
+                <span>{t("setup.settings.instance.name")}</span>
+                <input
+                  data-testid="instance-name-input"
+                  value={instanceName}
+                  maxLength={100}
+                  disabled={loadingInstance || savingInstance}
+                  onChange={(event) => setInstanceName(event.target.value)}
+                />
+              </label>
+              <TimezoneSelect
+                label={t("setup.settings.instance.timezone")}
+                help={t("setup.settings.instance.timezoneHelp")}
+                value={instanceTimezone}
                 disabled={loadingInstance || savingInstance}
-                onChange={(event) => setInstanceName(event.target.value)}
+                onChange={setInstanceTimezone}
               />
-            </label>
-            <Button
-              data-testid="save-instance-name"
-              type="submit"
-              loading={savingInstance}
-              disabled={loadingInstance || savingInstance || !instanceName.trim()}
-              icon={<Save size={17} aria-hidden="true" />}
-            >
-              {t("setup.common.save")}
-            </Button>
+            </div>
+            <div>
+              <Button
+                data-testid="save-instance-name"
+                type="submit"
+                loading={savingInstance}
+                disabled={loadingInstance || savingInstance || !instanceName.trim()}
+                icon={<Save size={17} aria-hidden="true" />}
+              >
+                {t("setup.common.save")}
+              </Button>
+            </div>
           </form>
           {instanceError ? <p className="error-message">{instanceError}</p> : null}
         </SettingsSection>
