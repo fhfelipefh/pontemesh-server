@@ -335,8 +335,10 @@
       "instance": {
         "title": "Instance",
         "name": "Instance name",
-        "loadFailed": "Failed to load the instance name.",
-        "saveFailed": "Failed to save the instance name."
+        "timezone": "Server timezone",
+        "timezoneHelp": "Timezone that the server should use for time-based operations.",
+        "loadFailed": "Failed to load instance settings.",
+        "saveFailed": "Failed to save instance settings."
       },
       "storage": {
         "title": "Storage capacity",
