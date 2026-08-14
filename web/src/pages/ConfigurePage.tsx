@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { CheckCircle2, ChevronDown, Clipboard, KeyRound } from "lucide-react";
+import { CheckCircle2, ChevronDown, KeyRound } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { CompleteSetupRequest, CompleteSetupResponse, completeSetup } from "../api/setupApi";
@@ -7,6 +7,7 @@ import { Button } from "../components/Button";
 import { ErrorMessage } from "../components/ErrorMessage";
 import { PageShell } from "../components/PageShell";
 import { TextInput } from "../components/TextInput";
+import { CopyButton } from "../components/settings/CopyButton";
 
 const DEFAULT_STORAGE_PATH = "/var/pontemesh_home/data/storage";
 
@@ -316,18 +317,6 @@ export function ConfigurePage({
         </div>
       </form>
     </PageShell>
-  );
-}
-
-function CopyButton({ value, label }: { value: string; label: string }) {
-  async function handleCopy() {
-    await navigator.clipboard?.writeText(value);
-  }
-
-  return (
-    <button className="icon-button" type="button" title={label} aria-label={label} onClick={handleCopy}>
-      <Clipboard size={16} aria-hidden="true" />
-    </button>
   );
 }
 

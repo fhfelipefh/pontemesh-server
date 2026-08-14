@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
-import { Activity, Ban, Boxes, Copy, KeyRound, Plus, ServerCog, ShieldCheck } from "lucide-react";
+import { Activity, Ban, Boxes, KeyRound, Plus, ServerCog, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   CreatedReplicaCredential,
@@ -11,6 +11,7 @@ import {
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
 import { ErrorMessage } from "../components/ErrorMessage";
+import { CopyButton } from "../components/settings/CopyButton";
 import { EmptyState } from "../components/settings/EmptyState";
 import { StatusBadge } from "../components/settings/StatusBadge";
 
@@ -119,7 +120,7 @@ export function ReplicasPage() {
             </Button>
           </form>
           <ErrorMessage message={error} />
-          {created ? <CreatedReplicaToken created={created} onCopy={() => void navigator.clipboard?.writeText(created.token)} /> : null}
+          {created ? <CreatedReplicaToken created={created} /> : null}
         </section>
 
         <section className="settings-card replica-list-card">
@@ -191,14 +192,14 @@ function ReplicaDetail({ label, value }: { label: string; value: string }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function CreatedReplicaToken({ created, onCopy }: { created: CreatedReplicaCredential; onCopy: () => void }) {
+function CreatedReplicaToken({ created }: { created: CreatedReplicaCredential }) {
   const { t } = useTranslation();
   return (
     <section className="secret-panel" role="status">
       <strong>{t("setup.replicas.createdTitle")}</strong>
       <dl>
         <div><dt>{t("setup.replicas.replicaId")}</dt><dd><code>{created.replica.id}</code></dd></div>
-        <div><dt>{t("setup.replicas.token")}</dt><dd><code>{created.token}</code><button className="icon-button" type="button" title={t("setup.replicas.copyToken")} aria-label={t("setup.replicas.copyToken")} onClick={onCopy}><Copy size={16} aria-hidden="true" /></button></dd></div>
+        <div><dt>{t("setup.replicas.token")}</dt><dd><code>{created.token}</code><CopyButton value={created.token} label={t("setup.replicas.copyToken")} /></dd></div>
       </dl>
     </section>
   );
