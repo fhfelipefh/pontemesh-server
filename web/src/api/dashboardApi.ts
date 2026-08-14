@@ -51,6 +51,7 @@ export type DashboardSummary = {
 export type InstanceSummary = {
   name: string;
   role: "origin" | "replica-edge";
+  timezone: string;
   environment: "native" | "container" | "unknown";
   version: string;
   uptimeSeconds: number;
@@ -159,17 +160,21 @@ export async function getInstanceSummary(): Promise<InstanceSummary> {
   return response.json() as Promise<InstanceSummary>;
 }
 
-export async function updateInstanceName(name: string): Promise<InstanceSummary> {
+export async function updateInstanceSettings(name: string, timezone?: string): Promise<InstanceSummary> {
   const response = await fetch("/api/admin/instance", {
     method: "PUT",
     headers: {
       accept: "application/json",
       "content-type": "application/json"
     },
-    body: JSON.stringify({ name })
+    body: JSON.stringify({ name, timezone })
   });
   await ensureOk(response);
   return response.json() as Promise<InstanceSummary>;
+}
+
+export async function updateInstanceName(name: string): Promise<InstanceSummary> {
+  return updateInstanceSettings(name);
 }
 
 export async function getOriginTrafficMetrics(): Promise<OriginTrafficMetrics> {

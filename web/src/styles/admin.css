@@ -887,13 +887,19 @@
   line-height: 1.5;
 }
 
+.instance-settings-form,
 .instance-name-form {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto;
-  align-items: end;
   gap: var(--space-4);
 }
 
+.instance-settings-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.instance-settings-fields label,
 .instance-name-form label {
   display: grid;
   gap: var(--space-2);
@@ -901,6 +907,7 @@
   font-weight: 800;
 }
 
+.instance-settings-fields input,
 .instance-name-form input {
   width: 100%;
   min-height: 44px;
@@ -911,12 +918,45 @@
   background: var(--settings-surface-muted);
 }
 
+.instance-settings-fields input:focus,
 .instance-name-form input:focus {
   border-color: var(--settings-primary);
   outline: 3px solid var(--pm-focus-ring);
 }
 
+.timezone-select-field {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--settings-text);
+  font-weight: 800;
+}
+
+.timezone-select-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.timezone-search-input,
+.timezone-select {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--settings-border-strong);
+  border-radius: 12px;
+  padding: 0 14px;
+  color: var(--settings-text);
+  background: var(--settings-surface-muted);
+}
+
+.timezone-search-input:focus,
+.timezone-select:focus {
+  border-color: var(--settings-primary);
+  outline: 3px solid var(--pm-focus-ring);
+}
+
 @media (max-width: 680px) {
+  .instance-settings-fields,
+  .timezone-select-controls,
   .instance-name-form {
     grid-template-columns: 1fr;
   }
