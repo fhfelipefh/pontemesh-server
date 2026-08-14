@@ -271,11 +271,8 @@ pub async fn update_instance(
     Extension(session): Extension<AdminSession>,
     Json(request): Json<UpdateInstanceRequest>,
 ) -> Response {
-    match config::update_instance_settings(
-        &state.paths,
-        &request.name,
-        request.timezone.as_deref(),
-    ) {
+    match config::update_instance_settings(&state.paths, &request.name, request.timezone.as_deref())
+    {
         Ok(_) => {
             audit::event(
                 "instance_settings_updated",
