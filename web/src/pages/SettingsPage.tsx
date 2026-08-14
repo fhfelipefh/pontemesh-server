@@ -1,6 +1,6 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Ban, Check, Copy, Download, HardDrive, KeyRound, LockKeyhole, Network, Plus, Save, Server, ShieldCheck, Upload, Users, Wrench } from "lucide-react";
+import { Activity, Ban, Check, Download, HardDrive, KeyRound, LockKeyhole, Network, Plus, Save, Server, ShieldCheck, Upload, Users, Wrench } from "lucide-react";
 import { AdminUserSummary, createAdminUser, listAdminUsers, updateMyCredentials } from "../api/usersApi";
 import { getInstanceSummary, updateInstanceSettings } from "../api/dashboardApi";
 import { TimezoneSelect } from "../components/settings/TimezoneSelect";
@@ -42,6 +42,7 @@ import {
 } from "../api/webhookApi";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
+import { CopyButton } from "../components/settings/CopyButton";
 import { CredentialTable } from "../components/settings/CredentialTable";
 import { EmptyState } from "../components/settings/EmptyState";
 import { IconButton } from "../components/settings/IconButton";
@@ -1023,17 +1024,16 @@ function McpSettingsCard({
                   <dt>{t("setup.settings.mcp.tokenSecret")}</dt>
                   <dd>
                     <code>{createdToken.secret}</code>
-                    <IconButton label={t("setup.settings.mcp.copyToken")} icon={<Copy size={16} aria-hidden="true" />} onClick={() => void navigator.clipboard?.writeText(createdToken.secret)} />
+                    <CopyButton value={createdToken.secret} label={t("setup.settings.mcp.copyToken")} />
                   </dd>
                 </div>
               </dl>
               <div className="mcp-connection-config">
                 <div className="mcp-connection-config__header">
                   <strong>{t("setup.settings.mcp.connectionConfig")}</strong>
-                  <IconButton
+                  <CopyButton
+                    value={mcpConnectionConfig}
                     label={t("setup.settings.mcp.copyConnectionConfig")}
-                    icon={<Copy size={16} aria-hidden="true" />}
-                    onClick={() => void navigator.clipboard?.writeText(mcpConnectionConfig)}
                   />
                 </div>
                 <pre>{mcpConnectionConfig}</pre>
@@ -1249,7 +1249,7 @@ function ApplicationCredentialsCard({
                 <dt>{t("setup.settings.applications.token")}</dt>
                 <dd>
                   <code>{createdApplication.token}</code>
-                  <IconButton label={t("setup.settings.applications.copyToken")} icon={<Copy size={16} aria-hidden="true" />} onClick={() => void navigator.clipboard?.writeText(createdApplication.token)} />
+                  <CopyButton value={createdApplication.token} label={t("setup.settings.applications.copyToken")} />
                 </dd>
               </div>
             </dl>
