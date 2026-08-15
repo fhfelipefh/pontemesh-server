@@ -52,5 +52,15 @@ mod tests {
         assert!(validate_admin_password("PONTEMESH123!").is_err());
         assert!(validate_admin_password("PonteMeshAdmin!").is_err());
         assert!(validate_admin_password("PonteMesh1234").is_err());
+        assert!(validate_admin_password("Short1!").is_err());
+    }
+
+    #[test]
+    fn hash_and_verify_admin_password_lifecycle() {
+        let raw = "PonteMesh123!";
+        let hash = hash_admin_password(raw).expect("hash success");
+        assert!(verify_admin_password(raw, &hash).expect("verify ok"));
+        assert!(!verify_admin_password("WrongPassword1!", &hash).expect("verify fail"));
+        assert!(verify_admin_password(raw, "invalid_hash_string").is_err());
     }
 }
