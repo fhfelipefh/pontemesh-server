@@ -3861,6 +3861,45 @@ async fn record_origin_audit(
 mod tests {
     use super::*;
 
+    #[test]
+    fn parse_range_property_based_testing() {
+        let mut seed: u64 = 123456789;
+        let mut lcg = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            seed
+        };
+
+        for _ in 0..1000 {
+            let total_size: u64 = (lcg() % 1_000_000) + 1;
+            let choice = lcg() % 4;
+
+            let raw_range = match choice {
+                0 => {
+                    let start = lcg() % total_size;
+                    let end = start + (lcg() % (total_size - start + 100));
+                    format!("bytes={start}-{end}")
+                }
+                1 => {
+                    let start = lcg() % (total_size + 100);
+                    format!("bytes={start}-")
+                }
+                2 => {
+                    let suffix = (lcg() % (total_size + 100)) + 1;
+                    format!("bytes=-{suffix}")
+                }
+                _ => {
+                    format!("bytes=invalid-range-format-{}", lcg())
+                }
+            };
+
+            let res = parse_range(&raw_range, total_size);
+            if let Ok(resolved) = res {
+                assert!(resolved.start <= resolved.end);
+                assert!(resolved.end < total_size);
+            }
+        }
+    }
+
     #[tokio::test]
     async fn delete_objects_rejects_oversized_bodies_and_more_than_one_thousand_keys() {
         let oversized = format!(

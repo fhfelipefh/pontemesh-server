@@ -6290,8 +6290,103 @@ mod tests {
         let mut update = secure_mcp_settings_update();
         assert!(validate_mcp_settings_update(&update).is_ok());
 
+        update.endpoint_path = "/invalid".to_string();
+        assert!(validate_mcp_settings_update(&update).is_err());
+        update.endpoint_path = "/mcp".to_string();
+
+        update.bind_host = Some("a".repeat(256));
+        assert!(validate_mcp_settings_update(&update).is_err());
+        update.bind_host = Some("127.0.0.1".to_string());
+
         update.require_auth = false;
         assert!(validate_mcp_settings_update(&update).is_err());
+    }
+
+    #[test]
+    fn validate_bucket_name_and_object_key_property_testing() {
+        let mut seed: u64 = 987654321;
+        let mut lcg = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            seed
+        };
+
+        let bucket_chars = "abcdefghijklmnopqrstuvwxyz0123456789-.";
+        let bucket_chars_len = bucket_chars.len() as u64;
+
+        for _ in 0..1000 {
+            let len = (lcg() % 70) + 1;
+            let name: String = (0..len)
+                .map(|_| {
+                    let idx = (lcg() % bucket_chars_len) as usize;
+                    bucket_chars.chars().nth(idx).unwrap()
+                })
+                .collect();
+
+            let res = validate_bucket_name(&name);
+            if res.is_ok() {
+                assert!((3..=63).contains(&name.len()));
+                assert!(!name.starts_with('-') && !name.starts_with('.'));
+                assert!(!name.ends_with('-') && !name.ends_with('.'));
+                assert!(!name.contains(".."));
+            }
+        }
+
+        for _ in 0..1000 {
+            let len = lcg() % 1050;
+            let key: String = (0..len).map(|_| ((lcg() % 128) as u8) as char).collect();
+
+            let res = validate_object_key(&key);
+            if res.is_ok() {
+                assert!(!key.trim().is_empty());
+                assert!(key.len() <= 1024);
+                assert!(!key.contains('\0'));
+                assert!(!key.contains('\\'));
+                assert!(!key.starts_with('/'));
+            }
+        }
+    }
+
+    #[test]
+    fn helper_validations_and_parsers_behave_as_expected() {
+        assert!(validate_replica_endpoint("https://replica.local:8443").is_ok());
+        assert!(validate_replica_endpoint("ftp://replica.local").is_err());
+        assert!(validate_replica_endpoint("").is_err());
+
+        assert!(validate_peer_endpoint("http://peer.local:9000").is_ok());
+        assert!(validate_peer_endpoint("invalid-url").is_err());
+
+        assert!(validate_peer_id("peer-node-1").is_ok());
+        assert!(validate_peer_id("peer name with spaces").is_err());
+        assert!(validate_peer_id("").is_err());
+
+        assert!(validate_source_type("ORIGIN").is_ok());
+        assert!(validate_source_type("REPLICA_EDGE").is_ok());
+        assert!(validate_source_type("PEER").is_ok());
+        assert!(validate_source_type("UNKNOWN").is_err());
+
+        assert!(validate_sdk_event_type("FRAGMENT_VALIDATED").is_ok());
+        assert!(validate_sdk_event_type("INVALID").is_err());
+
+        assert!(validate_sdk_outcome("SUCCESS").is_ok());
+        assert!(validate_sdk_outcome("INVALID").is_err());
+
+        assert_eq!(validate_health_status("ok").unwrap(), "OK");
+        assert!(validate_health_status("BROKEN").is_err());
+
+        assert!(
+            parse_fragment_id(
+                "m1:0:0000000000000000000000000000000000000000000000000000000000000000"
+            )
+            .is_ok()
+        );
+        assert!(parse_fragment_id("invalid:fragment").is_err());
+        assert!(
+            parse_fragment_id(
+                "m1:-1:0000000000000000000000000000000000000000000000000000000000000000"
+            )
+            .is_err()
+        );
+        assert!(parse_fragment_id("m1:0:short_hash").is_err());
     }
 
     #[test]
