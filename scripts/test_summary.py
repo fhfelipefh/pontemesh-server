@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-Generates a visual ASCII/Unicode box summary of test results and code coverage
-for GitHub Actions step summary ($GITHUB_STEP_SUMMARY) and console log.
-"""
 import json
 import os
 import re
