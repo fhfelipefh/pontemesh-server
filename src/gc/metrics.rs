@@ -54,3 +54,30 @@ impl GcMetrics {
         self.last_success_epoch.store(epoch, Ordering::Relaxed);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gc_metrics_record_and_get() {
+        let metrics = GcMetrics::default();
+        assert_eq!(metrics.cycles_total.load(Ordering::Relaxed), 0);
+
+        metrics.record_cycle_start();
+        assert_eq!(metrics.cycles_total.load(Ordering::Relaxed), 1);
+
+        metrics.record_reclaimed(5, 1024);
+        assert_eq!(metrics.objects_reclaimed_total.load(Ordering::Relaxed), 5);
+        assert_eq!(metrics.bytes_reclaimed_total.load(Ordering::Relaxed), 1024);
+
+        metrics.record_error();
+        assert_eq!(metrics.errors_total.load(Ordering::Relaxed), 1);
+
+        metrics.set_last_epoch(123456789);
+        assert_eq!(
+            metrics.last_success_epoch.load(Ordering::Relaxed),
+            123456789
+        );
+    }
+}
