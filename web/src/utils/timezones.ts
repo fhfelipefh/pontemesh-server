@@ -53,12 +53,18 @@ const COMMON_TIMEZONES = [
   "Africa/Lagos"
 ];
 
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
 export function getTimezoneOffsetString(timeZone: string, date = new Date()): string {
   try {
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      timeZoneName: "longOffset"
-    });
+    let formatter = formatterCache.get(timeZone);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        timeZoneName: "longOffset"
+      });
+      formatterCache.set(timeZone, formatter);
+    }
     const parts = formatter.formatToParts(date);
     const tzPart = parts.find((p) => p.type === "timeZoneName");
     if (tzPart && tzPart.value) {
@@ -69,7 +75,6 @@ export function getTimezoneOffsetString(timeZone: string, date = new Date()): st
       return val;
     }
   } catch {
-    /* empty */
   }
   return "UTC+00:00";
 }
@@ -91,7 +96,6 @@ export function getAllTimezones(): string[] {
         return supported;
       }
     } catch {
-      /* empty */
     }
   }
   return COMMON_TIMEZONES;
