@@ -52,3 +52,14 @@ pub async fn readiness(State(state): State<AppState>) -> Response {
 
     (http_status, Json(body)).into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn liveness_returns_up() {
+        let response = liveness().await;
+        assert_eq!(response.status, "UP");
+    }
+}

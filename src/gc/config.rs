@@ -36,3 +36,27 @@ impl Default for GcConfig {
         Self::from(GcSection::default())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_gc_config_clamping() {
+        let mut section = GcSection::default();
+        section.candidate_scan_interval_seconds = 2; // below min 10
+        section.batch_size = 2000; // above max 1000
+        section.max_concurrent_io = 0; // below min 1
+        section.full_gc_interval_seconds = 100; // below min 3600
+        section.sweep_lease_seconds = 5; // below min 30
+        section.temp_file_max_age_seconds = 10; // below min 300
+
+        let config = GcConfig::from(section);
+        assert_eq!(config.candidate_scan_interval_seconds, 10);
+        assert_eq!(config.batch_size, 1000);
+        assert_eq!(config.max_concurrent_io, 1);
+        assert_eq!(config.full_gc_interval_seconds, 3600);
+        assert_eq!(config.sweep_lease_seconds, 30);
+        assert_eq!(config.temp_file_max_age_seconds, 300);
+    }
+}
