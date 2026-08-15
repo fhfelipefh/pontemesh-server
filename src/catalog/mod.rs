@@ -6333,9 +6333,7 @@ mod tests {
 
         for _ in 0..1000 {
             let len = lcg() % 1050;
-            let key: String = (0..len)
-                .map(|_| ((lcg() % 128) as u8) as char)
-                .collect();
+            let key: String = (0..len).map(|_| ((lcg() % 128) as u8) as char).collect();
 
             let res = validate_object_key(&key);
             if res.is_ok() {
@@ -6375,9 +6373,19 @@ mod tests {
         assert_eq!(validate_health_status("ok").unwrap(), "OK");
         assert!(validate_health_status("BROKEN").is_err());
 
-        assert!(parse_fragment_id("m1:0:0000000000000000000000000000000000000000000000000000000000000000").is_ok());
+        assert!(
+            parse_fragment_id(
+                "m1:0:0000000000000000000000000000000000000000000000000000000000000000"
+            )
+            .is_ok()
+        );
         assert!(parse_fragment_id("invalid:fragment").is_err());
-        assert!(parse_fragment_id("m1:-1:0000000000000000000000000000000000000000000000000000000000000000").is_err());
+        assert!(
+            parse_fragment_id(
+                "m1:-1:0000000000000000000000000000000000000000000000000000000000000000"
+            )
+            .is_err()
+        );
         assert!(parse_fragment_id("m1:0:short_hash").is_err());
     }
 
