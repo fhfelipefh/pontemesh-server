@@ -53,8 +53,6 @@ const COMMON_TIMEZONES = [
   "Africa/Lagos"
 ];
 
-// Cache Intl.DateTimeFormat instances by timezone name to prevent expensive re-creation
-// during bulk operations like getTimezoneOptions() across 400+ timezones (~80% speedup).
 const formatterCache = new Map<string, Intl.DateTimeFormat>();
 
 export function getTimezoneOffsetString(timeZone: string, date = new Date()): string {
@@ -77,7 +75,6 @@ export function getTimezoneOffsetString(timeZone: string, date = new Date()): st
       return val;
     }
   } catch {
-    /* empty */
   }
   return "UTC+00:00";
 }
@@ -99,7 +96,6 @@ export function getAllTimezones(): string[] {
         return supported;
       }
     } catch {
-      /* empty */
     }
   }
   return COMMON_TIMEZONES;
