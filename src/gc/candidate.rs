@@ -223,3 +223,26 @@ pub async fn pending_stats(pool: &PgPool) -> anyhow::Result<(i64, i64)> {
 
     Ok((row.get("cnt"), row.get("bytes")))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gc_candidate_struct_instantiation() {
+        let candidate = GcCandidate {
+            id: "cand-1".to_string(),
+            resource_type: "OBJECT_VERSION".to_string(),
+            resource_id: Some("res-123".to_string()),
+            storage_path: Some("/tmp/storage/1".to_string()),
+            reason: REASON_OBJECT_DELETED.to_string(),
+            state: STATE_PENDING.to_string(),
+            attempt_count: 0,
+            sweep_token: None,
+        };
+
+        assert_eq!(candidate.id, "cand-1");
+        assert_eq!(candidate.reason, "OBJECT_DELETED");
+        assert_eq!(candidate.state, "PENDING");
+    }
+}
