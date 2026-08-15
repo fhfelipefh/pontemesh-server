@@ -54,10 +54,16 @@ mod tests {
         let mut headers = HeaderMap::new();
         assert!(validate_origin(&headers).is_ok());
 
-        headers.insert(header::ORIGIN, HeaderValue::from_static("http://localhost:3000"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("http://localhost:3000"),
+        );
         assert!(validate_origin(&headers).is_ok());
 
-        headers.insert(header::ORIGIN, HeaderValue::from_static("https://127.0.0.1:8443"));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://127.0.0.1:8443"),
+        );
         assert!(validate_origin(&headers).is_ok());
 
         headers.insert(header::ORIGIN, HeaderValue::from_static("https://evil.com"));
@@ -72,7 +78,10 @@ mod tests {
         headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Basic abc"));
         assert_eq!(bearer_token(&headers), None);
 
-        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer  my-secret-token "));
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer  my-secret-token "),
+        );
         assert_eq!(bearer_token(&headers), Some("my-secret-token".to_string()));
     }
 }

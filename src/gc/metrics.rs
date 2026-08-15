@@ -75,6 +75,9 @@ mod tests {
         assert_eq!(metrics.errors_total.load(Ordering::Relaxed), 1);
 
         metrics.set_last_epoch(123456789);
-        assert_eq!(metrics.last_success_epoch.load(Ordering::Relaxed), 123456789);
+        assert_eq!(
+            metrics.last_success_epoch.load(Ordering::Relaxed),
+            123456789
+        );
     }
 }
