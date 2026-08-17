@@ -194,7 +194,7 @@ pub(crate) async fn complete_setup(
 ) -> anyhow::Result<Option<crate::catalog::CreatedS3AccessKey>> {
     let instance_name = non_empty(payload.instance_name, "instanceName")?;
     let admin_username = non_empty(payload.admin_username, "adminUsername")?;
-    let admin_password = non_empty(payload.admin_password, "adminPassword")?;
+    let admin_password = non_empty_password(payload.admin_password, "adminPassword")?;
     validate_setup_admin_password(&admin_password)?;
 
     let role = match payload.role.as_str() {
@@ -400,6 +400,13 @@ fn non_empty(value: String, field: &str) -> anyhow::Result<String> {
     Ok(trimmed.to_owned())
 }
 
+fn non_empty_password(value: String, field: &str) -> anyhow::Result<String> {
+    if value.trim().is_empty() {
+        bail!("{field} cannot be empty");
+    }
+    Ok(value)
+}
+
 fn validate_setup_admin_password(password: &str) -> anyhow::Result<()> {
     validate_admin_password(password).context("adminPassword does not meet the password policy")
 }
@@ -508,6 +515,13 @@ mod tests {
     fn setup_uses_the_full_admin_password_policy() {
         assert!(validate_setup_admin_password("weakpass").is_err());
         assert!(validate_setup_admin_password("StrongSetup123!").is_ok());
+    }
+
+    #[test]
+    fn setup_preserves_password_whitespace_instead_of_trimming_it() {
+        let password = " StrongSetup123! ".to_owned();
+
+        assert_eq!(non_empty_password(password.clone(), "adminPassword").unwrap(), password);
     }
 
     #[test]

@@ -8,6 +8,7 @@ import { ErrorMessage } from "../components/ErrorMessage";
 import { PageShell } from "../components/PageShell";
 import { TextInput } from "../components/TextInput";
 import { CopyButton } from "../components/settings/CopyButton";
+import { isValidAdminPassword, MAX_ADMIN_PASSWORD_LENGTH } from "../security/adminPassword";
 
 const DEFAULT_STORAGE_PATH = "/var/pontemesh_home/data/storage";
 
@@ -43,12 +44,29 @@ export function ConfigurePage({
   const [replicaPublicEndpoint, setReplicaPublicEndpoint] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState("");
+  const [adminPasswordError, setAdminPasswordError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [setupResult, setSetupResult] = useState<CompleteSetupResponse | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setAdminPasswordError("");
+
+    if (Array.from(adminPassword).length > MAX_ADMIN_PASSWORD_LENGTH) {
+      setAdminPasswordError(
+        t("setup.configure.adminPasswordTooLong", {
+          max: MAX_ADMIN_PASSWORD_LENGTH
+        })
+      );
+      return;
+    }
+
+    if (!isValidAdminPassword(adminPassword)) {
+      setAdminPasswordError(t("setup.configure.adminPasswordPolicy"));
+      return;
+    }
+
     setSubmitting(true);
 
     const payload: CompleteSetupRequest = {
@@ -187,6 +205,7 @@ export function ConfigurePage({
           autoComplete="new-password"
           value={adminPassword}
           onChange={setAdminPassword}
+          error={adminPasswordError}
           minLength={8}
           revealable
           required

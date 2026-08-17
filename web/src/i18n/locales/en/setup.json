@@ -26,6 +26,8 @@
       },
       "adminUsername": "Initial admin username",
       "adminPassword": "Initial admin password",
+      "adminPasswordTooLong": "Password must be at most {{max}} characters.",
+      "adminPasswordPolicy": "Password must have at least 12 characters and include upper, lower, number, and symbol.",
       "network": {
         "title": "Network endpoints",
         "internalWebPort": "Internal panel port",

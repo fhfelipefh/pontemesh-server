@@ -26,6 +26,8 @@
       },
       "adminUsername": "Usuário administrador inicial",
       "adminPassword": "Senha do administrador inicial",
+      "adminPasswordTooLong": "A senha deve ter no máximo {{max}} caracteres.",
+      "adminPasswordPolicy": "A senha deve ter pelo menos 12 caracteres e incluir maiúscula, minúscula, número e símbolo.",
       "network": {
         "title": "Endpoints de rede",
         "internalWebPort": "Porta interna do painel",
