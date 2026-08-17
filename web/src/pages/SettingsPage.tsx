@@ -1,23 +1,51 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Ban, Check, Download, HardDrive, KeyRound, LockKeyhole, Network, Plus, Save, Server, ShieldCheck, Upload, Users, Wrench } from "lucide-react";
-import { AdminUserSummary, createAdminUser, listAdminUsers, updateMyCredentials } from "../api/usersApi";
-import { getInstanceSummary, updateInstanceSettings } from "../api/dashboardApi";
+import {
+  Activity,
+  Ban,
+  Check,
+  Download,
+  HardDrive,
+  KeyRound,
+  LockKeyhole,
+  Network,
+  Plus,
+  Save,
+  Server,
+  ShieldCheck,
+  Upload,
+  Users,
+  Wrench,
+} from "lucide-react";
+import {
+  AdminUserSummary,
+  createAdminUser,
+  listAdminUsers,
+  updateMyCredentials,
+} from "../api/usersApi";
+import {
+  getInstanceSummary,
+  updateInstanceSettings,
+} from "../api/dashboardApi";
 import { TimezoneSelect } from "../components/settings/TimezoneSelect";
-import { getServerUpdateStatus, requestServerUpdate, ServerUpdateStatus } from "../api/serverUpdateApi";
+import {
+  getServerUpdateStatus,
+  requestServerUpdate,
+  ServerUpdateStatus,
+} from "../api/serverUpdateApi";
 import {
   ApplicationCredentialSummary,
   CreatedApplicationCredential,
   createApplicationCredential,
   listApplicationCredentials,
-  revokeApplicationCredential
+  revokeApplicationCredential,
 } from "../api/applicationCredentialsApi";
 import {
   CreatedS3AccessKey,
   S3AccessKeySummary,
   createS3AccessKey,
   listS3AccessKeys,
-  revokeS3AccessKey
+  revokeS3AccessKey,
 } from "../api/s3KeysApi";
 import {
   CreatedMcpAccessToken,
@@ -31,14 +59,22 @@ import {
   listMcpActivity,
   listMcpTokens,
   revokeMcpToken,
-  updateMcpSettings
+  updateMcpSettings,
 } from "../api/mcpApi";
-import { ConfigurationImportResult, exportConfiguration, importConfiguration } from "../api/configurationApi";
-import { DiskGuardSettings, getDiskGuardSettings, updateDiskGuardSettings } from "../api/storageApi";
+import {
+  ConfigurationImportResult,
+  exportConfiguration,
+  importConfiguration,
+} from "../api/configurationApi";
+import {
+  DiskGuardSettings,
+  getDiskGuardSettings,
+  updateDiskGuardSettings,
+} from "../api/storageApi";
 import {
   OperationalWebhookSettings,
   getOperationalWebhook,
-  updateOperationalWebhook
+  updateOperationalWebhook,
 } from "../api/webhookApi";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
@@ -75,13 +111,20 @@ export function SettingsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalKeys, setTotalKeys] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
-  const [applications, setApplications] = useState<ApplicationCredentialSummary[]>([]);
-  const [createdApplication, setCreatedApplication] = useState<CreatedApplicationCredential | null>(null);
+  const [applications, setApplications] = useState<
+    ApplicationCredentialSummary[]
+  >([]);
+  const [createdApplication, setCreatedApplication] =
+    useState<CreatedApplicationCredential | null>(null);
   const [applicationName, setApplicationName] = useState("default-sdk");
-  const [applicationPreset, setApplicationPreset] = useState<"downloader" | "full">("downloader");
+  const [applicationPreset, setApplicationPreset] = useState<
+    "downloader" | "full"
+  >("downloader");
   const [loadingApplications, setLoadingApplications] = useState(true);
   const [creatingApplication, setCreatingApplication] = useState(false);
-  const [revokingApplication, setRevokingApplication] = useState<string | null>(null);
+  const [revokingApplication, setRevokingApplication] = useState<string | null>(
+    null
+  );
   const [applicationError, setApplicationError] = useState("");
   const [mcpSettings, setMcpSettings] = useState<McpSettings | null>(null);
   const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null);
@@ -89,16 +132,19 @@ export function SettingsPage() {
   const [mcpActivity, setMcpActivity] = useState<McpActivityRecord[]>([]);
   const [mcpTokenName, setMcpTokenName] = useState("default-mcp-client");
   const [mcpTokenScopes, setMcpTokenScopes] = useState<string[]>(["read"]);
-  const [createdMcpToken, setCreatedMcpToken] = useState<CreatedMcpAccessToken | null>(null);
+  const [createdMcpToken, setCreatedMcpToken] =
+    useState<CreatedMcpAccessToken | null>(null);
   const [loadingMcp, setLoadingMcp] = useState(true);
   const [savingMcp, setSavingMcp] = useState(false);
   const [creatingMcpToken, setCreatingMcpToken] = useState(false);
   const [revokingMcpToken, setRevokingMcpToken] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState("");
   const [configurationImporting, setConfigurationImporting] = useState(false);
-  const [configurationResult, setConfigurationResult] = useState<ConfigurationImportResult | null>(null);
+  const [configurationResult, setConfigurationResult] =
+    useState<ConfigurationImportResult | null>(null);
   const [configurationError, setConfigurationError] = useState("");
-  const [destructiveConfirmation, setDestructiveConfirmation] = useState<DestructiveConfirmation>(null);
+  const [destructiveConfirmation, setDestructiveConfirmation] =
+    useState<DestructiveConfirmation>(null);
   const [instanceName, setInstanceName] = useState("");
   const [instanceTimezone, setInstanceTimezone] = useState("UTC");
   const [loadingInstance, setLoadingInstance] = useState(true);
@@ -109,16 +155,22 @@ export function SettingsPage() {
   const [savingDiskGuard, setSavingDiskGuard] = useState(false);
   const [diskGuardError, setDiskGuardError] = useState("");
   const [diskGuardSaved, setDiskGuardSaved] = useState(false);
-  const [operationalWebhook, setOperationalWebhook] = useState<OperationalWebhookSettings | null>(null);
-  const [loadingOperationalWebhook, setLoadingOperationalWebhook] = useState(true);
-  const [savingOperationalWebhook, setSavingOperationalWebhook] = useState(false);
+  const [operationalWebhook, setOperationalWebhook] =
+    useState<OperationalWebhookSettings | null>(null);
+  const [loadingOperationalWebhook, setLoadingOperationalWebhook] =
+    useState(true);
+  const [savingOperationalWebhook, setSavingOperationalWebhook] =
+    useState(false);
   const [operationalWebhookSaved, setOperationalWebhookSaved] = useState(false);
   const [operationalWebhookError, setOperationalWebhookError] = useState("");
-  const [serverUpdate, setServerUpdate] = useState<ServerUpdateStatus | null>(null);
+  const [serverUpdate, setServerUpdate] = useState<ServerUpdateStatus | null>(
+    null
+  );
   const [loadingServerUpdate, setLoadingServerUpdate] = useState(true);
   const [requestingServerUpdate, setRequestingServerUpdate] = useState(false);
   const [serverUpdateError, setServerUpdateError] = useState("");
-  const [serverUpdateConfirmation, setServerUpdateConfirmation] = useState(false);
+  const [serverUpdateConfirmation, setServerUpdateConfirmation] =
+    useState(false);
   const [restartPending, setRestartPending] = useState(false);
   const [adminUsers, setAdminUsers] = useState<AdminUserSummary[]>([]);
   const [usersError, setUsersError] = useState("");
@@ -132,34 +184,58 @@ export function SettingsPage() {
 
   useEffect(() => {
     getInstanceSummary()
-      .then((summary) => {
+      .then(summary => {
         setInstanceName(summary.name);
         if (summary.timezone) {
           setInstanceTimezone(summary.timezone);
         }
       })
-      .catch((loadError) => setInstanceError(loadError instanceof Error ? loadError.message : t("setup.settings.instance.loadFailed")))
+      .catch(loadError =>
+        setInstanceError(
+          loadError instanceof Error
+            ? loadError.message
+            : t("setup.settings.instance.loadFailed")
+        )
+      )
       .finally(() => setLoadingInstance(false));
   }, [t]);
 
   useEffect(() => {
     getServerUpdateStatus()
       .then(setServerUpdate)
-      .catch((loadError) => setServerUpdateError(loadError instanceof Error ? loadError.message : t("setup.settings.update.loadFailed")))
+      .catch(loadError =>
+        setServerUpdateError(
+          loadError instanceof Error
+            ? loadError.message
+            : t("setup.settings.update.loadFailed")
+        )
+      )
       .finally(() => setLoadingServerUpdate(false));
   }, [t]);
 
   useEffect(() => {
     getDiskGuardSettings()
       .then(setDiskGuard)
-      .catch((loadError) => setDiskGuardError(loadError instanceof Error ? loadError.message : t("setup.settings.storage.loadFailed")))
+      .catch(loadError =>
+        setDiskGuardError(
+          loadError instanceof Error
+            ? loadError.message
+            : t("setup.settings.storage.loadFailed")
+        )
+      )
       .finally(() => setLoadingDiskGuard(false));
   }, [t]);
 
   useEffect(() => {
     getOperationalWebhook()
       .then(setOperationalWebhook)
-      .catch((loadError) => setOperationalWebhookError(loadError instanceof Error ? loadError.message : t("setup.settings.webhook.loadFailed")))
+      .catch(loadError =>
+        setOperationalWebhookError(
+          loadError instanceof Error
+            ? loadError.message
+            : t("setup.settings.webhook.loadFailed")
+        )
+      )
       .finally(() => setLoadingOperationalWebhook(false));
   }, [t]);
 
@@ -171,7 +247,11 @@ export function SettingsPage() {
       setRestartPending(true);
       setServerUpdateConfirmation(false);
     } catch (requestError) {
-      setServerUpdateError(requestError instanceof Error ? requestError.message : t("setup.settings.update.requestFailed"));
+      setServerUpdateError(
+        requestError instanceof Error
+          ? requestError.message
+          : t("setup.settings.update.requestFailed")
+      );
     } finally {
       setRequestingServerUpdate(false);
     }
@@ -184,12 +264,21 @@ export function SettingsPage() {
     setSavingInstance(true);
     setInstanceError("");
     try {
-      const summary = await updateInstanceSettings(instanceName.trim(), instanceTimezone);
+      const summary = await updateInstanceSettings(
+        instanceName.trim(),
+        instanceTimezone
+      );
       setInstanceName(summary.name);
       setInstanceTimezone(summary.timezone);
-      window.dispatchEvent(new CustomEvent("pontemesh:instance-updated", { detail: summary }));
+      window.dispatchEvent(
+        new CustomEvent("pontemesh:instance-updated", { detail: summary })
+      );
     } catch (saveError) {
-      setInstanceError(saveError instanceof Error ? saveError.message : t("setup.settings.instance.saveFailed"));
+      setInstanceError(
+        saveError instanceof Error
+          ? saveError.message
+          : t("setup.settings.instance.saveFailed")
+      );
     } finally {
       setSavingInstance(false);
     }
@@ -209,19 +298,25 @@ export function SettingsPage() {
         enabled: nextSettings.enabled,
         warningPercent: nextSettings.warningPercent,
         degradedPercent: nextSettings.degradedPercent,
-        blockPercent: nextSettings.blockPercent
+        blockPercent: nextSettings.blockPercent,
       });
       setDiskGuard(saved);
       setDiskGuardSaved(true);
     } catch (saveError) {
       setDiskGuard(previousSettings);
-      setDiskGuardError(saveError instanceof Error ? saveError.message : t("setup.settings.storage.saveFailed"));
+      setDiskGuardError(
+        saveError instanceof Error
+          ? saveError.message
+          : t("setup.settings.storage.saveFailed")
+      );
     } finally {
       setSavingDiskGuard(false);
     }
   }
 
-  async function handleSaveOperationalWebhook(nextSettings = operationalWebhook) {
+  async function handleSaveOperationalWebhook(
+    nextSettings = operationalWebhook
+  ) {
     if (!nextSettings) {
       return;
     }
@@ -234,33 +329,44 @@ export function SettingsPage() {
       const saved = await updateOperationalWebhook({
         enabled: nextSettings.enabled,
         url: nextSettings.url,
-        cron: nextSettings.cron
+        cron: nextSettings.cron,
       });
       setOperationalWebhook(saved);
       setOperationalWebhookSaved(true);
     } catch (saveError) {
       setOperationalWebhook(previousSettings);
-      setOperationalWebhookError(saveError instanceof Error ? saveError.message : t("setup.settings.webhook.saveFailed"));
+      setOperationalWebhookError(
+        saveError instanceof Error
+          ? saveError.message
+          : t("setup.settings.webhook.saveFailed")
+      );
     } finally {
       setSavingOperationalWebhook(false);
     }
   }
 
-  const refreshKeys = useCallback(async (page: number) => {
-    setLoading(true);
-    setError("");
-    try {
-      const result = await listS3AccessKeys(page, S3_KEYS_PAGE_SIZE);
-      setKeys(result.items);
-      setCurrentPage(result.page);
-      setTotalKeys(result.total);
-      setTotalPages(result.totalPages);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t("setup.settings.s3.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const refreshKeys = useCallback(
+    async (page: number) => {
+      setLoading(true);
+      setError("");
+      try {
+        const result = await listS3AccessKeys(page, S3_KEYS_PAGE_SIZE);
+        setKeys(result.items);
+        setCurrentPage(result.page);
+        setTotalKeys(result.total);
+        setTotalPages(result.totalPages);
+      } catch (loadError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : t("setup.settings.s3.loadFailed")
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [t]
+  );
 
   useEffect(() => {
     void refreshKeys(1);
@@ -272,7 +378,11 @@ export function SettingsPage() {
     try {
       setApplications(await listApplicationCredentials());
     } catch (loadError) {
-      setApplicationError(loadError instanceof Error ? loadError.message : t("setup.settings.applications.loadFailed"));
+      setApplicationError(
+        loadError instanceof Error
+          ? loadError.message
+          : t("setup.settings.applications.loadFailed")
+      );
     } finally {
       setLoadingApplications(false);
     }
@@ -283,10 +393,20 @@ export function SettingsPage() {
   }, [refreshApplications]);
 
   const refreshAdminUsers = useCallback(async () => {
-    try { setAdminUsers(await listAdminUsers()); } catch (loadError) { setUsersError(loadError instanceof Error ? loadError.message : t("setup.settings.users.loadFailed")); }
+    try {
+      setAdminUsers(await listAdminUsers());
+    } catch (loadError) {
+      setUsersError(
+        loadError instanceof Error
+          ? loadError.message
+          : t("setup.settings.users.loadFailed")
+      );
+    }
   }, [t]);
 
-  useEffect(() => { void refreshAdminUsers(); }, [refreshAdminUsers]);
+  useEffect(() => {
+    void refreshAdminUsers();
+  }, [refreshAdminUsers]);
 
   const refreshMcp = useCallback(async () => {
     setLoadingMcp(true);
@@ -296,14 +416,18 @@ export function SettingsPage() {
         getMcpSettings(),
         getMcpStatus(),
         listMcpTokens(),
-        listMcpActivity()
+        listMcpActivity(),
       ]);
       setMcpSettings(settings);
       setMcpStatus(status);
       setMcpTokens(tokens);
       setMcpActivity(activity);
     } catch (loadError) {
-      setMcpError(loadError instanceof Error ? loadError.message : t("setup.settings.mcp.loadFailed"));
+      setMcpError(
+        loadError instanceof Error
+          ? loadError.message
+          : t("setup.settings.mcp.loadFailed")
+      );
     } finally {
       setLoadingMcp(false);
     }
@@ -321,7 +445,11 @@ export function SettingsPage() {
       setCreatedKey(nextKey);
       await refreshKeys(1);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : t("setup.settings.s3.createFailed"));
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : t("setup.settings.s3.createFailed")
+      );
     } finally {
       setCreating(false);
     }
@@ -335,7 +463,11 @@ export function SettingsPage() {
       setDestructiveConfirmation(null);
       await refreshKeys(currentPage);
     } catch (revokeError) {
-      setError(revokeError instanceof Error ? revokeError.message : t("setup.settings.s3.revokeFailed"));
+      setError(
+        revokeError instanceof Error
+          ? revokeError.message
+          : t("setup.settings.s3.revokeFailed")
+      );
     } finally {
       setRevoking(null);
     }
@@ -348,12 +480,20 @@ export function SettingsPage() {
     setCreatingApplication(true);
     setApplicationError("");
     try {
-      const created = await createApplicationCredential(applicationName.trim(), undefined, applicationPreset);
+      const created = await createApplicationCredential(
+        applicationName.trim(),
+        undefined,
+        applicationPreset
+      );
       setCreatedApplication(created);
       setApplicationName("");
       await refreshApplications();
     } catch (createError) {
-      setApplicationError(createError instanceof Error ? createError.message : t("setup.settings.applications.createFailed"));
+      setApplicationError(
+        createError instanceof Error
+          ? createError.message
+          : t("setup.settings.applications.createFailed")
+      );
     } finally {
       setCreatingApplication(false);
     }
@@ -367,26 +507,59 @@ export function SettingsPage() {
       setDestructiveConfirmation(null);
       await refreshApplications();
     } catch (revokeError) {
-      setApplicationError(revokeError instanceof Error ? revokeError.message : t("setup.settings.applications.revokeFailed"));
+      setApplicationError(
+        revokeError instanceof Error
+          ? revokeError.message
+          : t("setup.settings.applications.revokeFailed")
+      );
     } finally {
       setRevokingApplication(null);
     }
   }
 
   async function handleUpdateCredentials() {
-    setSavingUsers(true); setUsersError("");
+    setSavingUsers(true);
+    setUsersError("");
     try {
-      await updateMyCredentials({ username: currentUsername.trim(), currentPassword, newPassword });
+      await updateMyCredentials({
+        username: currentUsername.trim(),
+        currentPassword,
+        newPassword,
+      });
       window.location.assign("/login");
-    } catch (saveError) { setUsersError(saveError instanceof Error ? saveError.message : t("setup.settings.users.updateFailed")); } finally { setSavingUsers(false); }
+    } catch (saveError) {
+      setUsersError(
+        saveError instanceof Error
+          ? saveError.message
+          : t("setup.settings.users.updateFailed")
+      );
+    } finally {
+      setSavingUsers(false);
+    }
   }
 
   async function handleCreateAdminUser() {
-    setSavingUsers(true); setUsersError("");
+    setSavingUsers(true);
+    setUsersError("");
     try {
-      await createAdminUser({ username: newAdminUsername.trim(), password: newAdminPassword, currentPassword: newAdminCurrentPassword });
-      setNewAdminUsername(""); setNewAdminPassword(""); setNewAdminCurrentPassword(""); await refreshAdminUsers();
-    } catch (saveError) { setUsersError(saveError instanceof Error ? saveError.message : t("setup.settings.users.createFailed")); } finally { setSavingUsers(false); }
+      await createAdminUser({
+        username: newAdminUsername.trim(),
+        password: newAdminPassword,
+        currentPassword: newAdminCurrentPassword,
+      });
+      setNewAdminUsername("");
+      setNewAdminPassword("");
+      setNewAdminCurrentPassword("");
+      await refreshAdminUsers();
+    } catch (saveError) {
+      setUsersError(
+        saveError instanceof Error
+          ? saveError.message
+          : t("setup.settings.users.createFailed")
+      );
+    } finally {
+      setSavingUsers(false);
+    }
   }
 
   async function handleUpdateMcpSettings(nextSettings: McpSettings) {
@@ -403,12 +576,16 @@ export function SettingsPage() {
         adminToolsEnabled: nextSettings.adminToolsEnabled,
         exposeResources: nextSettings.exposeResources,
         exposePrompts: nextSettings.exposePrompts,
-        allowLocalhostOnly: nextSettings.allowLocalhostOnly
+        allowLocalhostOnly: nextSettings.allowLocalhostOnly,
       });
       setMcpSettings(saved);
       setMcpStatus(await getMcpStatus());
     } catch (saveError) {
-      setMcpError(saveError instanceof Error ? saveError.message : t("setup.settings.mcp.saveFailed"));
+      setMcpError(
+        saveError instanceof Error
+          ? saveError.message
+          : t("setup.settings.mcp.saveFailed")
+      );
     } finally {
       setSavingMcp(false);
     }
@@ -427,7 +604,11 @@ export function SettingsPage() {
       setMcpTokenScopes(["read"]);
       setMcpTokens(await listMcpTokens());
     } catch (createError) {
-      setMcpError(createError instanceof Error ? createError.message : t("setup.settings.mcp.createTokenFailed"));
+      setMcpError(
+        createError instanceof Error
+          ? createError.message
+          : t("setup.settings.mcp.createTokenFailed")
+      );
     } finally {
       setCreatingMcpToken(false);
     }
@@ -441,7 +622,11 @@ export function SettingsPage() {
       setDestructiveConfirmation(null);
       setMcpTokens(await listMcpTokens());
     } catch (revokeError) {
-      setMcpError(revokeError instanceof Error ? revokeError.message : t("setup.settings.mcp.revokeTokenFailed"));
+      setMcpError(
+        revokeError instanceof Error
+          ? revokeError.message
+          : t("setup.settings.mcp.revokeTokenFailed")
+      );
     } finally {
       setRevokingMcpToken(null);
     }
@@ -458,7 +643,11 @@ export function SettingsPage() {
       link.click();
       URL.revokeObjectURL(url);
     } catch (exportError) {
-      setConfigurationError(exportError instanceof Error ? exportError.message : t("setup.settings.configuration.exportFailed"));
+      setConfigurationError(
+        exportError instanceof Error
+          ? exportError.message
+          : t("setup.settings.configuration.exportFailed")
+      );
     }
   }
 
@@ -474,7 +663,11 @@ export function SettingsPage() {
       setConfigurationResult(result);
       await Promise.all([refreshMcp(), refreshKeys(currentPage)]);
     } catch (importError) {
-      setConfigurationError(importError instanceof Error ? importError.message : t("setup.settings.configuration.importFailed"));
+      setConfigurationError(
+        importError instanceof Error
+          ? importError.message
+          : t("setup.settings.configuration.importFailed")
+      );
     } finally {
       setConfigurationImporting(false);
     }
@@ -495,10 +688,13 @@ export function SettingsPage() {
           title={t("setup.settings.instance.title")}
           icon={<Server size={20} />}
         >
-          <form className="instance-settings-form" onSubmit={(event) => {
-            event.preventDefault();
-            void handleSaveInstanceSettings();
-          }}>
+          <form
+            className="instance-settings-form"
+            onSubmit={event => {
+              event.preventDefault();
+              void handleSaveInstanceSettings();
+            }}
+          >
             <div className="instance-settings-fields">
               <label>
                 <span>{t("setup.settings.instance.name")}</span>
@@ -507,7 +703,7 @@ export function SettingsPage() {
                   value={instanceName}
                   maxLength={100}
                   disabled={loadingInstance || savingInstance}
-                  onChange={(event) => setInstanceName(event.target.value)}
+                  onChange={event => setInstanceName(event.target.value)}
                 />
               </label>
               <TimezoneSelect
@@ -523,14 +719,18 @@ export function SettingsPage() {
                 data-testid="save-instance-name"
                 type="submit"
                 loading={savingInstance}
-                disabled={loadingInstance || savingInstance || !instanceName.trim()}
+                disabled={
+                  loadingInstance || savingInstance || !instanceName.trim()
+                }
                 icon={<Save size={17} aria-hidden="true" />}
               >
                 {t("setup.common.save")}
               </Button>
             </div>
           </form>
-          {instanceError ? <p className="error-message">{instanceError}</p> : null}
+          {instanceError ? (
+            <p className="error-message">{instanceError}</p>
+          ) : null}
         </SettingsSection>
         <StorageCapacityCard
           settings={diskGuard}
@@ -538,11 +738,13 @@ export function SettingsPage() {
           saving={savingDiskGuard}
           saved={diskGuardSaved}
           error={diskGuardError}
-          onChange={(nextSettings) => {
+          onChange={nextSettings => {
             setDiskGuardSaved(false);
             setDiskGuard(nextSettings);
           }}
-          onToggle={(enabled) => diskGuard && void handleSaveDiskGuard({ ...diskGuard, enabled })}
+          onToggle={enabled =>
+            diskGuard && void handleSaveDiskGuard({ ...diskGuard, enabled })
+          }
           onSave={() => void handleSaveDiskGuard()}
         />
         <OperationalWebhookCard
@@ -551,11 +753,11 @@ export function SettingsPage() {
           saving={savingOperationalWebhook}
           saved={operationalWebhookSaved}
           error={operationalWebhookError}
-          onChange={(settings) => {
+          onChange={settings => {
             setOperationalWebhookSaved(false);
             setOperationalWebhook(settings);
           }}
-          onToggle={(enabled) => {
+          onToggle={enabled => {
             if (!operationalWebhook) {
               return;
             }
@@ -577,7 +779,25 @@ export function SettingsPage() {
           restartPending={restartPending}
           onUpdate={() => setServerUpdateConfirmation(true)}
         />
-        <AdminUsersCard users={adminUsers} error={usersError} saving={savingUsers} currentUsername={currentUsername} currentPassword={currentPassword} newPassword={newPassword} newAdminUsername={newAdminUsername} newAdminPassword={newAdminPassword} newAdminCurrentPassword={newAdminCurrentPassword} onCurrentUsernameChange={setCurrentUsername} onCurrentPasswordChange={setCurrentPassword} onNewPasswordChange={setNewPassword} onNewAdminUsernameChange={setNewAdminUsername} onNewAdminPasswordChange={setNewAdminPassword} onNewAdminCurrentPasswordChange={setNewAdminCurrentPassword} onUpdate={() => void handleUpdateCredentials()} onCreate={() => void handleCreateAdminUser()} />
+        <AdminUsersCard
+          users={adminUsers}
+          error={usersError}
+          saving={savingUsers}
+          currentUsername={currentUsername}
+          currentPassword={currentPassword}
+          newPassword={newPassword}
+          newAdminUsername={newAdminUsername}
+          newAdminPassword={newAdminPassword}
+          newAdminCurrentPassword={newAdminCurrentPassword}
+          onCurrentUsernameChange={setCurrentUsername}
+          onCurrentPasswordChange={setCurrentPassword}
+          onNewPasswordChange={setNewPassword}
+          onNewAdminUsernameChange={setNewAdminUsername}
+          onNewAdminPasswordChange={setNewAdminPassword}
+          onNewAdminCurrentPasswordChange={setNewAdminCurrentPassword}
+          onUpdate={() => void handleUpdateCredentials()}
+          onCreate={() => void handleCreateAdminUser()}
+        />
         <McpSettingsCard
           settings={mcpSettings}
           status={mcpStatus}
@@ -596,22 +816,26 @@ export function SettingsPage() {
           onUpdateSettings={handleUpdateMcpSettings}
           onCreateToken={handleCreateMcpToken}
           onDismissCreatedToken={() => setCreatedMcpToken(null)}
-          onRevokeToken={(id, name) => setDestructiveConfirmation({ kind: "mcpToken", id, name })}
+          onRevokeToken={(id, name) =>
+            setDestructiveConfirmation({ kind: "mcpToken", id, name })
+          }
         />
-          <ApplicationCredentialsCard
+        <ApplicationCredentialsCard
           applications={applications}
           createdApplication={createdApplication}
-            applicationName={applicationName}
-            applicationPreset={applicationPreset}
+          applicationName={applicationName}
+          applicationPreset={applicationPreset}
           loading={loadingApplications}
           creating={creatingApplication}
           revoking={revokingApplication}
           error={applicationError}
-            onApplicationNameChange={setApplicationName}
-            onApplicationPresetChange={setApplicationPreset}
+          onApplicationNameChange={setApplicationName}
+          onApplicationPresetChange={setApplicationPreset}
           onCreateApplication={handleCreateApplication}
           onDismissCreatedApplication={() => setCreatedApplication(null)}
-          onRevokeApplication={(id, name) => setDestructiveConfirmation({ kind: "application", id, name })}
+          onRevokeApplication={(id, name) =>
+            setDestructiveConfirmation({ kind: "application", id, name })
+          }
         />
         <S3CredentialsCard
           keys={keys}
@@ -628,15 +852,17 @@ export function SettingsPage() {
           onKeyNameChange={setKeyName}
           onCreateKey={handleCreateKey}
           onDismissCreatedKey={() => setCreatedKey(null)}
-          onPageChange={(page) => void refreshKeys(page)}
-          onRevokeKey={(id, name) => setDestructiveConfirmation({ kind: "s3Key", id, name })}
+          onPageChange={page => void refreshKeys(page)}
+          onRevokeKey={(id, name) =>
+            setDestructiveConfirmation({ kind: "s3Key", id, name })
+          }
         />
         <ConfigurationBackupCard
           importing={configurationImporting}
           result={configurationResult}
           error={configurationError}
           onExport={() => void handleExportConfiguration()}
-          onImport={(file) => void handleImportConfiguration(file)}
+          onImport={file => void handleImportConfiguration(file)}
         />
       </div>
       {destructiveConfirmation ? (
@@ -650,10 +876,16 @@ export function SettingsPage() {
           }
           description={
             destructiveConfirmation.kind === "s3Key"
-              ? t("setup.settings.s3.confirmRevokeDescription", { name: destructiveConfirmation.name })
+              ? t("setup.settings.s3.confirmRevokeDescription", {
+                  name: destructiveConfirmation.name,
+                })
               : destructiveConfirmation.kind === "application"
-                ? t("setup.settings.applications.confirmRevokeDescription", { name: destructiveConfirmation.name })
-                : t("setup.settings.mcp.confirmRevokeTokenDescription", { name: destructiveConfirmation.name })
+                ? t("setup.settings.applications.confirmRevokeDescription", {
+                    name: destructiveConfirmation.name,
+                  })
+                : t("setup.settings.mcp.confirmRevokeTokenDescription", {
+                    name: destructiveConfirmation.name,
+                  })
           }
           onCancel={() => setDestructiveConfirmation(null)}
           onConfirm={() => {
@@ -672,7 +904,9 @@ export function SettingsPage() {
       {serverUpdateConfirmation && serverUpdate ? (
         <ConfirmDialog
           title={t("setup.settings.update.confirmTitle")}
-          description={t("setup.settings.update.confirmDescription", { version: serverUpdate.latestVersion })}
+          description={t("setup.settings.update.confirmDescription", {
+            version: serverUpdate.latestVersion,
+          })}
           confirmLabel={t("setup.settings.update.confirmAction")}
           onCancel={() => setServerUpdateConfirmation(false)}
           onConfirm={() => void handleRequestServerUpdate()}
@@ -690,7 +924,7 @@ function StorageCapacityCard({
   error,
   onChange,
   onToggle,
-  onSave
+  onSave,
 }: {
   settings: DiskGuardSettings | null;
   loading: boolean;
@@ -702,11 +936,12 @@ function StorageCapacityCard({
   onSave: () => void;
 }) {
   const { t } = useTranslation();
-  const thresholdsValid = settings !== null
-    && settings.warningPercent >= 0
-    && settings.warningPercent < settings.degradedPercent
-    && settings.degradedPercent < settings.blockPercent
-    && settings.blockPercent <= 100;
+  const thresholdsValid =
+    settings !== null &&
+    settings.warningPercent >= 0 &&
+    settings.warningPercent < settings.degradedPercent &&
+    settings.degradedPercent < settings.blockPercent &&
+    settings.blockPercent <= 100;
 
   return (
     <SettingsSection
@@ -719,10 +954,13 @@ function StorageCapacityCard({
       {loading || !settings ? (
         <div className="settings-loading">{t("setup.common.loading")}</div>
       ) : (
-        <form className="storage-capacity-form" onSubmit={(event) => {
-          event.preventDefault();
-          onSave();
-        }}>
+        <form
+          className="storage-capacity-form"
+          onSubmit={event => {
+            event.preventDefault();
+            onSave();
+          }}
+        >
           {!settings.enabled ? (
             <div className="mcp-settings-grid mcp-settings-grid--single">
               <ToggleRow
@@ -734,59 +972,73 @@ function StorageCapacityCard({
             </div>
           ) : (
             <>
-          <div className="storage-capacity-form__summary">
-            <ToggleRow
-              label={t("setup.settings.storage.enabled")}
-              checked={settings.enabled}
-              disabled={saving}
-              onChange={onToggle}
-            />
-            <div className="storage-capacity-form__usage">
-              <span>{t("setup.settings.storage.currentUsage")}</span>
-              <strong>{settings.usedPercent === null ? t("setup.common.unavailable") : `${settings.usedPercent.toFixed(1)}%`}</strong>
-            </div>
-          </div>
-          <div className="storage-capacity-form__thresholds">
-            <StorageThresholdField
-              id="storage-warning-percent"
-              label={t("setup.settings.storage.warningPercent")}
-              value={settings.warningPercent}
-              disabled={saving || !settings.enabled}
-              onChange={(warningPercent) => onChange({ ...settings, warningPercent })}
-            />
-            <StorageThresholdField
-              id="storage-degraded-percent"
-              label={t("setup.settings.storage.degradedPercent")}
-              value={settings.degradedPercent}
-              disabled={saving || !settings.enabled}
-              onChange={(degradedPercent) => onChange({ ...settings, degradedPercent })}
-            />
-            <StorageThresholdField
-              id="storage-block-percent"
-              label={t("setup.settings.storage.blockPercent")}
-              value={settings.blockPercent}
-              disabled={saving || !settings.enabled}
-              onChange={(blockPercent) => onChange({ ...settings, blockPercent })}
-            />
-          </div>
-          {!thresholdsValid ? <p className="settings-warning">{t("setup.settings.storage.invalidThresholds")}</p> : null}
-          <div className="storage-capacity-form__actions">
-            {saved ? (
-              <span className="storage-capacity-form__saved" role="status">
-                <Check size={16} aria-hidden="true" />
-                {t("setup.settings.storage.saved")}
-              </span>
-            ) : null}
-            <Button
-              data-testid="save-storage-capacity"
-              type="submit"
-              loading={saving}
-              disabled={saving || !thresholdsValid}
-              icon={<Save size={17} aria-hidden="true" />}
-            >
-              {t("setup.common.save")}
-            </Button>
-          </div>
+              <div className="storage-capacity-form__summary">
+                <ToggleRow
+                  label={t("setup.settings.storage.enabled")}
+                  checked={settings.enabled}
+                  disabled={saving}
+                  onChange={onToggle}
+                />
+                <div className="storage-capacity-form__usage">
+                  <span>{t("setup.settings.storage.currentUsage")}</span>
+                  <strong>
+                    {settings.usedPercent === null
+                      ? t("setup.common.unavailable")
+                      : `${settings.usedPercent.toFixed(1)}%`}
+                  </strong>
+                </div>
+              </div>
+              <div className="storage-capacity-form__thresholds">
+                <StorageThresholdField
+                  id="storage-warning-percent"
+                  label={t("setup.settings.storage.warningPercent")}
+                  value={settings.warningPercent}
+                  disabled={saving || !settings.enabled}
+                  onChange={warningPercent =>
+                    onChange({ ...settings, warningPercent })
+                  }
+                />
+                <StorageThresholdField
+                  id="storage-degraded-percent"
+                  label={t("setup.settings.storage.degradedPercent")}
+                  value={settings.degradedPercent}
+                  disabled={saving || !settings.enabled}
+                  onChange={degradedPercent =>
+                    onChange({ ...settings, degradedPercent })
+                  }
+                />
+                <StorageThresholdField
+                  id="storage-block-percent"
+                  label={t("setup.settings.storage.blockPercent")}
+                  value={settings.blockPercent}
+                  disabled={saving || !settings.enabled}
+                  onChange={blockPercent =>
+                    onChange({ ...settings, blockPercent })
+                  }
+                />
+              </div>
+              {!thresholdsValid ? (
+                <p className="settings-warning">
+                  {t("setup.settings.storage.invalidThresholds")}
+                </p>
+              ) : null}
+              <div className="storage-capacity-form__actions">
+                {saved ? (
+                  <span className="storage-capacity-form__saved" role="status">
+                    <Check size={16} aria-hidden="true" />
+                    {t("setup.settings.storage.saved")}
+                  </span>
+                ) : null}
+                <Button
+                  data-testid="save-storage-capacity"
+                  type="submit"
+                  loading={saving}
+                  disabled={saving || !thresholdsValid}
+                  icon={<Save size={17} aria-hidden="true" />}
+                >
+                  {t("setup.common.save")}
+                </Button>
+              </div>
             </>
           )}
         </form>
@@ -800,7 +1052,7 @@ function StorageThresholdField({
   label,
   value,
   disabled,
-  onChange
+  onChange,
 }: {
   id: string;
   label: string;
@@ -821,7 +1073,7 @@ function StorageThresholdField({
           required
           value={value}
           disabled={disabled}
-          onChange={(event) => onChange(Number(event.target.value))}
+          onChange={event => onChange(Number(event.target.value))}
         />
         <span aria-hidden="true">%</span>
       </div>
@@ -837,7 +1089,13 @@ type ConfigurationBackupCardProps = {
   onImport: (file: File | null) => void;
 };
 
-function ConfigurationBackupCard({ importing, result, error, onExport, onImport }: ConfigurationBackupCardProps) {
+function ConfigurationBackupCard({
+  importing,
+  result,
+  error,
+  onExport,
+  onImport,
+}: ConfigurationBackupCardProps) {
   const { t } = useTranslation();
 
   return (
@@ -858,12 +1116,16 @@ function ConfigurationBackupCard({ importing, result, error, onExport, onImport 
         </Button>
         <label className="settings-file-button">
           <Upload size={17} aria-hidden="true" />
-          <span>{importing ? t("setup.common.loading") : t("setup.settings.configuration.import")}</span>
+          <span>
+            {importing
+              ? t("setup.common.loading")
+              : t("setup.settings.configuration.import")}
+          </span>
           <input
             type="file"
             accept="application/json,.json"
             disabled={importing}
-            onChange={(event) => {
+            onChange={event => {
               onImport(event.currentTarget.files?.[0] ?? null);
               event.currentTarget.value = "";
             }}
@@ -875,10 +1137,10 @@ function ConfigurationBackupCard({ importing, result, error, onExport, onImport 
       {result ? (
         <InfoBox variant="success">
           <p>
-          {t("setup.settings.configuration.imported", {
-            count: result.appliedBucketPolicies,
-            skipped: result.skippedBucketPolicies.length
-          })}
+            {t("setup.settings.configuration.imported", {
+              count: result.appliedBucketPolicies,
+              skipped: result.skippedBucketPolicies.length,
+            })}
           </p>
         </InfoBox>
       ) : null}
@@ -925,12 +1187,17 @@ function McpSettingsCard({
   onUpdateSettings,
   onCreateToken,
   onDismissCreatedToken,
-  onRevokeToken
+  onRevokeToken,
 }: McpSettingsCardProps) {
   const { t, i18n } = useTranslation();
-  const mcpConnectionConfig = createdToken && settings && status
-    ? JSON.stringify(buildMcpConnectionConfig(createdToken, settings, status), null, 2)
-    : "";
+  const mcpConnectionConfig =
+    createdToken && settings && status
+      ? JSON.stringify(
+          buildMcpConnectionConfig(createdToken, settings, status),
+          null,
+          2
+        )
+      : "";
 
   function update(patch: Partial<McpSettings>) {
     if (!settings || saving) {
@@ -946,62 +1213,153 @@ function McpSettingsCard({
       title={t("setup.settings.mcp.title")}
       icon={<Network size={20} />}
     >
-
       {error ? <p className="error-message">{error}</p> : null}
 
       {loading || !settings || !status ? (
         <div className="settings-loading">{t("setup.common.loading")}</div>
       ) : !settings.enabled ? (
         <div className="mcp-settings-grid mcp-settings-grid--single">
-          <ToggleRow label={t("setup.settings.mcp.enable")} checked={settings.enabled} disabled={saving} onChange={(checked) => update({ enabled: checked })} />
+          <ToggleRow
+            label={t("setup.settings.mcp.enable")}
+            checked={settings.enabled}
+            disabled={saving}
+            onChange={checked => update({ enabled: checked })}
+          />
         </div>
       ) : (
         <>
           <div className="mcp-summary-grid">
-            <McpSummaryItem icon={<Activity size={17} />} label={t("setup.settings.mcp.status")} value={status.enabled ? t("setup.settings.mcp.enabled") : t("setup.settings.mcp.disabled")} />
-            <McpSummaryItem icon={<Network size={17} />} label={t("setup.settings.mcp.endpoint")} value={status.endpoint} />
-            <McpSummaryItem icon={<ShieldCheck size={17} />} label={t("setup.settings.mcp.accessMode")} value={status.adminToolsEnabled ? t("setup.settings.mcp.fullAdmin") : status.writeToolsEnabled ? t("setup.settings.mcp.readWrite") : t("setup.settings.mcp.readOnly")} />
-            <McpSummaryItem icon={<Wrench size={17} />} label={t("setup.settings.mcp.lastActivity")} value={status.lastActivityAt ? formatDate(status.lastActivityAt, i18n.language) : t("setup.common.unavailable")} />
+            <McpSummaryItem
+              icon={<Activity size={17} />}
+              label={t("setup.settings.mcp.status")}
+              value={
+                status.enabled
+                  ? t("setup.settings.mcp.enabled")
+                  : t("setup.settings.mcp.disabled")
+              }
+            />
+            <McpSummaryItem
+              icon={<Network size={17} />}
+              label={t("setup.settings.mcp.endpoint")}
+              value={status.endpoint}
+            />
+            <McpSummaryItem
+              icon={<ShieldCheck size={17} />}
+              label={t("setup.settings.mcp.accessMode")}
+              value={
+                status.adminToolsEnabled
+                  ? t("setup.settings.mcp.fullAdmin")
+                  : status.writeToolsEnabled
+                    ? t("setup.settings.mcp.readWrite")
+                    : t("setup.settings.mcp.readOnly")
+              }
+            />
+            <McpSummaryItem
+              icon={<Wrench size={17} />}
+              label={t("setup.settings.mcp.lastActivity")}
+              value={
+                status.lastActivityAt
+                  ? formatDate(status.lastActivityAt, i18n.language)
+                  : t("setup.common.unavailable")
+              }
+            />
           </div>
 
           <div className="mcp-settings-grid">
-            <ToggleRow label={t("setup.settings.mcp.enable")} checked={settings.enabled} disabled={saving} onChange={(checked) => update({ enabled: checked })} />
-            <ToggleRow label={t("setup.settings.mcp.requireAuth")} checked={settings.requireAuth} disabled />
-            <ToggleRow label={t("setup.settings.mcp.localhostOnly")} checked={settings.allowLocalhostOnly} disabled={saving} onChange={(checked) => update({ allowLocalhostOnly: checked })} />
-            <ToggleRow label={t("setup.settings.mcp.readTools")} checked={settings.readToolsEnabled} disabled={saving} onChange={(checked) => update({ readToolsEnabled: checked })} />
-            <ToggleRow label={t("setup.settings.mcp.writeTools")} checked={settings.writeToolsEnabled} disabled={saving} onChange={(checked) => update({ writeToolsEnabled: checked })} />
-            <ToggleRow label={t("setup.settings.mcp.adminTools")} checked={settings.adminToolsEnabled} disabled={saving} onChange={(checked) => update({ adminToolsEnabled: checked })} />
-            <ToggleRow label={t("setup.settings.mcp.resources")} checked={settings.exposeResources} disabled={saving} onChange={(checked) => update({ exposeResources: checked })} />
-            <ToggleRow label={t("setup.settings.mcp.prompts")} checked={settings.exposePrompts} disabled={saving} onChange={(checked) => update({ exposePrompts: checked })} />
+            <ToggleRow
+              label={t("setup.settings.mcp.enable")}
+              checked={settings.enabled}
+              disabled={saving}
+              onChange={checked => update({ enabled: checked })}
+            />
+            <ToggleRow
+              label={t("setup.settings.mcp.requireAuth")}
+              checked={settings.requireAuth}
+              disabled
+            />
+            <ToggleRow
+              label={t("setup.settings.mcp.localhostOnly")}
+              checked={settings.allowLocalhostOnly}
+              disabled={saving}
+              onChange={checked => update({ allowLocalhostOnly: checked })}
+            />
+            <ToggleRow
+              label={t("setup.settings.mcp.readTools")}
+              checked={settings.readToolsEnabled}
+              disabled={saving}
+              onChange={checked => update({ readToolsEnabled: checked })}
+            />
+            <ToggleRow
+              label={t("setup.settings.mcp.writeTools")}
+              checked={settings.writeToolsEnabled}
+              disabled={saving}
+              onChange={checked => update({ writeToolsEnabled: checked })}
+            />
+            <ToggleRow
+              label={t("setup.settings.mcp.adminTools")}
+              checked={settings.adminToolsEnabled}
+              disabled={saving}
+              onChange={checked => update({ adminToolsEnabled: checked })}
+            />
+            <ToggleRow
+              label={t("setup.settings.mcp.resources")}
+              checked={settings.exposeResources}
+              disabled={saving}
+              onChange={checked => update({ exposeResources: checked })}
+            />
+            <ToggleRow
+              label={t("setup.settings.mcp.prompts")}
+              checked={settings.exposePrompts}
+              disabled={saving}
+              onChange={checked => update({ exposePrompts: checked })}
+            />
           </div>
 
-          <form className="inline-form mcp-token-form" onSubmit={(event) => {
-            event.preventDefault();
-            onCreateToken();
-          }}>
+          <form
+            className="inline-form mcp-token-form"
+            onSubmit={event => {
+              event.preventDefault();
+              onCreateToken();
+            }}
+          >
             <input
               value={tokenName}
-              onChange={(event) => onTokenNameChange(event.target.value)}
+              onChange={event => onTokenNameChange(event.target.value)}
               placeholder={t("setup.settings.mcp.tokenNamePlaceholder")}
               aria-label={t("setup.settings.mcp.tokenName")}
             />
-            <button className="settings-create-key-button" type="submit" disabled={creatingToken || !tokenName.trim()}>
+            <button
+              className="settings-create-key-button"
+              type="submit"
+              disabled={creatingToken || !tokenName.trim()}
+            >
               <Plus size={17} aria-hidden="true" />
               {t("setup.settings.mcp.createToken")}
             </button>
             <div className="mcp-token-scopes">
-              <span className="mcp-token-scopes__label">{t("setup.settings.mcp.tokenScopes")}</span>
-              <div className="settings-checkbox-group" role="group" aria-label={t("setup.settings.mcp.tokenScopes")} data-testid="mcp-token-scope-group">
-                {["read", "write", "admin"].map((scope) => (
+              <span className="mcp-token-scopes__label">
+                {t("setup.settings.mcp.tokenScopes")}
+              </span>
+              <div
+                className="settings-checkbox-group"
+                role="group"
+                aria-label={t("setup.settings.mcp.tokenScopes")}
+                data-testid="mcp-token-scope-group"
+              >
+                {["read", "write", "admin"].map(scope => (
                   <label key={scope} className="settings-checkbox-field">
                     <input
                       type="checkbox"
                       checked={tokenScopes.includes(scope)}
                       disabled={scope === "read"}
                       data-testid={`mcp-token-scope-${scope}`}
-                      onChange={(event) => {
-                        const next = event.target.checked ? [...tokenScopes, scope] : tokenScopes.filter((item) => item !== scope);
-                        onTokenScopesChange(Array.from(new Set(["read", ...next])));
+                      onChange={event => {
+                        const next = event.target.checked
+                          ? [...tokenScopes, scope]
+                          : tokenScopes.filter(item => item !== scope);
+                        onTokenScopesChange(
+                          Array.from(new Set(["read", ...next]))
+                        );
                       }}
                     />
                     {scope}
@@ -1009,7 +1367,13 @@ function McpSettingsCard({
                 ))}
               </div>
             </div>
-            {tokenScopes.some((scope) => scope === "write" || scope === "admin") ? <p className="settings-warning">{t("setup.settings.mcp.permissionWarning")}</p> : null}
+            {tokenScopes.some(
+              scope => scope === "write" || scope === "admin"
+            ) ? (
+              <p className="settings-warning">
+                {t("setup.settings.mcp.permissionWarning")}
+              </p>
+            ) : null}
           </form>
 
           {createdToken ? (
@@ -1019,13 +1383,18 @@ function McpSettingsCard({
               <dl>
                 <div>
                   <dt>{t("setup.settings.mcp.tokenPrefix")}</dt>
-                  <dd><code>{createdToken.token.tokenPrefix}</code></dd>
+                  <dd>
+                    <code>{createdToken.token.tokenPrefix}</code>
+                  </dd>
                 </div>
                 <div>
                   <dt>{t("setup.settings.mcp.tokenSecret")}</dt>
                   <dd>
                     <code>{createdToken.secret}</code>
-                    <CopyButton value={createdToken.secret} label={t("setup.settings.mcp.copyToken")} />
+                    <CopyButton
+                      value={createdToken.secret}
+                      label={t("setup.settings.mcp.copyToken")}
+                    />
                   </dd>
                 </div>
               </dl>
@@ -1039,7 +1408,11 @@ function McpSettingsCard({
                 </div>
                 <pre>{mcpConnectionConfig}</pre>
               </div>
-              <button className="settings-secondary-button" type="button" onClick={onDismissCreatedToken}>
+              <button
+                className="settings-secondary-button"
+                type="button"
+                onClick={onDismissCreatedToken}
+              >
                 <Check size={16} aria-hidden="true" />
                 {t("setup.common.ok")}
               </button>
@@ -1048,48 +1421,86 @@ function McpSettingsCard({
 
           <CredentialTable
             columns={[
-              { key: "name", label: t("setup.settings.mcp.tokenName"), className: "settings-table__col-name" },
-              { key: "prefix", label: t("setup.settings.mcp.tokenPrefix"), className: "settings-table__col-key" },
-              { key: "scopes", label: t("setup.settings.mcp.tokenScopes"), className: "settings-table__col-status" },
-              { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
-              { key: "lastUsed", label: t("setup.settings.s3.lastUsed"), className: "settings-table__col-last-used" },
-              { key: "createdAt", label: t("setup.settings.s3.createdAt"), className: "settings-table__col-created" },
-              { key: "actions", ariaLabel: t("setup.settings.s3.actions"), className: "settings-table__col-actions" }
+              {
+                key: "name",
+                label: t("setup.settings.mcp.tokenName"),
+                className: "settings-table__col-name",
+              },
+              {
+                key: "prefix",
+                label: t("setup.settings.mcp.tokenPrefix"),
+                className: "settings-table__col-key",
+              },
+              {
+                key: "scopes",
+                label: t("setup.settings.mcp.tokenScopes"),
+                className: "settings-table__col-status",
+              },
+              {
+                key: "status",
+                label: t("setup.settings.s3.status"),
+                className: "settings-table__col-status",
+              },
+              {
+                key: "lastUsed",
+                label: t("setup.settings.s3.lastUsed"),
+                className: "settings-table__col-last-used",
+              },
+              {
+                key: "createdAt",
+                label: t("setup.settings.s3.createdAt"),
+                className: "settings-table__col-created",
+              },
+              {
+                key: "actions",
+                ariaLabel: t("setup.settings.s3.actions"),
+                className: "settings-table__col-actions",
+              },
             ]}
           >
-                {tokens.length === 0 ? (
-                  <tr className="settings-table__empty-row">
-                    <td colSpan={7}>
-                      <EmptyState title={t("setup.settings.mcp.noTokens")} />
-                    </td>
-                  </tr>
-                ) : tokens.map((token) => (
-                  <tr key={token.id}>
-                    <td className="settings-table__name">{token.name}</td>
-                    <td><code>{token.tokenPrefix}</code></td>
-                    <td>{formatScopes(token.scopes, t("setup.common.unavailable"))}</td>
-                    <td>
-                      <StatusBadge
-                        active={token.active}
-                        activeLabel={t("setup.settings.s3.active")}
-                        revokedLabel={t("setup.settings.s3.revoked")}
+            {tokens.length === 0 ? (
+              <tr className="settings-table__empty-row">
+                <td colSpan={7}>
+                  <EmptyState title={t("setup.settings.mcp.noTokens")} />
+                </td>
+              </tr>
+            ) : (
+              tokens.map(token => (
+                <tr key={token.id}>
+                  <td className="settings-table__name">{token.name}</td>
+                  <td>
+                    <code>{token.tokenPrefix}</code>
+                  </td>
+                  <td>
+                    {formatScopes(token.scopes, t("setup.common.unavailable"))}
+                  </td>
+                  <td>
+                    <StatusBadge
+                      active={token.active}
+                      activeLabel={t("setup.settings.s3.active")}
+                      revokedLabel={t("setup.settings.s3.revoked")}
+                    />
+                  </td>
+                  <td>
+                    {token.lastUsedAt
+                      ? formatDate(token.lastUsedAt, i18n.language)
+                      : t("setup.common.unavailable")}
+                  </td>
+                  <td>{formatDate(token.createdAt, i18n.language)}</td>
+                  <td className="settings-table__actions">
+                    {token.active ? (
+                      <IconButton
+                        variant="danger"
+                        label={t("setup.settings.mcp.revokeToken")}
+                        icon={<Ban size={16} aria-hidden="true" />}
+                        disabled={revokingToken === token.id}
+                        onClick={() => onRevokeToken(token.id, token.name)}
                       />
-                    </td>
-                    <td>{token.lastUsedAt ? formatDate(token.lastUsedAt, i18n.language) : t("setup.common.unavailable")}</td>
-                    <td>{formatDate(token.createdAt, i18n.language)}</td>
-                    <td className="settings-table__actions">
-                      {token.active ? (
-                        <IconButton
-                          variant="danger"
-                          label={t("setup.settings.mcp.revokeToken")}
-                          icon={<Ban size={16} aria-hidden="true" />}
-                          disabled={revokingToken === token.id}
-                          onClick={() => onRevokeToken(token.id, token.name)}
-                        />
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
+                    ) : null}
+                  </td>
+                </tr>
+              ))
+            )}
           </CredentialTable>
 
           <section className="mcp-activity">
@@ -1098,11 +1509,13 @@ function McpSettingsCard({
               <p>{t("setup.settings.mcp.noActivity")}</p>
             ) : (
               <ol>
-                {activity.slice(0, 8).map((entry) => (
+                {activity.slice(0, 8).map(entry => (
                   <li key={entry.id}>
                     <span>{entry.method}</span>
                     <strong>{entry.outcome}</strong>
-                    <time dateTime={entry.createdAt}>{formatDate(entry.createdAt, i18n.language)}</time>
+                    <time dateTime={entry.createdAt}>
+                      {formatDate(entry.createdAt, i18n.language)}
+                    </time>
                   </li>
                 ))}
               </ol>
@@ -1127,11 +1540,11 @@ function buildMcpConnectionConfig(
     method: "POST",
     headers: {
       Authorization: `Bearer ${createdToken.secret}`,
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     environment: {
       PONTEMESH_MCP_URL: url,
-      PONTEMESH_MCP_TOKEN: createdToken.secret
+      PONTEMESH_MCP_TOKEN: createdToken.secret,
     },
     initialize: {
       jsonrpc: "2.0",
@@ -1142,17 +1555,17 @@ function buildMcpConnectionConfig(
         capabilities: {},
         clientInfo: {
           name: "pontemesh-mcp-client",
-          version: "1.0.0"
-        }
-      }
+          version: "1.0.0",
+        },
+      },
     },
     options: {
       localhostOnly: settings.allowLocalhostOnly,
       readToolsEnabled: settings.readToolsEnabled,
       writeToolsEnabled: settings.writeToolsEnabled,
       resourcesEnabled: settings.exposeResources,
-      promptsEnabled: settings.exposePrompts
-    }
+      promptsEnabled: settings.exposePrompts,
+    },
   };
 }
 
@@ -1160,11 +1573,22 @@ function absoluteMcpUrl(endpoint: string) {
   if (/^https?:\/\//i.test(endpoint)) {
     return endpoint;
   }
-  const origin = typeof window === "undefined" ? "http://127.0.0.1:8080" : window.location.origin;
+  const origin =
+    typeof window === "undefined"
+      ? "http://127.0.0.1:8080"
+      : window.location.origin;
   return `${origin}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 }
 
-function McpSummaryItem({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function McpSummaryItem({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+}) {
   return (
     <div className="mcp-summary-item">
       {icon}
@@ -1203,7 +1627,7 @@ function ApplicationCredentialsCard({
   onApplicationPresetChange,
   onCreateApplication,
   onDismissCreatedApplication,
-  onRevokeApplication
+  onRevokeApplication,
 }: ApplicationCredentialsCardProps) {
   const { t, i18n } = useTranslation();
 
@@ -1212,25 +1636,40 @@ function ApplicationCredentialsCard({
       title={t("setup.settings.applications.title")}
       icon={<KeyRound size={20} />}
     >
-      <form className="inline-form" onSubmit={(event) => {
-        event.preventDefault();
-        onCreateApplication();
-      }}>
+      <form
+        className="inline-form"
+        onSubmit={event => {
+          event.preventDefault();
+          onCreateApplication();
+        }}
+      >
         <input
           value={applicationName}
-          onChange={(event) => onApplicationNameChange(event.target.value)}
+          onChange={event => onApplicationNameChange(event.target.value)}
           placeholder={t("setup.settings.applications.namePlaceholder")}
           aria-label={t("setup.settings.applications.name")}
         />
         <select
           value={applicationPreset}
-          onChange={(event) => onApplicationPresetChange(event.target.value as "downloader" | "full")}
+          onChange={event =>
+            onApplicationPresetChange(
+              event.target.value as "downloader" | "full"
+            )
+          }
           aria-label={t("setup.settings.applications.preset")}
         >
-          <option value="downloader">{t("setup.settings.applications.downloaderPreset")}</option>
-          <option value="full">{t("setup.settings.applications.fullPreset")}</option>
+          <option value="downloader">
+            {t("setup.settings.applications.downloaderPreset")}
+          </option>
+          <option value="full">
+            {t("setup.settings.applications.fullPreset")}
+          </option>
         </select>
-        <button className="settings-create-key-button" type="submit" disabled={creating || !applicationName.trim()}>
+        <button
+          className="settings-create-key-button"
+          type="submit"
+          disabled={creating || !applicationName.trim()}
+        >
           <Plus size={17} aria-hidden="true" />
           {t("setup.settings.applications.create")}
         </button>
@@ -1244,17 +1683,26 @@ function ApplicationCredentialsCard({
           <dl>
             <div>
               <dt>{t("setup.settings.applications.applicationId")}</dt>
-              <dd><code>{createdApplication.credential.id}</code></dd>
+              <dd>
+                <code>{createdApplication.credential.id}</code>
+              </dd>
             </div>
             <div>
-                <dt>{t("setup.settings.applications.token")}</dt>
-                <dd>
-                  <code>{createdApplication.token}</code>
-                  <CopyButton value={createdApplication.token} label={t("setup.settings.applications.copyToken")} />
-                </dd>
-              </div>
-            </dl>
-          <button className="settings-secondary-button" type="button" onClick={onDismissCreatedApplication}>
+              <dt>{t("setup.settings.applications.token")}</dt>
+              <dd>
+                <code>{createdApplication.token}</code>
+                <CopyButton
+                  value={createdApplication.token}
+                  label={t("setup.settings.applications.copyToken")}
+                />
+              </dd>
+            </div>
+          </dl>
+          <button
+            className="settings-secondary-button"
+            type="button"
+            onClick={onDismissCreatedApplication}
+          >
             <Check size={16} aria-hidden="true" />
             {t("setup.common.ok")}
           </button>
@@ -1271,39 +1719,66 @@ function ApplicationCredentialsCard({
       ) : (
         <CredentialTable
           columns={[
-            { key: "name", label: t("setup.settings.applications.name"), className: "settings-table__col-name" },
-            { key: "scopes", label: t("setup.settings.applications.scopes"), className: "settings-table__col-key" },
-            { key: "status", label: t("setup.settings.s3.status"), className: "settings-table__col-status" },
-            { key: "createdAt", label: t("setup.settings.s3.createdAt"), className: "settings-table__col-created" },
-            { key: "actions", ariaLabel: t("setup.settings.s3.actions"), className: "settings-table__col-actions" }
+            {
+              key: "name",
+              label: t("setup.settings.applications.name"),
+              className: "settings-table__col-name",
+            },
+            {
+              key: "scopes",
+              label: t("setup.settings.applications.scopes"),
+              className: "settings-table__col-key",
+            },
+            {
+              key: "status",
+              label: t("setup.settings.s3.status"),
+              className: "settings-table__col-status",
+            },
+            {
+              key: "createdAt",
+              label: t("setup.settings.s3.createdAt"),
+              className: "settings-table__col-created",
+            },
+            {
+              key: "actions",
+              ariaLabel: t("setup.settings.s3.actions"),
+              className: "settings-table__col-actions",
+            },
           ]}
           minWidth={820}
         >
-              {applications.map((application) => (
-                <tr key={application.id}>
-                  <td className="settings-table__name">{application.name}</td>
-                  <td>{formatScopes(application.scopes, t("setup.common.unavailable"))}</td>
-                  <td>
-                    <StatusBadge
-                      active={!application.revoked}
-                      activeLabel={t("setup.settings.s3.active")}
-                      revokedLabel={t("setup.settings.s3.revoked")}
-                    />
-                  </td>
-                  <td>{formatDate(application.createdAt, i18n.language)}</td>
-                  <td className="settings-table__actions">
-                    {!application.revoked ? (
-                      <IconButton
-                        variant="danger"
-                        label={t("setup.settings.applications.revoke")}
-                        icon={<Ban size={16} aria-hidden="true" />}
-                        disabled={revoking === application.id}
-                        onClick={() => onRevokeApplication(application.id, application.name)}
-                      />
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
+          {applications.map(application => (
+            <tr key={application.id}>
+              <td className="settings-table__name">{application.name}</td>
+              <td>
+                {formatScopes(
+                  application.scopes,
+                  t("setup.common.unavailable")
+                )}
+              </td>
+              <td>
+                <StatusBadge
+                  active={!application.revoked}
+                  activeLabel={t("setup.settings.s3.active")}
+                  revokedLabel={t("setup.settings.s3.revoked")}
+                />
+              </td>
+              <td>{formatDate(application.createdAt, i18n.language)}</td>
+              <td className="settings-table__actions">
+                {!application.revoked ? (
+                  <IconButton
+                    variant="danger"
+                    label={t("setup.settings.applications.revoke")}
+                    icon={<Ban size={16} aria-hidden="true" />}
+                    disabled={revoking === application.id}
+                    onClick={() =>
+                      onRevokeApplication(application.id, application.name)
+                    }
+                  />
+                ) : null}
+              </td>
+            </tr>
+          ))}
         </CredentialTable>
       )}
     </SettingsSection>
@@ -1313,7 +1788,7 @@ function ApplicationCredentialsCard({
 function formatDate(value: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
     dateStyle: "short",
-    timeStyle: "short"
+    timeStyle: "short",
   }).format(new Date(value));
 }
 
@@ -1321,25 +1796,197 @@ function formatScopes(scopes: string[] | undefined, fallback: string): string {
   return scopes && scopes.length > 0 ? scopes.join(", ") : fallback;
 }
 
-function AdminUsersCard({ users, error, saving, currentUsername, currentPassword, newPassword, newAdminUsername, newAdminPassword, newAdminCurrentPassword, onCurrentUsernameChange, onCurrentPasswordChange, onNewPasswordChange, onNewAdminUsernameChange, onNewAdminPasswordChange, onNewAdminCurrentPasswordChange, onUpdate, onCreate }: { users: AdminUserSummary[]; error: string; saving: boolean; currentUsername: string; currentPassword: string; newPassword: string; newAdminUsername: string; newAdminPassword: string; newAdminCurrentPassword: string; onCurrentUsernameChange: (value: string) => void; onCurrentPasswordChange: (value: string) => void; onNewPasswordChange: (value: string) => void; onNewAdminUsernameChange: (value: string) => void; onNewAdminPasswordChange: (value: string) => void; onNewAdminCurrentPasswordChange: (value: string) => void; onUpdate: () => void; onCreate: () => void }) {
+function AdminUsersCard({
+  users,
+  error,
+  saving,
+  currentUsername,
+  currentPassword,
+  newPassword,
+  newAdminUsername,
+  newAdminPassword,
+  newAdminCurrentPassword,
+  onCurrentUsernameChange,
+  onCurrentPasswordChange,
+  onNewPasswordChange,
+  onNewAdminUsernameChange,
+  onNewAdminPasswordChange,
+  onNewAdminCurrentPasswordChange,
+  onUpdate,
+  onCreate,
+}: {
+  users: AdminUserSummary[];
+  error: string;
+  saving: boolean;
+  currentUsername: string;
+  currentPassword: string;
+  newPassword: string;
+  newAdminUsername: string;
+  newAdminPassword: string;
+  newAdminCurrentPassword: string;
+  onCurrentUsernameChange: (value: string) => void;
+  onCurrentPasswordChange: (value: string) => void;
+  onNewPasswordChange: (value: string) => void;
+  onNewAdminUsernameChange: (value: string) => void;
+  onNewAdminPasswordChange: (value: string) => void;
+  onNewAdminCurrentPasswordChange: (value: string) => void;
+  onUpdate: () => void;
+  onCreate: () => void;
+}) {
   const { t } = useTranslation();
   const newAdminPasswordValid = isValidAdminPassword(newAdminPassword);
-  return <SettingsSection title={t("setup.settings.users.title")} icon={<Users size={20} />}>
-    <p className="settings-help">{t("setup.settings.users.help")}</p>
-    <form className="inline-form admin-users-form" onSubmit={(event) => { event.preventDefault(); onUpdate(); }}>
-      <input value={currentUsername} onChange={(event) => onCurrentUsernameChange(event.target.value)} placeholder={t("setup.settings.users.username")} aria-label={t("setup.settings.users.username")} autoComplete="username" />
-      <input value={currentPassword} onChange={(event) => onCurrentPasswordChange(event.target.value)} placeholder={t("setup.settings.users.currentPassword")} aria-label={t("setup.settings.users.currentPassword")} type="password" autoComplete="current-password" />
-      <input value={newPassword} onChange={(event) => onNewPasswordChange(event.target.value)} placeholder={t("setup.settings.users.newPassword")} aria-label={t("setup.settings.users.newPassword")} type="password" autoComplete="new-password" />
-      <Button type="submit" disabled={saving || !currentUsername.trim() || !currentPassword || !newPassword} icon={<LockKeyhole size={17} />}>{t("setup.settings.users.update")}</Button>
-    </form>
-    <form className="inline-form admin-users-form" onSubmit={(event) => { event.preventDefault(); onCreate(); }}>
-      <input value={newAdminUsername} onChange={(event) => onNewAdminUsernameChange(event.target.value)} placeholder={t("setup.settings.users.newUsername")} aria-label={t("setup.settings.users.newUsername")} autoComplete="off" />
-      <input value={newAdminPassword} onChange={(event) => onNewAdminPasswordChange(event.target.value)} placeholder={t("setup.settings.users.newPassword")} aria-label={t("setup.settings.users.newPassword")} aria-describedby="new-admin-password-requirements" aria-invalid={newAdminPassword.length > 0 && !newAdminPasswordValid} type="password" autoComplete="new-password" />
-      <input value={newAdminCurrentPassword} onChange={(event) => onNewAdminCurrentPasswordChange(event.target.value)} placeholder={t("setup.settings.users.currentPassword")} aria-label={t("setup.settings.users.confirmCurrentPassword")} type="password" autoComplete="current-password" />
-      <Button type="submit" disabled={saving || !newAdminUsername.trim() || !newAdminPasswordValid || !newAdminCurrentPassword} icon={<Plus size={17} />}>{t("setup.settings.users.create")}</Button>
-    </form>
-    <p id="new-admin-password-requirements" className="settings-help admin-password-requirements">{t("setup.settings.users.passwordRequirements")}</p>
-    {error ? <p className="error-message">{error}</p> : null}
-    <ul className="admin-users-list" aria-label={t("setup.settings.users.title")}>{users.map((user) => <li key={user.id}>{user.username}</li>)}</ul>
-  </SettingsSection>;
+  return (
+    <SettingsSection
+      title={t("setup.settings.users.title")}
+      icon={<Users size={20} />}
+    >
+      <p className="settings-help">{t("setup.settings.users.help")}</p>
+      <div className="admin-users-group">
+        <h3 className="admin-users-group__title">
+          {t("setup.settings.users.updateSection")}
+        </h3>
+        <form
+          className="inline-form admin-users-form"
+          onSubmit={event => {
+            event.preventDefault();
+            onUpdate();
+          }}
+        >
+          <label className="admin-users-field">
+            <span>{t("setup.settings.users.username")}</span>
+            <input
+              value={currentUsername}
+              onChange={event => onCurrentUsernameChange(event.target.value)}
+              placeholder={t("setup.settings.users.username")}
+              aria-label={t("setup.settings.users.username")}
+              autoComplete="username"
+            />
+          </label>
+          <label className="admin-users-field">
+            <span>{t("setup.settings.users.currentPassword")}</span>
+            <input
+              value={currentPassword}
+              onChange={event => onCurrentPasswordChange(event.target.value)}
+              placeholder={t("setup.settings.users.currentPassword")}
+              aria-label={t("setup.settings.users.currentPassword")}
+              type="password"
+              autoComplete="current-password"
+            />
+          </label>
+          <label className="admin-users-field">
+            <span>{t("setup.settings.users.newPassword")}</span>
+            <input
+              value={newPassword}
+              onChange={event => onNewPasswordChange(event.target.value)}
+              placeholder={t("setup.settings.users.newPassword")}
+              aria-label={t("setup.settings.users.newPassword")}
+              type="password"
+              autoComplete="new-password"
+            />
+          </label>
+          <Button
+            type="submit"
+            disabled={
+              saving ||
+              !currentUsername.trim() ||
+              !currentPassword ||
+              !newPassword
+            }
+            icon={<LockKeyhole size={17} />}
+          >
+            {t("setup.settings.users.update")}
+          </Button>
+        </form>
+      </div>
+      <div className="admin-users-group">
+        <h3 className="admin-users-group__title">
+          {t("setup.settings.users.createSection")}
+        </h3>
+        <form
+          className="inline-form admin-users-form"
+          onSubmit={event => {
+            event.preventDefault();
+            onCreate();
+          }}
+        >
+          <label className="admin-users-field">
+            <span>{t("setup.settings.users.newUsername")}</span>
+            <input
+              value={newAdminUsername}
+              onChange={event => onNewAdminUsernameChange(event.target.value)}
+              placeholder={t("setup.settings.users.newUsername")}
+              aria-label={t("setup.settings.users.newUsername")}
+              autoComplete="off"
+            />
+          </label>
+          <label className="admin-users-field">
+            <span>{t("setup.settings.users.newPassword")}</span>
+            <input
+              value={newAdminPassword}
+              onChange={event => onNewAdminPasswordChange(event.target.value)}
+              placeholder={t("setup.settings.users.newPassword")}
+              aria-label={t("setup.settings.users.newPassword")}
+              aria-describedby="new-admin-password-requirements"
+              aria-invalid={
+                newAdminPassword.length > 0 && !newAdminPasswordValid
+              }
+              type="password"
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="admin-users-field">
+            <span>{t("setup.settings.users.confirmCurrentPassword")}</span>
+            <input
+              value={newAdminCurrentPassword}
+              onChange={event =>
+                onNewAdminCurrentPasswordChange(event.target.value)
+              }
+              placeholder={t("setup.settings.users.currentPassword")}
+              aria-label={t("setup.settings.users.confirmCurrentPassword")}
+              type="password"
+              autoComplete="current-password"
+            />
+          </label>
+          <Button
+            type="submit"
+            disabled={
+              saving ||
+              !newAdminUsername.trim() ||
+              !newAdminPasswordValid ||
+              !newAdminCurrentPassword
+            }
+            icon={<Plus size={17} />}
+          >
+            {t("setup.settings.users.create")}
+          </Button>
+        </form>
+        <p
+          id="new-admin-password-requirements"
+          className="settings-help admin-password-requirements"
+        >
+          {t("setup.settings.users.passwordRequirements")}
+        </p>
+      </div>
+      {error ? <p className="error-message">{error}</p> : null}
+      <section
+        className="admin-users-accounts"
+        aria-label={t("setup.settings.users.accounts")}
+      >
+        <div className="admin-users-accounts__header">
+          <h3>{t("setup.settings.users.accounts")}</h3>
+          <span className="admin-users-accounts__count" aria-hidden="true">
+            {users.length}
+          </span>
+        </div>
+        <ul
+          className="admin-users-list"
+          aria-label={t("setup.settings.users.title")}
+        >
+          {users.map(user => (
+            <li key={user.id}>{user.username}</li>
+          ))}
+        </ul>
+      </section>
+    </SettingsSection>
+  );
 }

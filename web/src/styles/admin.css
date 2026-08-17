@@ -1951,30 +1951,101 @@
   background: var(--pm-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
 }
 
+.admin-users-group {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--pm-border-soft);
+  border-radius: 16px;
+  padding: 18px;
+  background: var(--pm-bg-elevated);
+}
+
+.admin-users-group__title {
+  margin: 0;
+  color: var(--pm-deep-navy);
+  font-size: 0.95rem;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
 .admin-users-form {
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
-  margin-top: 12px;
+  align-items: end;
+  gap: 12px;
+}
+
+.admin-users-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-users-field span {
+  color: var(--settings-text);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.admin-users-accounts {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-users-accounts__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-users-accounts__header h3 {
+  margin: 0;
+  color: var(--pm-muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.admin-users-accounts__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  padding: 0 9px;
+  color: var(--pm-primary-blue-strong);
+  background: var(--pm-primary-faint);
+  font-size: 0.82rem;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
 }
 
 .admin-users-list {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 14px;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .admin-users-list li {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--pm-primary-border);
   border-radius: 999px;
-  padding: 5px 10px;
+  padding: 6px 12px;
   color: var(--pm-primary-blue-strong);
   background: var(--pm-primary-faint);
-  font-size: 0.82rem;
-  font-weight: 750;
+  font-size: 0.84rem;
+  font-weight: 800;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1120px) {
+  .admin-users-form { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; }
+}
+
+@media (max-width: 720px) {
   .admin-users-form { grid-template-columns: 1fr; }
 }
 
