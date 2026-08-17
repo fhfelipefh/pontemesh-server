@@ -561,7 +561,7 @@
   margin: 0 auto;
   padding: 32px;
   display: grid;
-  gap: var(--space-6);
+  gap: 28px;
 }
 
 .settings-page__header {
@@ -582,7 +582,7 @@
 .settings-page__header p {
   max-width: 680px;
   margin: 8px 0 0;
-  color: var(--pm-muted);
+  color: var(--pm-neutral);
   font-size: 1rem;
   line-height: 1.5;
 }
@@ -826,7 +826,7 @@
 
 .settings-card {
   min-width: 0;
-  padding: var(--space-6);
+  padding: 24px;
 }
 
 .settings-card--wide {
@@ -838,7 +838,7 @@
   align-items: start;
   justify-content: space-between;
   gap: var(--space-6);
-  margin-bottom: var(--space-6);
+  margin-bottom: 24px;
 }
 
 .settings-card__actions {
@@ -865,9 +865,9 @@
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
   color: var(--pm-primary-blue);
   background: var(--pm-primary-soft);
 }
@@ -897,6 +897,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
+  align-items: start;
 }
 
 .instance-settings-fields label,
@@ -910,12 +911,15 @@
 .instance-settings-fields input,
 .instance-name-form input {
   width: 100%;
-  min-height: 44px;
+  height: 46px;
+  min-height: 46px;
   border: 1px solid var(--settings-border-strong);
   border-radius: 12px;
   padding: 0 14px;
   color: var(--settings-text);
   background: var(--settings-surface-muted);
+  font-size: 0.94rem;
+  font-weight: 650;
 }
 
 .instance-settings-fields input:focus,
@@ -931,21 +935,50 @@
   font-weight: 800;
 }
 
+.timezone-select-field .settings-help {
+  margin: 2px 0 0;
+  color: var(--settings-text-muted);
+  font-size: 0.82rem;
+  font-weight: 550;
+  line-height: 1.45;
+}
+
 .timezone-select-controls {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(180px, 0.78fr) minmax(220px, 1.22fr);
   gap: var(--space-2);
 }
 
 .timezone-search-input,
 .timezone-select {
   width: 100%;
-  min-height: 44px;
+  height: 46px;
+  min-height: 46px;
   border: 1px solid var(--settings-border-strong);
   border-radius: 12px;
   padding: 0 14px;
   color: var(--settings-text);
   background: var(--settings-surface-muted);
+  font-size: 0.94rem;
+  font-weight: 650;
+}
+
+.instance-settings-form > div:last-child,
+.storage-capacity-form__actions,
+.operational-webhook-form__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: 16px;
+  border-top: 1px solid var(--pm-border-subtle);
+}
+
+.instance-settings-form > div:last-child .button,
+.storage-capacity-form__actions .button,
+.operational-webhook-form__actions .button {
+  width: auto;
+  min-width: 118px;
 }
 
 .timezone-search-input:focus,
@@ -971,7 +1004,7 @@
 .storage-capacity-form__thresholds {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .storage-capacity-form__thresholds {
@@ -989,6 +1022,12 @@
   padding: 10px 14px;
   color: var(--settings-text);
   background: var(--settings-surface-muted);
+}
+
+.storage-capacity-form__usage strong {
+  color: var(--settings-text);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .storage-capacity-form__thresholds label {

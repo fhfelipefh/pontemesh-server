@@ -485,6 +485,7 @@ export function SettingsPage() {
       <header className="settings-page__header">
         <div>
           <h1>{t("setup.settings.title")}</h1>
+          <p>{t("setup.settings.description")}</p>
         </div>
       </header>
 

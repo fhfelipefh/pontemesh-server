@@ -333,6 +333,7 @@
     },
     "settings": {
       "title": "Configurações",
+      "description": "Ajuste a operação da instância, os limites de armazenamento e as integrações administrativas.",
       "instance": {
         "title": "Instância",
         "name": "Nome da instância",

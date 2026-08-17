@@ -333,6 +333,7 @@
     },
     "settings": {
       "title": "Settings",
+      "description": "Configure the instance, storage limits, and administrative integrations.",
       "instance": {
         "title": "Instance",
         "name": "Instance name",
