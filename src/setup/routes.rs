@@ -521,7 +521,10 @@ mod tests {
     fn setup_preserves_password_whitespace_instead_of_trimming_it() {
         let password = " StrongSetup123! ".to_owned();
 
-        assert_eq!(non_empty_password(password.clone(), "adminPassword").unwrap(), password);
+        assert_eq!(
+            non_empty_password(password.clone(), "adminPassword").unwrap(),
+            password
+        );
     }
 
     #[test]

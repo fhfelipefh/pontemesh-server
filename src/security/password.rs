@@ -10,9 +10,7 @@ pub fn validate_admin_password(password: &str) -> anyhow::Result<()> {
         anyhow::bail!("password must have at least 12 characters");
     }
     if password.chars().count() > MAX_ADMIN_PASSWORD_LENGTH {
-        anyhow::bail!(
-            "password must have at most {MAX_ADMIN_PASSWORD_LENGTH} characters"
-        );
+        anyhow::bail!("password must have at most {MAX_ADMIN_PASSWORD_LENGTH} characters");
     }
     if !password.chars().any(|character| character.is_lowercase())
         || !password.chars().any(|character| character.is_uppercase())
@@ -69,7 +67,9 @@ mod tests {
 
         assert!(validate_admin_password(&valid).is_ok());
         assert!(validate_admin_password(&oversized).is_err());
-        assert!(validate_admin_password("pm_init_aa8sRcjUfTvQV3Ud1lNxaf1zc9uCm1eNYw-HVY5VDiM").is_ok());
+        assert!(
+            validate_admin_password("pm_init_aa8sRcjUfTvQV3Ud1lNxaf1zc9uCm1eNYw-HVY5VDiM").is_ok()
+        );
     }
 
     #[test]
