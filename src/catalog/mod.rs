@@ -1778,7 +1778,7 @@ impl Catalog {
         let (paged_items, common_prefixes, total, total_pages, page) = split_and_paginate(
             rows.into_iter().map(object_summary_from_row).collect(),
             prefix_str,
-            delimiter,
+            normalized_query.is_none().then_some(delimiter),
             page,
             page_size,
         );
@@ -6209,14 +6209,15 @@ pub fn build_object_manifest(
 fn split_and_paginate(
     objects: Vec<ObjectSummary>,
     prefix: &str,
-    delimiter: &str,
+    delimiter: Option<&str>,
     page: u32,
     page_size: u32,
 ) -> (Vec<ObjectSummary>, Vec<String>, i64, u32, u32) {
     let mut common_prefixes: Vec<String> = Vec::new();
     let mut file_items: Vec<ObjectSummary> = Vec::new();
     for object in objects {
-        match common_prefix_for_key(prefix, delimiter, &object.key) {
+        match delimiter.and_then(|delimiter| common_prefix_for_key(prefix, delimiter, &object.key))
+        {
             Some(cp) => {
                 if !common_prefixes.contains(&cp) {
                     common_prefixes.push(cp);
@@ -6504,7 +6505,8 @@ mod tests {
             make_object("images/logo.png"),
             make_object("root.txt"),
         ];
-        let (files, prefixes, total, _pages, _page) = split_and_paginate(objects, "", "/", 1, 20);
+        let (files, prefixes, total, _pages, _page) =
+            split_and_paginate(objects, "", Some("/"), 1, 20);
 
         assert_eq!(total, 1);
         assert_eq!(files.len(), 1);
@@ -6521,7 +6523,8 @@ mod tests {
             make_object("a/file2.txt"),
             make_object("a/file3.txt"),
         ];
-        let (_files, prefixes, _total, _pages, _page) = split_and_paginate(objects, "", "/", 1, 20);
+        let (_files, prefixes, _total, _pages, _page) =
+            split_and_paginate(objects, "", Some("/"), 1, 20);
 
         assert_eq!(prefixes, vec!["a/".to_string()]);
     }
@@ -6533,14 +6536,14 @@ mod tests {
             .collect();
 
         let (page1, _, total, total_pages, page_num) =
-            split_and_paginate(objects.clone(), "", "/", 1, 10);
+            split_and_paginate(objects.clone(), "", Some("/"), 1, 10);
         assert_eq!(total, 25);
         assert_eq!(total_pages, 3);
         assert_eq!(page_num, 1);
         assert_eq!(page1.len(), 10);
         assert_eq!(page1[0].key, "file00.txt");
 
-        let (page3, _, _, _, _) = split_and_paginate(objects, "", "/", 3, 10);
+        let (page3, _, _, _, _) = split_and_paginate(objects, "", Some("/"), 3, 10);
         assert_eq!(page3.len(), 5);
         assert_eq!(page3[0].key, "file20.txt");
     }
@@ -6551,7 +6554,7 @@ mod tests {
             .map(|i| make_object(&format!("file{i}.txt")))
             .collect();
 
-        let (items, _, _, _, page_num) = split_and_paginate(objects, "", "/", 99, 10);
+        let (items, _, _, _, page_num) = split_and_paginate(objects, "", Some("/"), 99, 10);
         assert_eq!(page_num, 1);
         assert_eq!(items.len(), 5);
     }
@@ -6559,11 +6562,23 @@ mod tests {
     #[test]
     fn split_and_paginate_with_prefix_only_counts_direct_children() {
         let objects = vec![make_object("a/b/deep.txt"), make_object("a/direct.txt")];
-        let (files, prefixes, total, _, _) = split_and_paginate(objects, "a/", "/", 1, 20);
+        let (files, prefixes, total, _, _) = split_and_paginate(objects, "a/", Some("/"), 1, 20);
 
         assert_eq!(total, 1);
         assert_eq!(files[0].key, "a/direct.txt");
         assert_eq!(prefixes, vec!["a/b/".to_string()]);
+    }
+
+    #[test]
+    fn split_and_paginate_without_delimiter_keeps_nested_keys_as_items() {
+        let objects = vec![make_object("docs/readme.md"), make_object("root.txt")];
+        let (files, prefixes, total, _, _) = split_and_paginate(objects, "", None, 1, 20);
+
+        assert_eq!(total, 2);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].key, "docs/readme.md");
+        assert_eq!(files[1].key, "root.txt");
+        assert!(prefixes.is_empty());
     }
 }
 

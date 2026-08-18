@@ -501,6 +501,27 @@
         "revokeFailed": "Falha ao revogar chave S3.",
         "emptyTitle": "Nenhuma credencial S3.",
         "helpText": "WinSCP: Avançado > S3 > Estilo da URL > Path."
+      },
+      "speedTest": {
+        "title": "Teste de velocidade da conexão",
+        "description": "Mede a taxa real de download e upload entre este navegador e o servidor.",
+        "action": "Medir velocidade",
+        "actionAgain": "Medir novamente",
+        "preparing": "Preparando teste…",
+        "downloading": "Medindo download {{round}}/{{total}}…",
+        "uploading": "Medindo upload {{round}}/{{total}}…",
+        "finalizing": "Finalizando…",
+        "completed": "Teste concluído.",
+        "failed": "Falha no teste de velocidade.",
+        "empty": "Nenhum resultado ainda. Execute o teste para medir sua conexão.",
+        "download": "Download",
+        "upload": "Upload",
+        "transferred": "{{amount}} transferidos",
+        "round": "Rodada",
+        "direction": "Direção",
+        "transferredAmount": "Transferido",
+        "duration": "Duração",
+        "speed": "Velocidade"
       }
     }
   }

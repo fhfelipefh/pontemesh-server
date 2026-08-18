@@ -51,10 +51,6 @@ impl GcRuntime {
         }
     }
 
-    pub fn current_status(&self) -> GcStatus {
-        self.status.lock().unwrap().clone()
-    }
-
     pub async fn run(self) {
         if !self.config.enabled {
             info!("gc: disabled by configuration");

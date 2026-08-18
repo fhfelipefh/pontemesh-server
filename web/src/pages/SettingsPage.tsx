@@ -87,6 +87,7 @@ import { OperationalWebhookCard } from "../components/settings/OperationalWebhoo
 import { S3CredentialsCard } from "../components/settings/S3CredentialsCard";
 import { ServerUpdateCard } from "../components/settings/ServerUpdateCard";
 import { SettingsSection } from "../components/settings/SettingsSection";
+import { SpeedTestCard } from "../components/settings/SpeedTestCard";
 import { StatusBadge } from "../components/settings/StatusBadge";
 import { ToggleRow } from "../components/settings/ToggleRow";
 import { isValidAdminPassword } from "../security/adminPassword";
@@ -779,6 +780,7 @@ export function SettingsPage() {
           restartPending={restartPending}
           onUpdate={() => setServerUpdateConfirmation(true)}
         />
+        <SpeedTestCard />
         <AdminUsersCard
           users={adminUsers}
           error={usersError}

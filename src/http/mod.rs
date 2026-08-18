@@ -202,6 +202,14 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             get(admin::object_traffic_metrics),
         )
         .route(
+            "/api/admin/speed-test/download",
+            get(admin::speed_test::download),
+        )
+        .route(
+            "/api/admin/speed-test/upload",
+            post(admin::speed_test::upload),
+        )
+        .route(
             "/api/admin/metrics/replicas/{replica_id}",
             get(admin::replica_detail_metrics),
         )
@@ -607,7 +615,14 @@ mod tests {
         );
         assert_json_object_keys(
             &dashboard_body["instance"],
-            &["environment", "name", "role", "uptimeSeconds", "version"],
+            &[
+                "environment",
+                "name",
+                "role",
+                "timezone",
+                "uptimeSeconds",
+                "version",
+            ],
         );
         assert_eq!(dashboard_body["instance"]["role"], "origin");
         assert_json_object_keys(
@@ -697,6 +712,7 @@ mod tests {
         assert_eq!(objects.status(), StatusCode::OK);
         let objects_body = json_body(objects).await;
         assert_paginated_contract(&objects_body);
+        assert!(objects_body["commonPrefixes"].is_array());
         assert_eq!(objects_body["items"], serde_json::json!([]));
 
         let origin_metrics = app
@@ -749,6 +765,119 @@ mod tests {
                 "totalFragmentsSynced",
                 "totalReplicas",
             ],
+        );
+    }
+
+    #[tokio::test]
+    async fn speed_test_endpoints_require_auth_and_measure_real_transfers() {
+        let Some(ctx) = TestContext::new("speed-test-contract").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+
+        let unauthenticated_download = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/speed-test/download?size=1048576")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauthenticated_download.status(), StatusCode::UNAUTHORIZED);
+
+        let unauthenticated_upload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/speed-test/upload")
+                    .body(Body::from(vec![0u8; 4096]))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauthenticated_upload.status(), StatusCode::UNAUTHORIZED);
+
+        let cookie = login_cookie(app.clone()).await;
+
+        let download_size: usize = 2 * 1024 * 1024;
+        let download = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/admin/speed-test/download?size={download_size}"
+                    ))
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(download.status(), StatusCode::OK);
+        assert_eq!(
+            header_value(&download, header::CONTENT_LENGTH),
+            download_size.to_string()
+        );
+        assert_eq!(
+            header_value(&download, header::CONTENT_TYPE),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            header_value(&download, header::CONTENT_ENCODING),
+            "identity"
+        );
+        assert!(
+            download
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .expect("Cache-Control")
+                .to_str()
+                .expect("cache-control text")
+                .contains("no-store")
+        );
+        let download_body = to_bytes(download.into_body(), usize::MAX)
+            .await
+            .expect("download body");
+        assert_eq!(download_body.len(), download_size);
+
+        let clamped = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/speed-test/download?size=16")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(clamped.status(), StatusCode::OK);
+        assert_eq!(header_value(&clamped, header::CONTENT_LENGTH), "1048576");
+
+        let upload_body = vec![0xA5u8; 256 * 1024];
+        let upload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/speed-test/upload")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/octet-stream")
+                    .body(Body::from(upload_body.clone()))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(upload.status(), StatusCode::OK);
+        assert_json_content_type(&upload);
+        let upload_body_json = json_body(upload).await;
+        assert_eq!(
+            upload_body_json["bytesReceived"],
+            serde_json::json!(upload_body.len())
         );
     }
 
@@ -4909,10 +5038,12 @@ mod tests {
     }
 
     fn assert_paginated_contract(value: &serde_json::Value) {
-        assert_json_object_keys(
-            value,
-            &["items", "page", "pageSize", "totalItems", "totalPages"],
-        );
+        for key in ["items", "page", "pageSize", "totalItems", "totalPages"] {
+            assert!(
+                value.get(key).is_some(),
+                "expected paginated response to include {key}"
+            );
+        }
         assert!(value["items"].is_array());
         assert!(value["page"].is_number());
         assert!(value["pageSize"].is_number());

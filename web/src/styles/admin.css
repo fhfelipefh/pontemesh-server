@@ -2837,6 +2837,51 @@
   background: var(--pm-danger-strong);
 }
 
+.speed-test-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.speed-test-status {
+  color: var(--pm-muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.speed-test-progress {
+  margin-bottom: 18px;
+}
+
+.speed-test-results {
+  display: grid;
+  gap: 18px;
+}
+
+.speed-test-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.speed-test-summary .mcp-summary-item small {
+  color: var(--pm-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.speed-test-table {
+  margin: 0;
+  min-width: 0;
+}
+
+.settings-hint {
+  color: var(--pm-muted);
+  font-size: 0.9rem;
+}
+
+
 .upload-progress-item button {
   display: grid;
   place-items: center;

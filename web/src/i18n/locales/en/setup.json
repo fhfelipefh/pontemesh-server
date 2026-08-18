@@ -501,6 +501,27 @@
         "revokeFailed": "Failed to revoke S3 key.",
         "emptyTitle": "No S3 credentials.",
         "helpText": "WinSCP: Advanced > S3 > URL style > Path."
+      },
+      "speedTest": {
+        "title": "Connection speed test",
+        "description": "Measures real download and upload throughput between this browser and the server.",
+        "action": "Measure speed",
+        "actionAgain": "Measure again",
+        "preparing": "Preparing test…",
+        "downloading": "Measuring download {{round}}/{{total}}…",
+        "uploading": "Measuring upload {{round}}/{{total}}…",
+        "finalizing": "Finalizing…",
+        "completed": "Test completed.",
+        "failed": "Speed test failed.",
+        "empty": "No results yet. Run the test to measure your connection.",
+        "download": "Download",
+        "upload": "Upload",
+        "transferred": "{{amount}} transferred",
+        "round": "Round",
+        "direction": "Direction",
+        "transferredAmount": "Transferred",
+        "duration": "Duration",
+        "speed": "Speed"
       }
     }
   }

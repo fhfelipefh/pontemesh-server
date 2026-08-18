@@ -5,12 +5,9 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 #[derive(Debug, Default)]
 pub struct GcMetrics {
     pub cycles_total: AtomicU64,
-    pub candidates_total: AtomicI64,
     pub objects_reclaimed_total: AtomicI64,
     pub bytes_reclaimed_total: AtomicI64,
     pub errors_total: AtomicU64,
-    pub last_cycle_duration_ms: AtomicU64,
-    pub last_success_epoch: AtomicI64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -49,10 +46,6 @@ impl GcMetrics {
     pub fn record_error(&self) {
         self.errors_total.fetch_add(1, Ordering::Relaxed);
     }
-
-    pub fn set_last_epoch(&self, epoch: i64) {
-        self.last_success_epoch.store(epoch, Ordering::Relaxed);
-    }
 }
 
 #[cfg(test)]
@@ -73,11 +66,5 @@ mod tests {
 
         metrics.record_error();
         assert_eq!(metrics.errors_total.load(Ordering::Relaxed), 1);
-
-        metrics.set_last_epoch(123456789);
-        assert_eq!(
-            metrics.last_success_epoch.load(Ordering::Relaxed),
-            123456789
-        );
     }
 }

@@ -253,8 +253,6 @@ pub struct GcSection {
     pub quarantine_period_seconds: u64,
     #[serde(default = "default_gc_batch_size")]
     pub batch_size: usize,
-    #[serde(default = "default_max_concurrent_io")]
-    pub max_concurrent_io: usize,
     #[serde(default = "default_full_gc_interval")]
     pub full_gc_interval_seconds: u64,
     #[serde(default = "default_sweep_lease")]
@@ -273,7 +271,6 @@ impl Default for GcSection {
             grace_period_seconds: default_grace_period(),
             quarantine_period_seconds: default_quarantine_period(),
             batch_size: default_gc_batch_size(),
-            max_concurrent_io: default_max_concurrent_io(),
             full_gc_interval_seconds: default_full_gc_interval(),
             sweep_lease_seconds: default_sweep_lease(),
             max_retries: default_max_retries(),
@@ -296,9 +293,6 @@ fn default_quarantine_period() -> u64 {
 }
 fn default_gc_batch_size() -> usize {
     100
-}
-fn default_max_concurrent_io() -> usize {
-    4
 }
 fn default_full_gc_interval() -> u64 {
     86400
@@ -533,41 +527,6 @@ pub fn update_instance_settings(
     Ok(config)
 }
 
-pub fn update_instance_name(paths: &PontemeshHome, name: &str) -> anyhow::Result<InstanceConfig> {
-    update_instance_settings(paths, name, None)
-}
-
-pub fn format_datetime_in_timezone(
-    utc_dt: chrono::DateTime<chrono::Utc>,
-    tz_str: &str,
-) -> anyhow::Result<String> {
-    let validated = validate_timezone(tz_str)?;
-    let tz: Tz = validated
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid timezone '{tz_str}'"))?;
-    let local_dt = utc_dt.with_timezone(&tz);
-    Ok(local_dt.format("%d/%m/%Y %H:%M").to_string())
-}
-
-pub fn parse_local_datetime_to_utc(
-    local_naive_str: &str,
-    tz_str: &str,
-) -> anyhow::Result<chrono::DateTime<chrono::Utc>> {
-    use chrono::TimeZone;
-    let validated = validate_timezone(tz_str)?;
-    let tz: Tz = validated
-        .parse()
-        .map_err(|_| anyhow::anyhow!("invalid timezone '{tz_str}'"))?;
-    let naive = chrono::NaiveDateTime::parse_from_str(local_naive_str, "%Y-%m-%d %H:%M:%S")
-        .with_context(|| {
-            format!("invalid datetime format '{local_naive_str}', expected YYYY-MM-DD HH:MM:SS")
-        })?;
-    let local = tz.from_local_datetime(&naive).single().ok_or_else(|| {
-        anyhow::anyhow!("ambiguous or non-existent local datetime '{local_naive_str}'")
-    })?;
-    Ok(local.with_timezone(&chrono::Utc))
-}
-
 pub fn update_storage_guards(
     paths: &PontemeshHome,
     guards: StorageGuardsSection,
@@ -723,76 +682,6 @@ fn validate_url(value: &str, field: &str) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn utc_to_configured_timezone_conversions() {
-        let utc_dt = chrono::DateTime::parse_from_rfc3339("2026-08-14T15:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-
-        assert_eq!(
-            format_datetime_in_timezone(utc_dt, "America/Sao_Paulo").unwrap(),
-            "14/08/2026 12:00"
-        );
-        assert_eq!(
-            format_datetime_in_timezone(utc_dt, "America/New_York").unwrap(),
-            "14/08/2026 11:00"
-        );
-        assert_eq!(
-            format_datetime_in_timezone(utc_dt, "Europe/London").unwrap(),
-            "14/08/2026 16:00"
-        );
-        assert_eq!(
-            format_datetime_in_timezone(utc_dt, "UTC").unwrap(),
-            "14/08/2026 15:00"
-        );
-    }
-
-    #[test]
-    fn configured_timezone_to_utc_conversions() {
-        let utc_dt =
-            parse_local_datetime_to_utc("2026-08-14 12:00:00", "America/Sao_Paulo").unwrap();
-        assert_eq!(utc_dt.to_rfc3339(), "2026-08-14T15:00:00+00:00");
-
-        let utc_ny =
-            parse_local_datetime_to_utc("2026-08-14 11:00:00", "America/New_York").unwrap();
-        assert_eq!(utc_ny.to_rfc3339(), "2026-08-14T15:00:00+00:00");
-    }
-
-    #[test]
-    fn midnight_boundary_behavior() {
-        let utc_dt = chrono::DateTime::parse_from_rfc3339("2026-01-01T01:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-
-        assert_eq!(
-            format_datetime_in_timezone(utc_dt, "America/Sao_Paulo").unwrap(),
-            "31/12/2025 22:00"
-        );
-    }
-
-    #[test]
-    fn os_timezone_isolation() {
-        unsafe {
-            std::env::set_var("TZ", "Asia/Tokyo");
-        }
-        let utc_dt = chrono::DateTime::parse_from_rfc3339("2026-08-14T15:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-
-        assert_eq!(
-            format_datetime_in_timezone(utc_dt, "America/Sao_Paulo").unwrap(),
-            "14/08/2026 12:00"
-        );
-
-        unsafe {
-            std::env::set_var("TZ", "UTC");
-        }
-        assert_eq!(
-            format_datetime_in_timezone(utc_dt, "America/Sao_Paulo").unwrap(),
-            "14/08/2026 12:00"
-        );
-    }
 
     #[test]
     fn validates_timezones() {

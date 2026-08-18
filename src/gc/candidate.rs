@@ -1,12 +1,6 @@
 use anyhow::Context;
 use sqlx::PgPool;
 use sqlx_core::{query::query, query_scalar::query_scalar, row::Row};
-use tracing::warn;
-
-pub const REASON_OBJECT_DELETED: &str = "OBJECT_DELETED";
-pub const REASON_ABORTED_MULTIPART: &str = "ABORTED_MULTIPART";
-pub const REASON_TEMP_FILE: &str = "TEMP_FILE";
-
 pub const STATE_PENDING: &str = "PENDING";
 pub const STATE_SWEEPING: &str = "SWEEPING";
 pub const STATE_DELETED: &str = "DELETED";
@@ -15,71 +9,9 @@ pub const STATE_FAILED: &str = "FAILED";
 #[derive(Debug, Clone)]
 pub struct GcCandidate {
     pub id: String,
-    pub resource_type: String,
     pub resource_id: Option<String>,
     pub storage_path: Option<String>,
-    pub reason: String,
-    pub state: String,
-    pub attempt_count: i32,
     pub sweep_token: Option<String>,
-}
-
-pub async fn enqueue_deleted_object(
-    pool: &PgPool,
-    version_id: &str,
-    storage_path: &str,
-    grace_seconds: u64,
-) -> anyhow::Result<()> {
-    let grace = i64::try_from(grace_seconds).unwrap_or(7200);
-    query(
-        r#"
-        INSERT INTO gc_candidates (resource_type, resource_id, storage_path, reason, not_before)
-        VALUES ('OBJECT_VERSION', $1::uuid, $2, $3, now() + ($4 * interval '1 second'))
-        ON CONFLICT DO NOTHING
-        "#,
-    )
-    .bind(version_id)
-    .bind(storage_path)
-    .bind(REASON_OBJECT_DELETED)
-    .bind(grace)
-    .execute(pool)
-    .await
-    .context("failed to enqueue gc candidate")?;
-    Ok(())
-}
-
-pub async fn enqueue_aborted_multipart_parts(
-    pool: &PgPool,
-    upload_id: &str,
-    grace_seconds: u64,
-) -> anyhow::Result<()> {
-    let grace = i64::try_from(grace_seconds).unwrap_or(7200);
-    let rows =
-        query("SELECT storage_path FROM s3_multipart_upload_parts WHERE upload_id = $1::uuid")
-            .bind(upload_id)
-            .fetch_all(pool)
-            .await
-            .context("failed to list multipart parts for gc")?;
-
-    for row in rows {
-        let path: String = row.get("storage_path");
-        if let Err(error) = query(
-            r#"
-            INSERT INTO gc_candidates (resource_type, storage_path, reason, not_before)
-            VALUES ('MULTIPART_PART', $1, $2, now() + ($3 * interval '1 second'))
-            ON CONFLICT DO NOTHING
-            "#,
-        )
-        .bind(&path)
-        .bind(REASON_ABORTED_MULTIPART)
-        .bind(grace)
-        .execute(pool)
-        .await
-        {
-            warn!(upload_id, path, error = %error, "gc: failed to enqueue multipart part");
-        }
-    }
-    Ok(())
 }
 
 pub async fn claim_batch(
@@ -106,8 +38,7 @@ pub async fn claim_batch(
             FOR UPDATE SKIP LOCKED
             LIMIT $5
         )
-        RETURNING id::text, resource_type, resource_id::text, storage_path,
-                  reason, state, attempt_count, sweep_token::text
+            RETURNING id::text, resource_id::text, storage_path, sweep_token::text
         "#,
     )
     .bind(STATE_SWEEPING)
@@ -123,12 +54,8 @@ pub async fn claim_batch(
         .into_iter()
         .map(|row| GcCandidate {
             id: row.get("id"),
-            resource_type: row.get("resource_type"),
             resource_id: row.get("resource_id"),
             storage_path: row.get("storage_path"),
-            reason: row.get("reason"),
-            state: row.get("state"),
-            attempt_count: row.get("attempt_count"),
             sweep_token: row.get("sweep_token"),
         })
         .collect())
@@ -232,17 +159,13 @@ mod tests {
     fn gc_candidate_struct_instantiation() {
         let candidate = GcCandidate {
             id: "cand-1".to_string(),
-            resource_type: "OBJECT_VERSION".to_string(),
             resource_id: Some("res-123".to_string()),
             storage_path: Some("/tmp/storage/1".to_string()),
-            reason: REASON_OBJECT_DELETED.to_string(),
-            state: STATE_PENDING.to_string(),
-            attempt_count: 0,
             sweep_token: None,
         };
 
         assert_eq!(candidate.id, "cand-1");
-        assert_eq!(candidate.reason, "OBJECT_DELETED");
-        assert_eq!(candidate.state, "PENDING");
+        assert_eq!(candidate.resource_id.as_deref(), Some("res-123"));
+        assert_eq!(candidate.storage_path.as_deref(), Some("/tmp/storage/1"));
     }
 }

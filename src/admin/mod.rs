@@ -1,3 +1,5 @@
+pub mod speed_test;
+
 use crate::{
     audit,
     auth::AdminSession,
