@@ -113,8 +113,9 @@ export async function uploadPayload(
       accept: "application/json",
       "content-type": "application/octet-stream"
     },
-    body: randomBody(bytes, onProgress)
-  });
+    body: randomBody(bytes, onProgress),
+    duplex: "half"
+  } as RequestInit & { duplex: "half" });
   await ensureOk(response);
   const { bytesReceived } = (await response.json()) as { bytesReceived: number };
   const durationMs = performance.now() - startedAt;

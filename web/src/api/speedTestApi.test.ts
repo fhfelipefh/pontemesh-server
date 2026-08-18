@@ -80,7 +80,8 @@ describe("speedTestApi", () => {
         accept: "application/json",
         "content-type": "application/octet-stream"
       },
-      body: expect.any(ReadableStream)
+      body: expect.any(ReadableStream),
+      duplex: "half"
     });
     expect(result.bytes).toBe(2048);
     expect(result.mbps).toBe(bytesToMbps(2048, result.durationMs));
