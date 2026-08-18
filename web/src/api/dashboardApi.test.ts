@@ -22,7 +22,7 @@ describe("dashboardApi — instance and logs endpoints", () => {
           role: "origin",
           timezone: "America/Sao_Paulo",
           environment: "native",
-          version: "0.3.14",
+          version: "0.3.15",
           uptimeSeconds: 900
         })
       );
@@ -57,7 +57,7 @@ describe("dashboardApi — instance and logs endpoints", () => {
           role: "origin",
           timezone: "America/Sao_Paulo",
           environment: "container",
-          version: "0.3.14",
+          version: "0.3.15",
           uptimeSeconds: 100
         })
       );
