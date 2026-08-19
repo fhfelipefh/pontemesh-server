@@ -5464,7 +5464,6 @@ mod tests {
         let app = ctx.app.clone();
         let admin_cookie = login_cookie(app.clone()).await;
 
-        // 1. Create a user
         let create_res = app
             .clone()
             .oneshot(
@@ -5487,7 +5486,6 @@ mod tests {
             .unwrap();
         assert_eq!(create_res.status(), StatusCode::CREATED);
 
-        // 2. List users
         let list_res = app
             .clone()
             .oneshot(
@@ -5505,13 +5503,11 @@ mod tests {
         let body_text = response_text(list_res).await;
         let users: Vec<serde_json::Value> = serde_json::from_str(&body_text).unwrap();
         
-        // At least admin and testuser
         assert!(users.len() >= 2);
         let test_user = users.iter().find(|u| u["username"] == "testuser").expect("user exists");
         assert_eq!(test_user["role"], "User");
         let test_user_id = test_user["id"].as_str().unwrap().to_owned();
 
-        // 3. Delete user
         let delete_res = app
             .clone()
             .oneshot(
