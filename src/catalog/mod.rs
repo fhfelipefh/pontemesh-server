@@ -3463,7 +3463,11 @@ impl Catalog {
         Ok(())
     }
 
-    pub async fn revoke_s3_access_key_by_id(&self, id: &str, user_filter: Option<&str>) -> anyhow::Result<S3AccessKeySummary> {
+    pub async fn revoke_s3_access_key_by_id(
+        &self,
+        id: &str,
+        user_filter: Option<&str>,
+    ) -> anyhow::Result<S3AccessKeySummary> {
         let user_uuid = user_filter.and_then(|id| uuid::Uuid::parse_str(id).ok());
         let row = query(
             r#"
@@ -5634,8 +5638,13 @@ fn application_summary_from_row(row: PgRow) -> anyhow::Result<ApplicationCredent
         revoked: row
             .get::<Option<chrono::DateTime<chrono::Utc>>, _>("revoked_at")
             .is_some(),
-        owner_username: row.try_get::<Option<String>, _>("owner_username").unwrap_or(None),
-        owner_id: row.try_get::<uuid::Uuid, _>("owner_id").ok().map(|u| u.to_string()),
+        owner_username: row
+            .try_get::<Option<String>, _>("owner_username")
+            .unwrap_or(None),
+        owner_id: row
+            .try_get::<uuid::Uuid, _>("owner_id")
+            .ok()
+            .map(|u| u.to_string()),
     })
 }
 

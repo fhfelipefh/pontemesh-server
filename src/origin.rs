@@ -1523,7 +1523,11 @@ async fn delete_objects(
     }
 }
 
-async fn create_bucket_inner(state: &AppState, bucket_name: &str, owner_id: Option<&str>) -> anyhow::Result<BucketSummary> {
+async fn create_bucket_inner(
+    state: &AppState,
+    bucket_name: &str,
+    owner_id: Option<&str>,
+) -> anyhow::Result<BucketSummary> {
     catalog::validate_bucket_name(bucket_name)?;
     let storage_path = config::configured_storage_dir(&state.paths)?;
     fs::create_dir_all(bucket_storage_dir(storage_path, bucket_name))

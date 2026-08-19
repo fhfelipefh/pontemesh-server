@@ -5499,12 +5499,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(list_res.status(), StatusCode::OK);
-        
+
         let body_text = response_text(list_res).await;
         let users: Vec<serde_json::Value> = serde_json::from_str(&body_text).unwrap();
-        
+
         assert!(users.len() >= 2);
-        let test_user = users.iter().find(|u| u["username"] == "testuser").expect("user exists");
+        let test_user = users
+            .iter()
+            .find(|u| u["username"] == "testuser")
+            .expect("user exists");
         assert_eq!(test_user["role"], "User");
         let test_user_id = test_user["id"].as_str().unwrap().to_owned();
 
