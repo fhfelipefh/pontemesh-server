@@ -71,10 +71,6 @@ test("creates an administrator only after a strong password and explicit confirm
   await createForm.getByLabel("Password", { exact: true }).fill("onlylowercase123");
   await createForm.getByLabel("Your current password").fill("CurrentAdmin123!");
   await expect(createButton).toBeDisabled();
-
-  // On the Users page, we don't display the policy error message directly until submit, 
-  // but we can check if it stays disabled or if the user appears in the table after a successful submit.
-
   await createForm.getByLabel("Password", { exact: true }).fill("PonteMeshAdmin123!");
   await expect(createButton).toBeEnabled();
   await createButton.click();
