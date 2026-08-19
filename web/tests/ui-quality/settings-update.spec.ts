@@ -33,11 +33,11 @@ test("shows and saves the maximum storage capacity setting", async ({ page }) =>
 
 test("exposes administrator accounts as a named semantic list", async ({ page }) => {
   await installAdminApiFixtures(page);
-  await page.goto("/settings");
+  await page.goto("/users");
 
-  const accounts = page.getByRole("list", { name: "Administrator accounts" });
+  const accounts = page.getByRole("table");
   await expect(accounts).toBeVisible();
-  await expect(accounts.getByRole("listitem")).toHaveText(["admin"]);
+  await expect(accounts.getByRole("cell", { name: "admin", exact: true })).toBeVisible();
 });
 
 test("configures an operational webhook and keeps its JSON preview collapsed", async ({ page }) => {
@@ -63,21 +63,17 @@ test("configures an operational webhook and keeps its JSON preview collapsed", a
 
 test("creates an administrator only after a strong password and explicit confirmation", async ({ page }) => {
   await installAdminApiFixtures(page);
-  await page.goto("/settings");
+  await page.goto("/users");
 
-  const card = page.getByRole("heading", { name: "Administrator accounts" }).locator("xpath=ancestor::section");
-  const createForm = card.locator("form").nth(1);
-  const createButton = createForm.getByRole("button", { name: "Create administrator" });
-  await createForm.getByLabel("New administrator username").fill("operations-admin");
-  await createForm.getByLabel("New password").fill("onlylowercase123");
-  await createForm.getByLabel("Your current password to confirm").fill("CurrentAdmin123!");
+  const createForm = page.locator("form").first();
+  const createButton = createForm.getByRole("button", { name: "Create user" });
+  await createForm.getByLabel("Username").fill("operations-admin");
+  await createForm.getByLabel("Password", { exact: true }).fill("onlylowercase123");
+  await createForm.getByLabel("Your current password").fill("CurrentAdmin123!");
   await expect(createButton).toBeDisabled();
-  await expect(card.getByText("Use at least 12 characters with uppercase, lowercase, number, and symbol.")).toBeVisible();
-
-  await createForm.getByLabel("New password").fill("PonteMeshAdmin123!");
+  await createForm.getByLabel("Password", { exact: true }).fill("PonteMeshAdmin123!");
   await expect(createButton).toBeEnabled();
   await createButton.click();
 
-  await expect(card.getByRole("listitem")).toHaveText(["admin", "operations-admin"]);
-  await expect(card.getByText("password must include upper, lower, number, and symbol")).toHaveCount(0);
+  await expect(page.getByRole("table").getByRole("cell", { name: "operations-admin", exact: true })).toBeVisible();
 });

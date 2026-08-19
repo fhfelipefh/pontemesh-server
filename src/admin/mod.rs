@@ -550,6 +550,7 @@ pub struct CreateAdminUserRequest {
     username: String,
     password: String,
     current_password: String,
+    role: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -921,12 +922,18 @@ pub async fn replica_detail_metrics(
 
 pub async fn list_buckets(
     State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
     Query(query): Query<ListBucketsQuery>,
 ) -> Response {
     let (page, page_size) = normalize_storage_pagination(query.page, query.page_size);
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
     match state
         .catalog
-        .list_buckets_page(query.query.as_deref(), page, page_size)
+        .list_buckets_page(query.query.as_deref(), page, page_size, owner_filter)
         .await
     {
         Ok(buckets) => Json(buckets).into_response(),
@@ -939,7 +946,7 @@ pub async fn create_bucket(
     Extension(session): Extension<AdminSession>,
     Json(payload): Json<CreateBucketRequest>,
 ) -> Response {
-    match create_bucket_inner(&state, payload.name.trim()).await {
+    match create_bucket_inner(&state, payload.name.trim(), Some(&session.user_id)).await {
         Ok(bucket) => {
             audit::event(
                 "bucket_created",
@@ -961,10 +968,33 @@ pub async fn create_bucket(
     }
 }
 
+async fn require_bucket_access(
+    state: &AppState,
+    session: &AdminSession,
+    bucket_name: &str,
+) -> anyhow::Result<()> {
+    if session.role == "admin" {
+        return Ok(());
+    }
+    let bucket = state
+        .catalog
+        .get_bucket(bucket_name)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("bucket not found"))?;
+    if bucket.owner_id != Some(session.user_id.clone()) {
+        anyhow::bail!("access denied: you do not own this bucket");
+    }
+    Ok(())
+}
+
 pub async fn get_bucket(
     State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
     Path(bucket_name): Path<String>,
 ) -> Response {
+    if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
+        return bad_request(error);
+    }
     match state.catalog.get_bucket(&bucket_name).await {
         Ok(Some(bucket)) => Json(bucket).into_response(),
         Ok(None) => not_found("bucket not found"),
@@ -977,6 +1007,9 @@ pub async fn delete_bucket(
     Extension(session): Extension<AdminSession>,
     Path(bucket_name): Path<String>,
 ) -> Response {
+    if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
+        return bad_request(error);
+    }
     match state.catalog.delete_bucket(&bucket_name).await {
         Ok(()) => {
             audit::event(
@@ -1001,8 +1034,12 @@ pub async fn delete_bucket(
 
 pub async fn get_bucket_policy(
     State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
     Path(bucket_name): Path<String>,
 ) -> Response {
+    if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
+        return bad_request(error);
+    }
     match state.catalog.get_bucket_policy(&bucket_name).await {
         Ok(policy) => Json(policy).into_response(),
         Err(error) => bad_request(error),
@@ -1105,6 +1142,9 @@ pub async fn update_bucket_policy(
     Path(bucket_name): Path<String>,
     Json(payload): Json<UpdateBucketPolicyRequest>,
 ) -> Response {
+    if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
+        return bad_request(error);
+    }
     let current = match state.catalog.get_bucket_policy(&bucket_name).await {
         Ok(policy) => policy,
         Err(error) => return bad_request(error),
@@ -1219,9 +1259,13 @@ pub async fn update_bucket_policy(
 
 pub async fn list_objects(
     State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
     Path(bucket_name): Path<String>,
     Query(query): Query<ListObjectsQuery>,
 ) -> Response {
+    if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
+        return bad_request(error);
+    }
     let (page, page_size) = normalize_storage_pagination(query.page, query.page_size);
     match state
         .catalog
@@ -1245,6 +1289,9 @@ pub async fn upload_object(
     Path(bucket_name): Path<String>,
     multipart: Multipart,
 ) -> Response {
+    if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
+        return bad_request(error);
+    }
     match upload_object_inner(&state, &bucket_name, multipart).await {
         Ok(object) => {
             let detail = format!(
@@ -1291,8 +1338,12 @@ pub async fn upload_object(
 
 pub async fn get_object(
     State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
     Path((bucket_name, object_key)): Path<(String, String)>,
 ) -> Response {
+    if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
+        return bad_request(error);
+    }
     match state
         .catalog
         .get_object_record(&bucket_name, &object_key)
@@ -1325,6 +1376,9 @@ pub async fn delete_object(
     Extension(session): Extension<AdminSession>,
     Path((bucket_name, object_key)): Path<(String, String)>,
 ) -> Response {
+    if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
+        return bad_request(error);
+    }
     match state.catalog.delete_object(&bucket_name, &object_key).await {
         Ok(()) => {
             audit::event(
@@ -1352,6 +1406,9 @@ pub async fn revoke_object(
     Extension(session): Extension<AdminSession>,
     Path((bucket_name, object_key)): Path<(String, String)>,
 ) -> Response {
+    if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
+        return bad_request(error);
+    }
     match state.catalog.revoke_object(&bucket_name, &object_key).await {
         Ok(()) => {
             if let Err(error) = state
@@ -1390,15 +1447,27 @@ pub async fn revoke_object(
     }
 }
 
-pub async fn list_application_credentials(State(state): State<AppState>) -> Response {
-    match state.catalog.list_application_credentials().await {
+pub async fn list_application_credentials(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+) -> Response {
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
+    match state
+        .catalog
+        .list_application_credentials(owner_filter)
+        .await
+    {
         Ok(credentials) => Json(credentials).into_response(),
         Err(error) => internal_error(error),
     }
 }
 
 pub async fn list_admin_users(State(state): State<AppState>) -> Response {
-    match state.catalog.list_active_admin_users().await {
+    match state.catalog.list_active_users().await {
         Ok(users) => Json(users).into_response(),
         Err(error) => internal_error(error),
     }
@@ -1436,9 +1505,13 @@ pub async fn create_admin_user(
         Ok(hash) => hash,
         Err(error) => return internal_error(error),
     };
+    let user_role = payload.role.unwrap_or_else(|| "admin".to_string());
+    if user_role != "admin" && user_role != "user" {
+        return bad_request(anyhow::anyhow!("invalid role"));
+    }
     match state
         .catalog
-        .create_admin_user(username, &password_hash)
+        .create_user(username, &password_hash, &user_role)
         .await
     {
         Ok(user_id) => {
@@ -1455,6 +1528,30 @@ pub async fn create_admin_user(
                 Json(serde_json::json!({"id": user_id, "username": username})),
             )
                 .into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn delete_admin_user(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
+) -> Response {
+    if session.user_id == id.to_string() {
+        return bad_request(anyhow::anyhow!("cannot delete yourself"));
+    }
+    match state.catalog.delete_user(&id.to_string()).await {
+        Ok(()) => {
+            record_admin_audit(
+                &state,
+                "admin_user_deleted",
+                &session.username,
+                "success",
+                &format!("deleted_user_id={id}"),
+            )
+            .await;
+            StatusCode::NO_CONTENT.into_response()
         }
         Err(error) => bad_request(error),
     }
@@ -1527,7 +1624,7 @@ pub async fn create_application_credential(
     };
     match state
         .catalog
-        .create_application_credential(&payload.name, scopes)
+        .create_application_credential(&payload.name, scopes, Some(&session.user_id))
         .await
     {
         Ok(created) => {
@@ -1556,7 +1653,16 @@ pub async fn revoke_application_credential(
     Extension(session): Extension<AdminSession>,
     Path(id): Path<String>,
 ) -> Response {
-    match state.catalog.revoke_application_credential(&id).await {
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
+    match state
+        .catalog
+        .revoke_application_credential(&id, owner_filter)
+        .await
+    {
         Ok(()) => {
             audit::event(
                 "application_credential_revoked",
@@ -1607,11 +1713,21 @@ pub async fn revoke_access_package(
 
 pub async fn list_s3_access_keys(
     State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
     Query(query): Query<ListS3AccessKeysQuery>,
 ) -> Response {
     let (page, page_size) = normalize_s3_access_key_pagination(&query);
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
 
-    match state.catalog.list_s3_access_keys(page, page_size).await {
+    match state
+        .catalog
+        .list_s3_access_keys(page, page_size, owner_filter)
+        .await
+    {
         Ok(keys) => Json(keys).into_response(),
         Err(error) => internal_error(error),
     }
@@ -1678,7 +1794,16 @@ pub async fn revoke_s3_access_key_by_id(
     Extension(session): Extension<AdminSession>,
     Path(id): Path<String>,
 ) -> Response {
-    match state.catalog.revoke_s3_access_key_by_id(&id).await {
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
+    match state
+        .catalog
+        .revoke_s3_access_key_by_id(&id, owner_filter)
+        .await
+    {
         Ok(key) => {
             audit::event(
                 "s3_access_key_revoked",
@@ -1705,7 +1830,16 @@ pub async fn revoke_s3_access_key(
     Extension(session): Extension<AdminSession>,
     Path(access_key_id): Path<String>,
 ) -> Response {
-    match state.catalog.revoke_s3_access_key(&access_key_id).await {
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
+    match state
+        .catalog
+        .revoke_s3_access_key(&access_key_id, owner_filter)
+        .await
+    {
         Ok(()) => {
             audit::event(
                 "s3_access_key_revoked",
@@ -1855,12 +1989,16 @@ fn build_instance_summary(state: &AppState) -> anyhow::Result<InstanceSummary> {
     })
 }
 
-async fn create_bucket_inner(state: &AppState, bucket_name: &str) -> anyhow::Result<BucketSummary> {
+async fn create_bucket_inner(
+    state: &AppState,
+    bucket_name: &str,
+    owner_id: Option<&str>,
+) -> anyhow::Result<BucketSummary> {
     catalog::validate_bucket_name(bucket_name)?;
     let storage_path = config::configured_storage_dir(&state.paths)?;
     fs::create_dir_all(bucket_storage_dir(storage_path, bucket_name))
         .with_context(|| format!("failed to create storage directory for bucket {bucket_name}"))?;
-    state.catalog.create_bucket(bucket_name).await
+    state.catalog.create_bucket(bucket_name, owner_id).await
 }
 
 async fn upload_object_inner(

@@ -2,6 +2,8 @@ import { HttpError, ensureOk } from "./http";
 
 export type BucketSummary = {
   name: string;
+  ownerId: string;
+  ownerUsername: string;
   objectCount: number;
   totalBytes: number;
   createdAt: string;

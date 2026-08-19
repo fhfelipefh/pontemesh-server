@@ -49,7 +49,7 @@ pub async fn read_resource(
             let storage_path = config::configured_storage_dir(&state.paths)?;
             json!(storage::status(&storage_path))
         }
-        "pontemesh://buckets" => json!(state.catalog.list_buckets_page(None, 1, 100).await?),
+        "pontemesh://buckets" => json!(state.catalog.list_buckets_page(None, 1, 100, None).await?),
         "pontemesh://audit/recent" => json!(
             state
                 .catalog

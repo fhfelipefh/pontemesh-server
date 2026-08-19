@@ -3,6 +3,7 @@ import { ensureOk } from "./http";
 export type AuthUser = {
   authenticated: boolean;
   username: string | null;
+  role?: string;
 };
 
 export type LoginRequest = {

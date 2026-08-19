@@ -22,6 +22,8 @@ pub struct BucketSummary {
     pub object_count: i64,
     pub total_bytes: i64,
     pub created_at: String,
+    pub owner_username: Option<String>,
+    pub owner_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -325,6 +327,8 @@ pub struct ApplicationCredentialSummary {
     pub scopes: Vec<String>,
     pub created_at: String,
     pub revoked: bool,
+    pub owner_username: Option<String>,
+    pub owner_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -802,6 +806,7 @@ pub struct UserRecord {
 pub struct AdminUserSummary {
     pub id: String,
     pub username: String,
+    pub role: String,
     pub created_at: String,
     pub last_login_at: Option<String>,
 }
@@ -916,18 +921,19 @@ impl Catalog {
         }))
     }
 
-    pub async fn list_active_admin_users(&self) -> anyhow::Result<Vec<AdminUserSummary>> {
+    pub async fn list_active_users(&self) -> anyhow::Result<Vec<AdminUserSummary>> {
         let rows = query(
-            "SELECT id::text, username, created_at, last_login_at FROM users WHERE role = 'admin' AND is_active = TRUE ORDER BY created_at ASC",
+            "SELECT id::text, username, role, created_at, last_login_at FROM users WHERE is_active = TRUE ORDER BY created_at ASC",
         )
         .fetch_all(&self.pool)
         .await
-        .context("failed to list active admin users")?;
+        .context("failed to list active users")?;
         Ok(rows
             .into_iter()
             .map(|row| AdminUserSummary {
                 id: row.get("id"),
                 username: row.get("username"),
+                role: row.get("role"),
                 created_at: format_datetime(row.get("created_at")),
                 last_login_at: row
                     .try_get("last_login_at")
@@ -938,18 +944,32 @@ impl Catalog {
             .collect())
     }
 
-    pub async fn create_admin_user(
+    pub async fn create_user(
         &self,
         username: &str,
         password_hash: &str,
+        role: &str,
     ) -> anyhow::Result<String> {
-        let row = query("INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'admin') RETURNING id::text")
+        let row = query("INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3) RETURNING id::text")
             .bind(username)
             .bind(password_hash)
+            .bind(role)
             .fetch_one(&self.pool)
             .await
-            .context("failed to create admin user")?;
+            .context("failed to create user")?;
         Ok(row.get("id"))
+    }
+
+    pub async fn delete_user(&self, user_id: &str) -> anyhow::Result<()> {
+        let result = query("DELETE FROM users WHERE id = $1::uuid")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .context("failed to delete user")?;
+        if result.rows_affected() != 1 {
+            bail!("user not found");
+        }
+        Ok(())
     }
 
     pub async fn update_admin_credentials(
@@ -1083,24 +1103,32 @@ impl Catalog {
         Ok(())
     }
 
-    pub async fn list_buckets(&self) -> anyhow::Result<Vec<BucketSummary>> {
+    pub async fn list_buckets(
+        &self,
+        owner_id_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<BucketSummary>> {
         let rows = query(
             r#"
             SELECT
                 b.name,
                 b.created_at,
+                b.owner_id,
+                u.username AS owner_username,
                 COUNT(v.id)::bigint AS object_count,
                 COALESCE(SUM(v.size_bytes), 0)::bigint AS total_bytes
             FROM buckets b
+            LEFT JOIN users u ON u.id = b.owner_id
             LEFT JOIN objects o
                 ON o.bucket_id = b.id AND o.deleted_at IS NULL
             LEFT JOIN object_versions v
                 ON v.id = o.current_version_id AND NOT v.is_delete_marker
             WHERE b.deleted_at IS NULL
-            GROUP BY b.id, b.name, b.created_at
+              AND ($1::uuid IS NULL OR b.owner_id = $1::uuid)
+            GROUP BY b.id, b.name, b.created_at, u.username
             ORDER BY b.created_at DESC, b.name ASC
             "#,
         )
+        .bind(owner_id_filter)
         .fetch_all(&self.pool)
         .await
         .context("failed to list buckets")?;
@@ -1112,6 +1140,11 @@ impl Catalog {
                 created_at: format_datetime(row.get("created_at")),
                 object_count: row.get("object_count"),
                 total_bytes: row.get("total_bytes"),
+                owner_username: row.get("owner_username"),
+                owner_id: row
+                    .try_get::<uuid::Uuid, _>("owner_id")
+                    .ok()
+                    .map(|u| u.to_string()),
             })
             .collect())
     }
@@ -1121,6 +1154,7 @@ impl Catalog {
         query_text: Option<&str>,
         page: u32,
         page_size: u32,
+        owner_id_filter: Option<&str>,
     ) -> anyhow::Result<PaginatedBuckets> {
         let normalized_query = normalize_optional_name(query_text.unwrap_or(""));
         let total: i64 = query_scalar(
@@ -1129,9 +1163,11 @@ impl Catalog {
             FROM buckets b
             WHERE b.deleted_at IS NULL
               AND ($1::text IS NULL OR b.name ILIKE '%' || $1 || '%')
+              AND ($2::uuid IS NULL OR b.owner_id = $2::uuid)
             "#,
         )
         .bind(normalized_query.as_deref())
+        .bind(owner_id_filter)
         .fetch_one(&self.pool)
         .await
         .context("failed to count buckets")?;
@@ -1144,16 +1180,20 @@ impl Catalog {
             SELECT
                 b.name,
                 b.created_at,
+                b.owner_id,
+                u.username AS owner_username,
                 COUNT(v.id)::bigint AS object_count,
                 COALESCE(SUM(v.size_bytes), 0)::bigint AS total_bytes
             FROM buckets b
+            LEFT JOIN users u ON u.id = b.owner_id
             LEFT JOIN objects o
                 ON o.bucket_id = b.id AND o.deleted_at IS NULL
             LEFT JOIN object_versions v
                 ON v.id = o.current_version_id AND NOT v.is_delete_marker
             WHERE b.deleted_at IS NULL
               AND ($1::text IS NULL OR b.name ILIKE '%' || $1 || '%')
-            GROUP BY b.id, b.name, b.created_at
+              AND ($4::uuid IS NULL OR b.owner_id = $4::uuid)
+            GROUP BY b.id, b.name, b.created_at, u.username
             ORDER BY b.created_at DESC, b.name ASC
             LIMIT $2 OFFSET $3
             "#,
@@ -1161,6 +1201,7 @@ impl Catalog {
         .bind(normalized_query.as_deref())
         .bind(limit)
         .bind(offset)
+        .bind(owner_id_filter)
         .fetch_all(&self.pool)
         .await
         .context("failed to list buckets")?;
@@ -1173,6 +1214,11 @@ impl Catalog {
                     created_at: format_datetime(row.get("created_at")),
                     object_count: row.get("object_count"),
                     total_bytes: row.get("total_bytes"),
+                    owner_username: row.get("owner_username"),
+                    owner_id: row
+                        .try_get::<uuid::Uuid, _>("owner_id")
+                        .ok()
+                        .map(|u| u.to_string()),
                 })
                 .collect(),
             page,
@@ -1189,15 +1235,17 @@ impl Catalog {
             SELECT
                 b.name,
                 b.created_at,
+                u.username AS owner_username,
                 COUNT(v.id)::bigint AS object_count,
                 COALESCE(SUM(v.size_bytes), 0)::bigint AS total_bytes
             FROM buckets b
+            LEFT JOIN users u ON u.id = b.owner_id
             LEFT JOIN objects o
                 ON o.bucket_id = b.id AND o.deleted_at IS NULL
             LEFT JOIN object_versions v
                 ON v.id = o.current_version_id AND NOT v.is_delete_marker
             WHERE b.name = $1 AND b.deleted_at IS NULL
-            GROUP BY b.id, b.name, b.created_at
+            GROUP BY b.id, b.name, b.created_at, u.username
             "#,
         )
         .bind(name)
@@ -1210,10 +1258,19 @@ impl Catalog {
             created_at: format_datetime(row.get("created_at")),
             object_count: row.get("object_count"),
             total_bytes: row.get("total_bytes"),
+            owner_username: row.get("owner_username"),
+            owner_id: row
+                .try_get::<uuid::Uuid, _>("owner_id")
+                .ok()
+                .map(|u| u.to_string()),
         }))
     }
 
-    pub async fn create_bucket(&self, name: &str) -> anyhow::Result<BucketSummary> {
+    pub async fn create_bucket(
+        &self,
+        name: &str,
+        owner_id: Option<&str>,
+    ) -> anyhow::Result<BucketSummary> {
         validate_bucket_name(name)?;
         let mut tx = self
             .pool
@@ -1222,15 +1279,18 @@ impl Catalog {
             .context("failed to begin bucket transaction")?;
         let row = query(
             r#"
-            INSERT INTO buckets (name)
-            VALUES ($1)
+            INSERT INTO buckets (name, owner_id)
+            VALUES ($1, $2::uuid)
             RETURNING id::text, name, created_at
             "#,
         )
         .bind(name)
+        .bind(owner_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(map_unique_violation("bucket already exists"))?;
+
+        let _bucket_id: String = row.get("id");
 
         query(
             r#"
@@ -1262,6 +1322,8 @@ impl Catalog {
             object_count: 0,
             total_bytes: 0,
             created_at: format_datetime(row.get("created_at")),
+            owner_username: None,
+            owner_id: owner_id.map(|s| s.to_string()),
         })
     }
 
@@ -2971,6 +3033,7 @@ impl Catalog {
         &self,
         name: &str,
         scopes: Vec<String>,
+        owner_id: Option<&str>,
     ) -> anyhow::Result<CreatedApplicationCredential> {
         let name = name.trim();
         validate_credential_name(name, "application name")?;
@@ -2979,16 +3042,18 @@ impl Catalog {
         let token = secure_url_token("pm_app_", 32);
         let token_hash = hash_bearer_token(&token);
         let scopes_json = serde_json::to_value(&scopes).context("failed to serialize scopes")?;
+        let owner_uuid = owner_id.and_then(|id| uuid::Uuid::parse_str(id).ok());
         let row = query(
             r#"
-            INSERT INTO application_credentials (name, token_hash, scopes)
-            VALUES ($1, $2, $3)
-            RETURNING id::text, name, scopes, created_at, revoked_at
+            INSERT INTO application_credentials (name, token_hash, scopes, owner_id)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id::text, name, scopes, created_at, revoked_at, owner_id, NULL AS owner_username
             "#,
         )
         .bind(name)
         .bind(token_hash)
         .bind(scopes_json)
+        .bind(owner_uuid)
         .fetch_one(&self.pool)
         .await
         .context("failed to create application credential")?;
@@ -3001,14 +3066,19 @@ impl Catalog {
 
     pub async fn list_application_credentials(
         &self,
+        owner_filter: Option<&str>,
     ) -> anyhow::Result<Vec<ApplicationCredentialSummary>> {
+        let owner_uuid = owner_filter.and_then(|id| uuid::Uuid::parse_str(id).ok());
         let rows = query(
             r#"
-            SELECT id::text, name, scopes, created_at, revoked_at
-            FROM application_credentials
-            ORDER BY created_at DESC, name ASC
+            SELECT a.id::text, a.name, a.scopes, a.created_at, a.revoked_at, a.owner_id, u.username AS owner_username
+            FROM application_credentials a
+            LEFT JOIN users u ON u.id = a.owner_id
+            WHERE ($1::uuid IS NULL OR a.owner_id = $1)
+            ORDER BY a.created_at DESC, a.name ASC
             "#,
         )
+        .bind(owner_uuid)
         .fetch_all(&self.pool)
         .await
         .context("failed to list application credentials")?;
@@ -3016,11 +3086,17 @@ impl Catalog {
         rows.into_iter().map(application_summary_from_row).collect()
     }
 
-    pub async fn revoke_application_credential(&self, id: &str) -> anyhow::Result<()> {
+    pub async fn revoke_application_credential(
+        &self,
+        id: &str,
+        owner_filter: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let owner_uuid = owner_filter.and_then(|id| uuid::Uuid::parse_str(id).ok());
         let result = query(
-            "UPDATE application_credentials SET revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL",
+            "UPDATE application_credentials SET revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL AND ($2::uuid IS NULL OR owner_id = $2)",
         )
         .bind(id)
+        .bind(owner_uuid)
         .execute(&self.pool)
         .await
         .context("failed to revoke application credential")?;
@@ -3343,11 +3419,16 @@ impl Catalog {
         &self,
         page: u32,
         page_size: u32,
+        user_filter: Option<&str>,
     ) -> anyhow::Result<PaginatedS3AccessKeys> {
-        let total: i64 = query_scalar("SELECT COUNT(*) FROM s3_access_keys")
-            .fetch_one(&self.pool)
-            .await
-            .context("failed to count S3 access keys")?;
+        let user_uuid = user_filter.and_then(|id| uuid::Uuid::parse_str(id).ok());
+        let total: i64 = query_scalar(
+            "SELECT COUNT(*) FROM s3_access_keys WHERE ($1::uuid IS NULL OR user_id = $1)",
+        )
+        .bind(user_uuid)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to count S3 access keys")?;
         let total_pages = total_pages(total, page_size);
         let page = page.min(total_pages).max(1);
         let offset = i64::from(page.saturating_sub(1)) * i64::from(page_size);
@@ -3357,12 +3438,14 @@ impl Catalog {
             SELECT id::text, name, access_key_id, user_id::text, is_active,
                    created_at, revoked_at, last_used_at
             FROM s3_access_keys
+            WHERE ($3::uuid IS NULL OR user_id = $3)
             ORDER BY created_at DESC, access_key_id ASC
             LIMIT $1 OFFSET $2
             "#,
         )
         .bind(limit)
         .bind(offset)
+        .bind(user_uuid)
         .fetch_all(&self.pool)
         .await
         .context("failed to list S3 access keys")?;
@@ -3379,16 +3462,23 @@ impl Catalog {
         })
     }
 
-    pub async fn revoke_s3_access_key(&self, access_key_id: &str) -> anyhow::Result<()> {
+    pub async fn revoke_s3_access_key(
+        &self,
+        access_key_id: &str,
+        user_filter: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let user_uuid = user_filter.and_then(|id| uuid::Uuid::parse_str(id).ok());
         let result = query(
             r#"
             UPDATE s3_access_keys
             SET is_active = FALSE, revoked_at = now()
             WHERE access_key_id = $1
               AND revoked_at IS NULL
+              AND ($2::uuid IS NULL OR user_id = $2)
             "#,
         )
         .bind(access_key_id)
+        .bind(user_uuid)
         .execute(&self.pool)
         .await
         .context("failed to revoke S3 access key")?;
@@ -3399,18 +3489,25 @@ impl Catalog {
         Ok(())
     }
 
-    pub async fn revoke_s3_access_key_by_id(&self, id: &str) -> anyhow::Result<S3AccessKeySummary> {
+    pub async fn revoke_s3_access_key_by_id(
+        &self,
+        id: &str,
+        user_filter: Option<&str>,
+    ) -> anyhow::Result<S3AccessKeySummary> {
+        let user_uuid = user_filter.and_then(|id| uuid::Uuid::parse_str(id).ok());
         let row = query(
             r#"
             UPDATE s3_access_keys
             SET is_active = FALSE,
                 revoked_at = COALESCE(revoked_at, now())
             WHERE id = $1::uuid
+              AND ($2::uuid IS NULL OR user_id = $2)
             RETURNING id::text, name, access_key_id, user_id::text, is_active,
                       created_at, revoked_at, last_used_at
             "#,
         )
         .bind(id)
+        .bind(user_uuid)
         .fetch_optional(&self.pool)
         .await
         .context("failed to revoke S3 access key")?;
@@ -5567,6 +5664,13 @@ fn application_summary_from_row(row: PgRow) -> anyhow::Result<ApplicationCredent
         revoked: row
             .get::<Option<chrono::DateTime<chrono::Utc>>, _>("revoked_at")
             .is_some(),
+        owner_username: row
+            .try_get::<Option<String>, _>("owner_username")
+            .unwrap_or(None),
+        owner_id: row
+            .try_get::<uuid::Uuid, _>("owner_id")
+            .ok()
+            .map(|u| u.to_string()),
     })
 }
 

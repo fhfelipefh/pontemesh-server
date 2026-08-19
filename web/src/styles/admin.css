@@ -2415,9 +2415,9 @@
 .buckets-table__head,
 .buckets-table__row {
   display: grid;
-  grid-template-columns: 36px minmax(160px, 1fr) 110px 120px 180px 230px;
+  grid-template-columns: 36px minmax(130px, 1fr) minmax(100px, 1fr) 90px 100px 150px 220px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 11px 14px;
 }
 
