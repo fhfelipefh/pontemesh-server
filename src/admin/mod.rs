@@ -926,7 +926,11 @@ pub async fn list_buckets(
     Query(query): Query<ListBucketsQuery>,
 ) -> Response {
     let (page, page_size) = normalize_storage_pagination(query.page, query.page_size);
-    let owner_filter = if session.role == "admin" { None } else { Some(session.user_id.as_str()) };
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
     match state
         .catalog
         .list_buckets_page(query.query.as_deref(), page, page_size, owner_filter)
@@ -1447,8 +1451,16 @@ pub async fn list_application_credentials(
     State(state): State<AppState>,
     Extension(session): Extension<AdminSession>,
 ) -> Response {
-    let owner_filter = if session.role == "admin" { None } else { Some(session.user_id.as_str()) };
-    match state.catalog.list_application_credentials(owner_filter).await {
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
+    match state
+        .catalog
+        .list_application_credentials(owner_filter)
+        .await
+    {
         Ok(credentials) => Json(credentials).into_response(),
         Err(error) => internal_error(error),
     }
@@ -1641,8 +1653,16 @@ pub async fn revoke_application_credential(
     Extension(session): Extension<AdminSession>,
     Path(id): Path<String>,
 ) -> Response {
-    let owner_filter = if session.role == "admin" { None } else { Some(session.user_id.as_str()) };
-    match state.catalog.revoke_application_credential(&id, owner_filter).await {
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
+    match state
+        .catalog
+        .revoke_application_credential(&id, owner_filter)
+        .await
+    {
         Ok(()) => {
             audit::event(
                 "application_credential_revoked",
@@ -1697,9 +1717,17 @@ pub async fn list_s3_access_keys(
     Query(query): Query<ListS3AccessKeysQuery>,
 ) -> Response {
     let (page, page_size) = normalize_s3_access_key_pagination(&query);
-    let owner_filter = if session.role == "admin" { None } else { Some(session.user_id.as_str()) };
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
 
-    match state.catalog.list_s3_access_keys(page, page_size, owner_filter).await {
+    match state
+        .catalog
+        .list_s3_access_keys(page, page_size, owner_filter)
+        .await
+    {
         Ok(keys) => Json(keys).into_response(),
         Err(error) => internal_error(error),
     }
@@ -1766,8 +1794,16 @@ pub async fn revoke_s3_access_key_by_id(
     Extension(session): Extension<AdminSession>,
     Path(id): Path<String>,
 ) -> Response {
-    let owner_filter = if session.role == "admin" { None } else { Some(session.user_id.as_str()) };
-    match state.catalog.revoke_s3_access_key_by_id(&id, owner_filter).await {
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
+    match state
+        .catalog
+        .revoke_s3_access_key_by_id(&id, owner_filter)
+        .await
+    {
         Ok(key) => {
             audit::event(
                 "s3_access_key_revoked",
@@ -1794,8 +1830,16 @@ pub async fn revoke_s3_access_key(
     Extension(session): Extension<AdminSession>,
     Path(access_key_id): Path<String>,
 ) -> Response {
-    let owner_filter = if session.role == "admin" { None } else { Some(session.user_id.as_str()) };
-    match state.catalog.revoke_s3_access_key(&access_key_id, owner_filter).await {
+    let owner_filter = if session.role == "admin" {
+        None
+    } else {
+        Some(session.user_id.as_str())
+    };
+    match state
+        .catalog
+        .revoke_s3_access_key(&access_key_id, owner_filter)
+        .await
+    {
         Ok(()) => {
             audit::event(
                 "s3_access_key_revoked",
@@ -1945,7 +1989,11 @@ fn build_instance_summary(state: &AppState) -> anyhow::Result<InstanceSummary> {
     })
 }
 
-async fn create_bucket_inner(state: &AppState, bucket_name: &str, owner_id: Option<&str>) -> anyhow::Result<BucketSummary> {
+async fn create_bucket_inner(
+    state: &AppState,
+    bucket_name: &str,
+    owner_id: Option<&str>,
+) -> anyhow::Result<BucketSummary> {
     catalog::validate_bucket_name(bucket_name)?;
     let storage_path = config::configured_storage_dir(&state.paths)?;
     fs::create_dir_all(bucket_storage_dir(storage_path, bucket_name))

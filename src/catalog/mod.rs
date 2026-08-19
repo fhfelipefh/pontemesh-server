@@ -1103,7 +1103,10 @@ impl Catalog {
         Ok(())
     }
 
-    pub async fn list_buckets(&self, owner_id_filter: Option<&str>) -> anyhow::Result<Vec<BucketSummary>> {
+    pub async fn list_buckets(
+        &self,
+        owner_id_filter: Option<&str>,
+    ) -> anyhow::Result<Vec<BucketSummary>> {
         let rows = query(
             r#"
             SELECT
@@ -1138,7 +1141,10 @@ impl Catalog {
                 object_count: row.get("object_count"),
                 total_bytes: row.get("total_bytes"),
                 owner_username: row.get("owner_username"),
-                owner_id: row.try_get::<uuid::Uuid, _>("owner_id").ok().map(|u| u.to_string()),
+                owner_id: row
+                    .try_get::<uuid::Uuid, _>("owner_id")
+                    .ok()
+                    .map(|u| u.to_string()),
             })
             .collect())
     }
@@ -1209,7 +1215,10 @@ impl Catalog {
                     object_count: row.get("object_count"),
                     total_bytes: row.get("total_bytes"),
                     owner_username: row.get("owner_username"),
-                    owner_id: row.try_get::<uuid::Uuid, _>("owner_id").ok().map(|u| u.to_string()),
+                    owner_id: row
+                        .try_get::<uuid::Uuid, _>("owner_id")
+                        .ok()
+                        .map(|u| u.to_string()),
                 })
                 .collect(),
             page,
@@ -1250,11 +1259,18 @@ impl Catalog {
             object_count: row.get("object_count"),
             total_bytes: row.get("total_bytes"),
             owner_username: row.get("owner_username"),
-            owner_id: row.try_get::<uuid::Uuid, _>("owner_id").ok().map(|u| u.to_string()),
+            owner_id: row
+                .try_get::<uuid::Uuid, _>("owner_id")
+                .ok()
+                .map(|u| u.to_string()),
         }))
     }
 
-    pub async fn create_bucket(&self, name: &str, owner_id: Option<&str>) -> anyhow::Result<BucketSummary> {
+    pub async fn create_bucket(
+        &self,
+        name: &str,
+        owner_id: Option<&str>,
+    ) -> anyhow::Result<BucketSummary> {
         validate_bucket_name(name)?;
         let mut tx = self
             .pool
@@ -3070,7 +3086,11 @@ impl Catalog {
         rows.into_iter().map(application_summary_from_row).collect()
     }
 
-    pub async fn revoke_application_credential(&self, id: &str, owner_filter: Option<&str>) -> anyhow::Result<()> {
+    pub async fn revoke_application_credential(
+        &self,
+        id: &str,
+        owner_filter: Option<&str>,
+    ) -> anyhow::Result<()> {
         let owner_uuid = owner_filter.and_then(|id| uuid::Uuid::parse_str(id).ok());
         let result = query(
             "UPDATE application_credentials SET revoked_at = now() WHERE id = $1::uuid AND revoked_at IS NULL AND ($2::uuid IS NULL OR owner_id = $2)",
@@ -3402,11 +3422,13 @@ impl Catalog {
         user_filter: Option<&str>,
     ) -> anyhow::Result<PaginatedS3AccessKeys> {
         let user_uuid = user_filter.and_then(|id| uuid::Uuid::parse_str(id).ok());
-        let total: i64 = query_scalar("SELECT COUNT(*) FROM s3_access_keys WHERE ($1::uuid IS NULL OR user_id = $1)")
-            .bind(user_uuid)
-            .fetch_one(&self.pool)
-            .await
-            .context("failed to count S3 access keys")?;
+        let total: i64 = query_scalar(
+            "SELECT COUNT(*) FROM s3_access_keys WHERE ($1::uuid IS NULL OR user_id = $1)",
+        )
+        .bind(user_uuid)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to count S3 access keys")?;
         let total_pages = total_pages(total, page_size);
         let page = page.min(total_pages).max(1);
         let offset = i64::from(page.saturating_sub(1)) * i64::from(page_size);
@@ -3440,7 +3462,11 @@ impl Catalog {
         })
     }
 
-    pub async fn revoke_s3_access_key(&self, access_key_id: &str, user_filter: Option<&str>) -> anyhow::Result<()> {
+    pub async fn revoke_s3_access_key(
+        &self,
+        access_key_id: &str,
+        user_filter: Option<&str>,
+    ) -> anyhow::Result<()> {
         let user_uuid = user_filter.and_then(|id| uuid::Uuid::parse_str(id).ok());
         let result = query(
             r#"
