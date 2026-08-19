@@ -45,35 +45,31 @@ function xorshift32(seed: number): () => number {
 function randomBody(
   bytes: number,
   onProgress?: (sent: number) => void
-): ReadableStream<Uint8Array> {
+): Blob {
   const chunkSize = 64 * 1024;
-  let remaining = bytes;
+  let generated = 0;
   const next = xorshift32(0x9e3779b9);
-  return new ReadableStream<Uint8Array>({
-    pull(controller) {
-      if (remaining <= 0) {
-        controller.close();
-        return;
+  const chunks: BlobPart[] = [];
+  while (generated < bytes) {
+    const chunk = new Uint8Array(Math.min(chunkSize, bytes - generated));
+    for (let index = 0; index < chunk.length; index += 4) {
+      const value = next();
+      chunk[index] = value & 0xff;
+      if (index + 1 < chunk.length) {
+        chunk[index + 1] = (value >>> 8) & 0xff;
       }
-      const chunk = new Uint8Array(Math.min(chunkSize, remaining));
-      for (let index = 0; index < chunk.length; index += 4) {
-        const value = next();
-        chunk[index] = value & 0xff;
-        if (index + 1 < chunk.length) {
-          chunk[index + 1] = (value >>> 8) & 0xff;
-        }
-        if (index + 2 < chunk.length) {
-          chunk[index + 2] = (value >>> 16) & 0xff;
-        }
-        if (index + 3 < chunk.length) {
-          chunk[index + 3] = (value >>> 24) & 0xff;
-        }
+      if (index + 2 < chunk.length) {
+        chunk[index + 2] = (value >>> 16) & 0xff;
       }
-      remaining -= chunk.length;
-      controller.enqueue(chunk);
-      onProgress?.(bytes - remaining);
+      if (index + 3 < chunk.length) {
+        chunk[index + 3] = (value >>> 24) & 0xff;
+      }
     }
-  });
+    chunks.push(chunk.buffer as ArrayBuffer);
+    generated += chunk.length;
+    onProgress?.(generated);
+  }
+  return new Blob(chunks, { type: "application/octet-stream" });
 }
 
 export async function downloadPayload(
@@ -106,6 +102,7 @@ export async function uploadPayload(
   bytes: number,
   onProgress?: (sent: number) => void
 ): Promise<SpeedTestResult> {
+  const body = randomBody(bytes, onProgress);
   const startedAt = performance.now();
   const response = await fetch("/api/admin/speed-test/upload", {
     method: "POST",
@@ -113,9 +110,8 @@ export async function uploadPayload(
       accept: "application/json",
       "content-type": "application/octet-stream"
     },
-    body: randomBody(bytes, onProgress),
-    duplex: "half"
-  } as RequestInit & { duplex: "half" });
+    body
+  });
   await ensureOk(response);
   const { bytesReceived } = (await response.json()) as { bytesReceived: number };
   const durationMs = performance.now() - startedAt;

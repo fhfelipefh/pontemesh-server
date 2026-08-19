@@ -64,7 +64,7 @@ describe("speedTestApi", () => {
     await expect(downloadPayload(1024)).rejects.toThrow("unauthorized");
   });
 
-  it("uploads a streamed payload and uses the reported bytesReceived", async () => {
+  it("uploads an exact-size Blob without half-duplex streaming", async () => {
     const jsonResponse = new Response(JSON.stringify({ bytesReceived: 2048 }), {
       status: 200,
       headers: { "content-type": "application/json" }
@@ -80,11 +80,40 @@ describe("speedTestApi", () => {
         accept: "application/json",
         "content-type": "application/octet-stream"
       },
-      body: expect.any(ReadableStream),
-      duplex: "half"
+      body: expect.any(Blob)
     });
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = request.body as Blob;
+    expect(body.size).toBe(2048);
+    expect(body.type).toBe("application/octet-stream");
+    expect("duplex" in request).toBe(false);
     expect(result.bytes).toBe(2048);
     expect(result.mbps).toBe(bytesToMbps(2048, result.durationMs));
     expect(onProgress).toHaveBeenLastCalledWith(2048);
+  });
+
+  it("reports every generated upload chunk and preserves non-aligned sizes", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ bytesReceived: 70_001 }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const progress = vi.fn();
+
+    await uploadPayload(70_001, progress);
+
+    expect(progress.mock.calls.map(([value]) => value)).toEqual([65_536, 70_001]);
+  });
+
+  it("surfaces upload authorization failures instead of reporting a speed", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    await expect(uploadPayload(1024)).rejects.toThrow("unauthorized");
   });
 });
