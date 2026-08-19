@@ -14,6 +14,8 @@ import { EmptyState } from "../components/settings/EmptyState";
 import { IconButton } from "../components/settings/IconButton";
 import { SettingsSection } from "../components/settings/SettingsSection";
 
+const isPasswordStrong = (pwd: string) => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_])[A-Za-z\d\W_]{12,64}$/.test(pwd);
+
 export function UsersPage() {
   const { t, i18n } = useTranslation();
   const [users, setUsers] = useState<AdminUserSummary[]>([]);
@@ -199,12 +201,15 @@ export function UsersPage() {
             </label>
             <Button
               type="submit"
-              disabled={saving || !newUsername.trim() || !newPassword || !currentPassword}
+              disabled={saving || !newUsername.trim() || !isPasswordStrong(newPassword) || !currentPassword}
               icon={<UserPlus size={17} />}
             >
               {t("setup.users.create")}
             </Button>
           </form>
+          {newPassword && !isPasswordStrong(newPassword) ? (
+            <p className="admin-users-help">{t("setup.configure.adminPasswordPolicy")}</p>
+          ) : null}
         </SettingsSection>
       </div>
 

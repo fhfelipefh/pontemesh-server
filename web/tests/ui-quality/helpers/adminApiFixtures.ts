@@ -159,10 +159,11 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
       }
     }
   };
-  let adminUsers: Array<{ id: string; username: string; createdAt: string; lastLoginAt: string | null }> = [
+  let adminUsers: Array<{ id: string; username: string; role: string; createdAt: string; lastLoginAt: string | null }> = [
     {
       id: "admin-qa",
       username: "admin",
+      role: "admin",
       createdAt: now,
       lastLoginAt: now
     }
@@ -189,7 +190,7 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
     }
 
     if (path === "/api/auth/me") {
-      return json(route, { authenticated: true, username: "admin" });
+      return json(route, { authenticated: true, username: "admin", role: "admin" });
     }
 
     if (path === "/api/auth/logout") {
@@ -240,12 +241,13 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
 
     if (path === "/api/admin/users") {
       if (request.method() === "POST") {
-        const body = request.postDataJSON() as { username: string };
+        const body = request.postDataJSON() as { username: string; role?: string };
         adminUsers = [
           ...adminUsers,
           {
             id: `admin-${adminUsers.length + 1}`,
             username: body.username,
+            role: body.role || "user",
             createdAt: now,
             lastLoginAt: null
           }
