@@ -87,7 +87,8 @@
       "metrics": "Métricas",
       "settings": "Configurações",
       "collapseSidebar": "Recolher sidebar",
-      "expandSidebar": "Expandir sidebar"
+      "expandSidebar": "Expandir sidebar",
+      "users": "Users"
     },
     "common": {
       "loading": "Carregando...",
@@ -241,7 +242,9 @@
       "emptyTitle": "Nenhum bucket.",
       "noResultsTitle": "Nenhum bucket encontrado.",
       "confirmDeleteTitle": "Excluir bucket",
-      "confirmDeleteDescription": "{{name}}"
+      "confirmDeleteDescription": "{{name}}",
+      "owner": "Created by",
+      "createConflict": "A bucket with this name already exists."
     },
     "objects": {
       "title": "Objetos",
@@ -389,24 +392,6 @@
         "exportFailed": "Falha ao exportar configuração.",
         "importFailed": "Falha ao importar configuração."
       },
-      "users": {
-        "title": "Contas administradoras",
-        "help": "Alterar suas credenciais ou criar outra conta exige sua senha atual. Alterar suas credenciais encerra todas as sessões ativas.",
-        "username": "Novo usuário",
-        "currentPassword": "Senha atual",
-        "confirmCurrentPassword": "Sua senha atual para confirmar",
-        "newPassword": "Nova senha",
-        "updateSection": "Minhas credenciais",
-        "createSection": "Novo administrador",
-        "accounts": "Contas existentes",
-        "passwordRequirements": "Use pelo menos 12 caracteres, com maiúscula, minúscula, número e símbolo.",
-        "newUsername": "Usuário do novo administrador",
-        "update": "Atualizar minhas credenciais",
-        "create": "Criar administrador",
-        "loadFailed": "Falha ao carregar contas administradoras.",
-        "updateFailed": "Falha ao atualizar credenciais.",
-        "createFailed": "Falha ao criar administrador."
-      },
       "applications": {
         "title": "Credenciais de aplicação",
         "name": "Nome",
@@ -523,6 +508,29 @@
         "duration": "Duração",
         "speed": "Velocidade"
       }
+    },
+    "users": {
+      "title": "User accounts",
+      "description": "Manage administrator and standard users.",
+      "listTitle": "User directory",
+      "createTitle": "Create new user",
+      "username": "Username",
+      "role": "Role",
+      "createdAt": "Created at",
+      "lastLogin": "Last login",
+      "actions": "Actions",
+      "emptyList": "No users found.",
+      "roleAdmin": "Admin",
+      "roleUser": "User",
+      "delete": "Delete",
+      "newUsername": "Username",
+      "newPassword": "Password",
+      "confirmCurrentPassword": "Your current password",
+      "create": "Create user",
+      "loadFailed": "Failed to load users",
+      "createFailed": "Failed to create user",
+      "deleteFailed": "Failed to delete user",
+      "confirmDeleteTitle": "Delete user"
     }
   }
 }

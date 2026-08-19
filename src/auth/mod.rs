@@ -61,6 +61,7 @@ pub struct LoginRequest {
 pub struct AuthUserResponse {
     authenticated: bool,
     username: Option<String>,
+    role: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -123,14 +124,14 @@ pub async fn login(State(state): State<AppState>, headers: HeaderMap, body: Byte
         Err(error) => return internal_error(error),
     };
 
-    if user.role != "admin" {
-        audit::failure("login_failed", Some(username), "non-admin login rejected");
+    if user.role != "admin" && user.role != "user" {
+        audit::failure("login_failed", Some(username), "invalid role rejected");
         record_auth_audit(
             &state,
             "login_failed",
             Some(username),
             "failure",
-            "non-admin login rejected",
+            "invalid role rejected",
         )
         .await;
         return unauthorized("invalid username or password");
@@ -157,14 +158,14 @@ pub async fn login(State(state): State<AppState>, headers: HeaderMap, body: Byte
                 "login_success",
                 Some(&user.username),
                 "success",
-                "admin session created",
+                "session created",
             );
             record_auth_audit(
                 &state,
                 "login_success",
                 Some(&user.username),
                 "success",
-                "admin session created",
+                "session created",
             )
             .await;
             (
@@ -173,6 +174,7 @@ pub async fn login(State(state): State<AppState>, headers: HeaderMap, body: Byte
                 Json(AuthUserResponse {
                     authenticated: true,
                     username: Some(user.username),
+                    role: Some(user.role),
                 }),
             )
                 .into_response()
@@ -213,14 +215,14 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
         "logout",
         session.as_ref().map(|session| session.username.as_str()),
         "success",
-        "admin session invalidated",
+        "session invalidated",
     );
     record_auth_audit(
         &state,
         "logout",
         session.as_ref().map(|session| session.username.as_str()),
         "success",
-        "admin session invalidated",
+        "session invalidated",
     )
     .await;
     (
@@ -236,6 +238,7 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
         Ok(Some(session)) => Json(AuthUserResponse {
             authenticated: true,
             username: Some(session.username),
+            role: Some(session.role),
         })
         .into_response(),
         Ok(None) => (
@@ -243,6 +246,29 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
             Json(AuthUserResponse {
                 authenticated: false,
                 username: None,
+                role: None,
+            }),
+        )
+            .into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn require_auth_session(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    match session_from_cookie(&state, read_auth_session(&headers).as_deref()).await {
+        Ok(Some(session)) => {
+            request.extensions_mut().insert(session);
+            next.run(request).await
+        }
+        Ok(None) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "authentication required".to_owned(),
             }),
         )
             .into_response(),
@@ -261,7 +287,14 @@ pub async fn require_admin_session(
             request.extensions_mut().insert(session);
             next.run(request).await
         }
-        Ok(_) => (
+        Ok(Some(_)) => (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "admin privileges required".to_owned(),
+            }),
+        )
+            .into_response(),
+        Ok(None) => (
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
                 error: "authentication required".to_owned(),

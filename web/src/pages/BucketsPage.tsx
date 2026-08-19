@@ -9,6 +9,7 @@ import {
   X
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { HttpError } from "../api/http";
 import {
   BucketPolicyDefaultsInput,
   BucketPolicy,
@@ -143,7 +144,11 @@ export function BucketsPage() {
       setActiveBucket(created);
       await refreshBuckets();
     } catch (createError) {
-      setBucketError(createError instanceof Error ? createError.message : t("setup.buckets.createFailed"));
+      if (createError instanceof HttpError && createError.status === 409) {
+        setBucketError(t("setup.buckets.createConflict"));
+      } else {
+        setBucketError(createError instanceof Error ? createError.message : t("setup.buckets.createFailed"));
+      }
     } finally {
       setSubmittingBucket(false);
     }
@@ -257,6 +262,7 @@ export function BucketsPage() {
                   />
                 </span>
                 <span role="columnheader">{t("setup.buckets.name")}</span>
+                <span role="columnheader">{t("setup.buckets.owner")}</span>
                 <span role="columnheader">{t("setup.buckets.objectCount")}</span>
                 <span role="columnheader">{t("setup.buckets.totalSize")}</span>
                 <span role="columnheader">{t("setup.buckets.createdAt")}</span>
@@ -280,6 +286,7 @@ export function BucketsPage() {
                     />
                   </span>
                   <span role="cell" title={bucket.name}>{bucket.name}</span>
+                  <span role="cell" title={bucket.ownerUsername} className="buckets-table__owner">{bucket.ownerUsername}</span>
                   <span role="cell">{bucket.objectCount}</span>
                   <span role="cell">{formatBytes(bucket.totalBytes)}</span>
                   <span role="cell">{formatDate(bucket.createdAt)}</span>

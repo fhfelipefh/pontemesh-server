@@ -1,4 +1,5 @@
 import {
+  Users,
   BarChart3,
   Boxes,
   Gauge,
@@ -21,19 +22,21 @@ type AdminLayoutProps = {
   children: ReactNode;
   instanceName?: string;
   username?: string | null;
+  role?: string | null;
   onLogout: () => void;
 };
 
-export function AdminLayout({ children, instanceName, username, onLogout }: AdminLayoutProps) {
+export function AdminLayout({ children, instanceName, username, role, onLogout }: AdminLayoutProps) {
   const { t } = useTranslation();
   const [resolvedInstanceName, setResolvedInstanceName] = useState(instanceName);
   const [version, setVersion] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("pontemesh.sidebarCollapsed") === "true");
-  const navItems = [
+  const navItems: Array<{ to: string, label: string, icon: React.ElementType, enabled: boolean, adminOnly?: boolean }> = [
     { to: "/dashboard", label: t("setup.nav.dashboard"), icon: Gauge, enabled: true },
     { to: "/buckets", label: t("setup.nav.buckets"), icon: Boxes, enabled: true },
     { to: "/objects", label: t("setup.nav.objects"), icon: HardDrive, enabled: true },
-    { to: "/replicas", label: t("setup.nav.replicas"), icon: Share2, enabled: true },
+    { to: "/replicas", label: t("setup.nav.replicas"), icon: Share2, enabled: true, adminOnly: true },
+    { to: "/users", label: t("setup.nav.users"), icon: Users, enabled: true, adminOnly: true },
     { to: "/metrics", label: t("setup.nav.metrics"), icon: BarChart3, enabled: true },
     { to: "/settings", label: t("setup.nav.settings"), icon: Settings, enabled: true }
   ];
@@ -78,6 +81,7 @@ export function AdminLayout({ children, instanceName, username, onLogout }: Admi
         </div>
         <nav className="admin-nav" aria-label={t("setup.nav.primary")}>
           {navItems.map((item) => {
+            if (item.adminOnly && role !== "admin") return null;
             const Icon = item.icon;
             if (!item.enabled) {
               return (

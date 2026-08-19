@@ -78,7 +78,7 @@ pub async fn list_buckets(
     State(state): State<AppState>,
     Extension(identity): Extension<S3Identity>,
 ) -> Response {
-    match state.catalog.list_buckets().await {
+    match state.catalog.list_buckets(None).await {
         Ok(buckets) => {
             let mut authorized = Vec::new();
             for bucket in buckets {
@@ -113,7 +113,7 @@ async fn create_bucket_inner_response(
     identity: S3Identity,
     bucket_name: String,
 ) -> Response {
-    match create_bucket_inner(&state, &bucket_name).await {
+    match create_bucket_inner(&state, &bucket_name, None).await {
         Ok(bucket) => {
             audit::event(
                 "s3_bucket_created",
@@ -1523,12 +1523,12 @@ async fn delete_objects(
     }
 }
 
-async fn create_bucket_inner(state: &AppState, bucket_name: &str) -> anyhow::Result<BucketSummary> {
+async fn create_bucket_inner(state: &AppState, bucket_name: &str, owner_id: Option<&str>) -> anyhow::Result<BucketSummary> {
     catalog::validate_bucket_name(bucket_name)?;
     let storage_path = config::configured_storage_dir(&state.paths)?;
     fs::create_dir_all(bucket_storage_dir(storage_path, bucket_name))
         .with_context(|| format!("failed to create storage directory for bucket {bucket_name}"))?;
-    state.catalog.create_bucket(bucket_name).await
+    state.catalog.create_bucket(bucket_name, owner_id).await
 }
 
 async fn put_object_inner(
@@ -3922,12 +3922,16 @@ mod tests {
         let xml = list_buckets_xml(&[
             BucketSummary {
                 name: "media-bucket".to_owned(),
+                owner_id: Some("test".to_owned()),
+                owner_username: Some("test".to_owned()),
                 object_count: 2,
                 total_bytes: 42,
                 created_at: "2026-06-29T12:00:00Z".to_owned(),
             },
             BucketSummary {
                 name: "team&docs".to_owned(),
+                owner_id: Some("test".to_owned()),
+                owner_username: Some("test".to_owned()),
                 object_count: 1,
                 total_bytes: 7,
                 created_at: "2026-06-29T12:01:00Z".to_owned(),

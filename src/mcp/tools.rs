@@ -208,7 +208,7 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
         "pontemesh_create_bucket" => {
             let bucket = required_str(&arguments, "bucket")?;
             catalog::validate_bucket_name(bucket)?;
-            json!(state.catalog.create_bucket(bucket).await?)
+            json!(state.catalog.create_bucket(bucket, None).await?)
         }
         "pontemesh_delete_bucket" => {
             let bucket = required_str(&arguments, "bucket")?;
@@ -270,7 +270,7 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
             json!(
                 state
                     .catalog
-                    .list_buckets_page(query, page, page_size)
+                    .list_buckets_page(query, page, page_size, None)
                     .await?
             )
         }
@@ -453,8 +453,8 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
         "pontemesh_list_credentials" => {
             json!({
                 "mcpTokens": state.catalog.list_mcp_access_tokens().await?,
-                "applicationCredentials": state.catalog.list_application_credentials().await?,
-                "s3AccessKeys": state.catalog.list_s3_access_keys(1, 100).await?,
+                "applicationCredentials": state.catalog.list_application_credentials(None).await?,
+                "s3AccessKeys": state.catalog.list_s3_access_keys(1, 100, None).await?,
                 "secretsIncluded": false
             })
         }
@@ -464,7 +464,7 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
                 .unwrap_or_else(default_application_scopes);
             let created = state
                 .catalog
-                .create_application_credential(name, scopes)
+                .create_application_credential(name, scopes, None)
                 .await?;
             state
                 .catalog

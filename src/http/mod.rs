@@ -4964,6 +4964,7 @@ mod tests {
                     "pontemesh:sources:read".to_owned(),
                     "pontemesh:access-package:create".to_owned(),
                 ],
+                None,
             )
             .await
             .expect("application credential");
@@ -5452,5 +5453,77 @@ mod tests {
         to_bytes(response.into_body(), 1024 * 1024)
             .await
             .expect("read response body")
+    }
+
+    #[tokio::test]
+    async fn admin_can_create_list_and_delete_users() {
+        let Some(ctx) = TestContext::new("users-admin").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let admin_cookie = login_cookie(app.clone()).await;
+
+        // 1. Create a user
+        let create_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/users")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "username": "testuser",
+                            "password": "ValidPassword123!",
+                            "role": "User"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_res.status(), StatusCode::CREATED);
+
+        // 2. List users
+        let list_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/users")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(list_res.status(), StatusCode::OK);
+        
+        let body_text = response_text(list_res).await;
+        let users: Vec<serde_json::Value> = serde_json::from_str(&body_text).unwrap();
+        
+        // At least admin and testuser
+        assert!(users.len() >= 2);
+        let test_user = users.iter().find(|u| u["username"] == "testuser").expect("user exists");
+        assert_eq!(test_user["role"], "User");
+        let test_user_id = test_user["id"].as_str().unwrap().to_owned();
+
+        // 3. Delete user
+        let delete_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri(format!("/api/users/{}", test_user_id))
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete_res.status(), StatusCode::NO_CONTENT);
     }
 }

@@ -13,6 +13,7 @@ import { ObjectsPage } from "./pages/ObjectsPage";
 import { ReplicasPage } from "./pages/ReplicasPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UnlockPage } from "./pages/UnlockPage";
+import { UsersPage } from "./pages/UsersPage";
 
 function SetupRoutes() {
   const location = useLocation();
@@ -72,7 +73,7 @@ function SetupRoutes() {
 
   const authenticated = user?.authenticated === true;
   const adminElement = (children: ReactElement) => authenticated ? (
-    <AdminLayout username={user.username} onLogout={handleLogout}>
+    <AdminLayout username={user?.username} role={user?.role} onLogout={handleLogout}>
       {children}
     </AdminLayout>
   ) : (
@@ -124,6 +125,7 @@ function SetupRoutes() {
       <Route path="/objects" element={adminElement(<ObjectsPage />)} />
       <Route path="/replicas" element={adminElement(<ReplicasPage />)} />
       <Route path="/metrics" element={adminElement(<MetricsPage />)} />
+      <Route path="/users" element={user?.role === "admin" ? adminElement(<UsersPage />) : <Navigate to="/dashboard" replace />} />
       <Route path="/settings" element={adminElement(<SettingsPage />)} />
       <Route path="*" element={<Navigate to={setupRequired ? "/setup" : "/"} replace />} />
     </Routes>
