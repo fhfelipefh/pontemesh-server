@@ -18,6 +18,7 @@ jobs:
     name: Validate release request
     if: github.event_name != 'workflow_dispatch' || github.actor == github.repository_owner
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.release.outputs.version }}
       prerelease: ${{ steps.release.outputs.prerelease }}
@@ -54,6 +55,7 @@ jobs:
     needs: validate
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -88,6 +90,7 @@ jobs:
     needs: [validate, web]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.target.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -173,6 +176,7 @@ jobs:
     needs: [validate, build]
     if: github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 
@@ -277,6 +281,7 @@ jobs:
     needs: validate
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
 
