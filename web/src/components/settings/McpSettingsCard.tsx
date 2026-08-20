@@ -477,7 +477,7 @@ function absoluteMcpUrl(endpoint: string) {
     typeof window === "undefined"
       ? "http://127.0.0.1:8080"
       : window.location.origin;
-  return `${origin}${endpoint.startsWith("/") ? endpoint : \`/\${endpoint}\`}`;
+  return `${origin}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 }
 
 function McpSummaryItem({

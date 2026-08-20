@@ -1,19 +1,8 @@
-import { ReactNode, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Activity,
-  Ban,
-  Check,
-  Download,
-  HardDrive,
-  KeyRound,
-  Network,
-  Plus,
   Save,
   Server,
-  ShieldCheck,
-  Upload,
-  Wrench,
 } from "lucide-react";
 
 import {
@@ -71,14 +60,11 @@ import {
 } from "../api/webhookApi";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
-import { CopyButton } from "../components/settings/CopyButton";
-import { CredentialTable } from "../components/settings/CredentialTable";
-import { EmptyState } from "../components/settings/EmptyState";
-import { IconButton } from "../components/settings/IconButton";
-import { InfoBox } from "../components/settings/InfoBox";
+
 import { OperationalWebhookCard } from "../components/settings/OperationalWebhookCard";
 import { S3CredentialsCard } from "../components/settings/S3CredentialsCard";
 import { ServerUpdateCard } from "../components/settings/ServerUpdateCard";
+import { SettingsSection } from "../components/settings/SettingsSection";
 import { SpeedTestCard } from "../components/settings/SpeedTestCard";
 import { StorageCapacityCard } from "../components/settings/StorageCapacityCard";
 import { ConfigurationBackupCard } from "../components/settings/ConfigurationBackupCard";
