@@ -1,6 +1,6 @@
 {
   "name": "pontemesh-server-web",
-  "version": "0.3.18",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "scripts": {
