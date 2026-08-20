@@ -287,10 +287,17 @@ pub async fn require_admin_session(
             let is_admin = session.role == "admin";
             let is_read_only = request.method() == axum::http::Method::GET
                 || request.method() == axum::http::Method::HEAD;
+            let path = request.uri().path();
             let is_self_credentials_update = request.method() == axum::http::Method::PUT
-                && request.uri().path() == "/api/admin/users/me/credentials";
+                && path == "/api/admin/users/me/credentials";
 
-            if is_admin || is_read_only || is_self_credentials_update {
+            let is_user_allowed_write = path.starts_with("/api/admin/buckets")
+                && !path.starts_with("/api/admin/buckets/bulk-policy")
+                || path.starts_with("/api/admin/application-credentials")
+                || path.starts_with("/api/admin/s3-access-keys")
+                || path.starts_with("/api/admin/s3/access-keys");
+
+            if is_admin || is_read_only || is_self_credentials_update || is_user_allowed_write {
                 request.extensions_mut().insert(session);
                 next.run(request).await
             } else {
