@@ -283,17 +283,25 @@ pub async fn require_admin_session(
     next: Next,
 ) -> Response {
     match session_from_cookie(&state, read_auth_session(&headers).as_deref()).await {
-        Ok(Some(session)) if session.role == "admin" => {
-            request.extensions_mut().insert(session);
-            next.run(request).await
+        Ok(Some(session)) => {
+            let is_admin = session.role == "admin";
+            let is_read_only = request.method() == axum::http::Method::GET || request.method() == axum::http::Method::HEAD;
+            let is_self_credentials_update = request.method() == axum::http::Method::PUT 
+                && request.uri().path() == "/api/admin/users/me/credentials";
+
+            if is_admin || is_read_only || is_self_credentials_update {
+                request.extensions_mut().insert(session);
+                next.run(request).await
+            } else {
+                (
+                    StatusCode::FORBIDDEN,
+                    Json(ErrorResponse {
+                        error: "admin privileges required".to_owned(),
+                    }),
+                )
+                    .into_response()
+            }
         }
-        Ok(Some(_)) => (
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "admin privileges required".to_owned(),
-            }),
-        )
-            .into_response(),
         Ok(None) => (
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
