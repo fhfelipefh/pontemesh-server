@@ -285,9 +285,10 @@ pub async fn require_admin_session(
     match session_from_cookie(&state, read_auth_session(&headers).as_deref()).await {
         Ok(Some(session)) => {
             let is_admin = session.role == "admin";
-            let is_read_only = request.method() == axum::http::Method::GET
-                || request.method() == axum::http::Method::HEAD;
             let path = request.uri().path();
+            let is_read_only = (request.method() == axum::http::Method::GET
+                || request.method() == axum::http::Method::HEAD)
+                && !path.starts_with("/api/admin/configuration");
             let is_self_credentials_update = request.method() == axum::http::Method::PUT
                 && path == "/api/admin/users/me/credentials";
 
@@ -295,7 +296,8 @@ pub async fn require_admin_session(
                 && !path.starts_with("/api/admin/buckets/bulk-policy")
                 || path.starts_with("/api/admin/application-credentials")
                 || path.starts_with("/api/admin/s3-access-keys")
-                || path.starts_with("/api/admin/s3/access-keys");
+                || path.starts_with("/api/admin/s3/access-keys")
+                || path.starts_with("/api/admin/speed-test/");
 
             if is_admin || is_read_only || is_self_credentials_update || is_user_allowed_write {
                 request.extensions_mut().insert(session);

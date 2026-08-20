@@ -126,7 +126,7 @@ function SetupRoutes() {
       <Route path="/replicas" element={adminElement(<ReplicasPage />)} />
       <Route path="/metrics" element={adminElement(<MetricsPage />)} />
       <Route path="/users" element={user?.role === "admin" ? adminElement(<UsersPage />) : <Navigate to="/dashboard" replace />} />
-      <Route path="/settings" element={adminElement(<SettingsPage />)} />
+      <Route path="/settings" element={adminElement(<SettingsPage role={user?.role} />)} />
       <Route path="*" element={<Navigate to={setupRequired ? "/setup" : "/"} replace />} />
     </Routes>
   );
