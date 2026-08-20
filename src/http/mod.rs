@@ -38,7 +38,7 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
         .route("/api/setup/status", get(setup::routes::status))
         .route("/api/setup/unlock", post(setup::routes::unlock))
         .route("/api/setup/complete", post(setup::routes::complete))
-                .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/login", post(auth::login))
         .route("/api/auth/oidc/login", get(auth::oidc::login_oidc))
         .route("/api/auth/oidc/callback", get(auth::oidc::callback_oidc))
         .route("/api/auth/logout", post(auth::logout))

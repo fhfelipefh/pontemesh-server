@@ -1,23 +1,22 @@
 use axum::{
     extract::{Query, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
 use openidconnect::{
-    core::{CoreClient, CoreProviderMetadata, CoreResponseType},
     AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenResponse,
+    core::{CoreClient, CoreProviderMetadata, CoreResponseType},
 };
 use serde::{Deserialize, Serialize};
 
-use base64::Engine;
 use crate::{
-    audit,
-    auth::{clear_auth_cookie, hash_session_token, session_cookie, user_agent, client_ip},
+    auth::{client_ip, hash_session_token, session_cookie, user_agent},
     config,
     http::AppState,
     security::random::secure_url_token,
 };
+use base64::Engine;
 
 const OIDC_STATE_COOKIE: &str = "pm_oidc_state";
 
@@ -51,36 +50,43 @@ pub async fn login_oidc(State(state): State<AppState>, headers: HeaderMap) -> Re
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid issuer URL").into_response(),
     };
 
-    let provider_metadata = match CoreProviderMetadata::discover_async(issuer_url, &reqwest::Client::new()).await {
-        Ok(metadata) => metadata,
-        Err(e) => {
-            tracing::error!("Failed to discover OIDC provider: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to discover OIDC provider").into_response();
-        }
-    };
+    let provider_metadata =
+        match CoreProviderMetadata::discover_async(issuer_url, &reqwest::Client::new()).await {
+            Ok(metadata) => metadata,
+            Err(e) => {
+                tracing::error!("Failed to discover OIDC provider: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to discover OIDC provider",
+                )
+                    .into_response();
+            }
+        };
 
     let client_id = ClientId::new(client_id_str);
     let client_secret = ClientSecret::new(client_secret_str);
 
     // Determine our public URL for the redirect
-    let base_url = config
-        .public_endpoints
-        .web_url
-        .clone()
-        .unwrap_or_else(|| {
-            let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("localhost");
-            format!("http://{}", host)
-        });
+    let base_url = config.public_endpoints.web_url.clone().unwrap_or_else(|| {
+        let host = headers
+            .get(header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("localhost");
+        format!("http://{}", host)
+    });
 
     let redirect_url_str = format!("{}/api/auth/oidc/callback", base_url.trim_end_matches('/'));
 
     let redirect_url = match RedirectUrl::new(redirect_url_str) {
         Ok(url) => url,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid redirect URL").into_response(),
+        Err(_) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid redirect URL").into_response();
+        }
     };
 
-    let client = CoreClient::from_provider_metadata(provider_metadata, client_id, Some(client_secret))
-        .set_redirect_uri(redirect_url);
+    let client =
+        CoreClient::from_provider_metadata(provider_metadata, client_id, Some(client_secret))
+            .set_redirect_uri(redirect_url);
 
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
@@ -104,12 +110,19 @@ pub async fn login_oidc(State(state): State<AppState>, headers: HeaderMap) -> Re
 
     let state_json = match serde_json::to_string(&state_data) {
         Ok(json) => json,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize state").into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to serialize state",
+            )
+                .into_response();
+        }
     };
 
     let state_base64 = base64::engine::general_purpose::STANDARD.encode(state_json);
 
-    let secure = crate::auth::request_is_https(&headers) || !crate::auth::request_is_localhost(&headers);
+    let secure =
+        crate::auth::request_is_https(&headers) || !crate::auth::request_is_localhost(&headers);
     let cookie = format!(
         "{OIDC_STATE_COOKIE}={state_base64}; Path=/; HttpOnly; SameSite=Lax; Max-Age=300{}",
         if secure { "; Secure" } else { "" }
@@ -151,7 +164,10 @@ pub async fn callback_oidc(
             c.split(';')
                 .find(|s| s.trim().starts_with(&format!("{}=", OIDC_STATE_COOKIE)))
         })
-        .map(|s| s.trim().trim_start_matches(&format!("{}=", OIDC_STATE_COOKIE)));
+        .map(|s| {
+            s.trim()
+                .trim_start_matches(&format!("{}=", OIDC_STATE_COOKIE))
+        });
 
     let state_cookie_base64 = match cookie_val {
         Some(v) => v,
@@ -185,42 +201,53 @@ pub async fn callback_oidc(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid issuer URL").into_response(),
     };
 
-    let provider_metadata: CoreProviderMetadata = match CoreProviderMetadata::discover_async(issuer_url, &reqwest::Client::new()).await {
-        Ok(metadata) => metadata,
-        Err(e) => {
-            tracing::error!("Failed to discover OIDC provider: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to discover OIDC provider").into_response();
-        }
-    };
+    let provider_metadata: CoreProviderMetadata =
+        match CoreProviderMetadata::discover_async(issuer_url, &reqwest::Client::new()).await {
+            Ok(metadata) => metadata,
+            Err(e) => {
+                tracing::error!("Failed to discover OIDC provider: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to discover OIDC provider",
+                )
+                    .into_response();
+            }
+        };
 
     let client_id = ClientId::new(client_id_str);
     let client_secret = ClientSecret::new(client_secret_str);
 
-    let base_url = config
-        .public_endpoints
-        .web_url
-        .unwrap_or_else(|| {
-            let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("localhost");
-            format!("http://{}", host)
-        });
+    let base_url = config.public_endpoints.web_url.unwrap_or_else(|| {
+        let host = headers
+            .get(header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("localhost");
+        format!("http://{}", host)
+    });
 
     let redirect_url_str = format!("{}/api/auth/oidc/callback", base_url.trim_end_matches('/'));
     let redirect_url = match RedirectUrl::new(redirect_url_str) {
         Ok(url) => url,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid redirect URL").into_response(),
+        Err(_) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid redirect URL").into_response();
+        }
     };
 
-    let client = CoreClient::from_provider_metadata(provider_metadata, client_id, Some(client_secret))
-        .set_redirect_uri(redirect_url);
+    let client =
+        CoreClient::from_provider_metadata(provider_metadata, client_id, Some(client_secret))
+            .set_redirect_uri(redirect_url);
 
     let pkce_verifier = PkceCodeVerifier::new(state_data.pkce_verifier);
-
 
     let exchange_req = match client.exchange_code(AuthorizationCode::new(query.code)) {
         Ok(req) => req,
         Err(e) => {
             tracing::error!("Failed to create token exchange request: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid OIDC configuration for code exchange").into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Invalid OIDC configuration for code exchange",
+            )
+                .into_response();
         }
     };
 
@@ -232,7 +259,11 @@ pub async fn callback_oidc(
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to exchange OIDC code: {}", e);
-            return (StatusCode::UNAUTHORIZED, "Failed to exchange authorization code").into_response();
+            return (
+                StatusCode::UNAUTHORIZED,
+                "Failed to exchange authorization code",
+            )
+                .into_response();
         }
     };
 
@@ -241,25 +272,34 @@ pub async fn callback_oidc(
         None => return (StatusCode::UNAUTHORIZED, "Missing ID token").into_response(),
     };
 
-    let claims: &openidconnect::core::CoreIdTokenClaims = match id_token.claims(&client.id_token_verifier(), &Nonce::new(state_data.nonce)) {
-        Ok(claims) => claims,
-        Err(e) => {
-            tracing::error!("Failed to verify ID token claims: {}", e);
-            return (StatusCode::UNAUTHORIZED, "Invalid ID token").into_response();
-        }
-    };
+    let claims: &openidconnect::core::CoreIdTokenClaims =
+        match id_token.claims(&client.id_token_verifier(), &Nonce::new(state_data.nonce)) {
+            Ok(claims) => claims,
+            Err(e) => {
+                tracing::error!("Failed to verify ID token claims: {}", e);
+                return (StatusCode::UNAUTHORIZED, "Invalid ID token").into_response();
+            }
+        };
 
-    let username = claims.preferred_username().map(|u| u.as_str()).unwrap_or_else(|| claims.subject().as_str()).to_string();
+    let username = claims
+        .preferred_username()
+        .map(|u| u.as_str())
+        .unwrap_or_else(|| claims.subject().as_str())
+        .to_string();
 
     let user_id = match state.catalog.find_active_user_by_username(&username).await {
         Ok(Some(user)) => user.id,
         Ok(None) => {
             let password_hash = format!("*OIDC*{}", secure_url_token("", 16));
-            match state.catalog.create_user(&username, &password_hash, "viewer").await {
+            match state
+                .catalog
+                .create_user(&username, &password_hash, "viewer")
+                .await
+            {
                 Ok(id) => id,
                 Err(e) => return crate::auth::internal_error(e),
             }
-        },
+        }
         Err(e) => return crate::auth::internal_error(e),
     };
 
@@ -285,20 +325,21 @@ pub async fn callback_oidc(
         Some(&username),
         "success",
         "session created via OIDC",
-    ).await;
+    )
+    .await;
 
     // Clear state cookie
-    let secure = crate::auth::request_is_https(&headers) || !crate::auth::request_is_localhost(&headers);
+    let secure =
+        crate::auth::request_is_https(&headers) || !crate::auth::request_is_localhost(&headers);
     let clear_state_cookie = format!(
         "{OIDC_STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{}",
         if secure { "; Secure" } else { "" }
     );
 
     let mut response = Redirect::to("/dashboard").into_response();
-    response.headers_mut().append(
-        header::SET_COOKIE,
-        session_cookie(&headers, &token),
-    );
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, session_cookie(&headers, &token));
     response.headers_mut().append(
         header::SET_COOKIE,
         HeaderValue::from_str(&clear_state_cookie).unwrap(),

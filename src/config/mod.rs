@@ -180,7 +180,6 @@ pub struct StorageSection {
     pub guards: StorageGuardsSection,
 }
 
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OidcSection {
     #[serde(default)]
@@ -195,7 +194,6 @@ pub struct OidcSection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookSection {
-
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
