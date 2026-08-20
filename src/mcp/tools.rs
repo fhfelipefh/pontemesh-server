@@ -490,7 +490,10 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
         "pontemesh_speed_test" => {
             let mode = required_str(&arguments, "mode")?;
             if mode == "download" {
-                let size_bytes = arguments.get("size_bytes").and_then(Value::as_u64).unwrap_or(1024 * 1024) as usize;
+                let size_bytes = arguments
+                    .get("size_bytes")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1024 * 1024) as usize;
                 let size_bytes = size_bytes.clamp(1, 10 * 1024 * 1024);
                 let payload = "A".repeat(size_bytes);
                 json!({ "mode": "download", "sizeBytes": payload.len(), "payload": payload })
