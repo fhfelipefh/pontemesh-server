@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2, UserPlus } from "lucide-react";
+import { Trash2, UserPlus, Eye, EyeOff } from "lucide-react";
 import {
   AdminUserSummary,
   listAdminUsers,
   createAdminUser,
   deleteAdminUser,
 } from "../api/usersApi";
+import { AuthUser, getCurrentUser } from "../api/authApi";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
 import { CredentialTable } from "../components/settings/CredentialTable";
@@ -26,6 +27,9 @@ export function UsersPage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newRole, setNewRole] = useState("user");
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
 
   const refreshUsers = useCallback(async () => {
     try {
@@ -42,6 +46,7 @@ export function UsersPage() {
 
   useEffect(() => {
     void refreshUsers();
+    getCurrentUser().then(setCurrentUser).catch(() => {});
   }, [refreshUsers]);
 
   async function handleCreateUser() {
@@ -144,6 +149,7 @@ export function UsersPage() {
                       label={t("setup.users.delete")}
                       icon={<Trash2 size={16} aria-hidden="true" />}
                       onClick={() => setDeletingUserId(u.id)}
+                      disabled={u.username === currentUser?.username}
                     />
                   </td>
                 </tr>
@@ -172,15 +178,24 @@ export function UsersPage() {
                 required
               />
             </label>
-            <label className="admin-users-field">
+            <label className="admin-users-field" style={{ position: "relative" }}>
               <span>{t("setup.users.newPassword")}</span>
               <input
-                type="password"
+                type={showNewPassword ? "text" : "password"}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder={t("setup.users.newPassword")}
+                style={newPassword && !isPasswordStrong(newPassword) ? { borderColor: "var(--color-danger, red)", paddingRight: "36px" } : { paddingRight: "36px" }}
                 required
               />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword(!showNewPassword)}
+                style={{ position: "absolute", right: "12px", bottom: "10px", background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0 }}
+                aria-label="Toggle password visibility"
+              >
+                {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </label>
             <label className="admin-users-field">
               <span>{t("setup.users.role")}</span>
@@ -189,15 +204,24 @@ export function UsersPage() {
                 <option value="admin">{t("setup.users.roleAdmin")}</option>
               </select>
             </label>
-            <label className="admin-users-field">
+            <label className="admin-users-field" style={{ position: "relative" }}>
               <span>{t("setup.users.confirmCurrentPassword")}</span>
               <input
-                type="password"
+                type={showCurrentPassword ? "text" : "password"}
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 placeholder={t("setup.users.confirmCurrentPassword")}
+                style={{ paddingRight: "36px" }}
                 required
               />
+              <button
+                type="button"
+                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                style={{ position: "absolute", right: "12px", bottom: "10px", background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0 }}
+                aria-label="Toggle password visibility"
+              >
+                {showCurrentPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </label>
             <Button
               type="submit"
