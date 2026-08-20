@@ -1,3 +1,4 @@
+pub mod oidc;
 use crate::{
     audit,
     http::AppState,
@@ -605,7 +606,7 @@ pub(crate) fn clear_auth_cookie() -> HeaderValue {
     HeaderValue::from_static("pm_admin_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
 }
 
-fn request_is_https(headers: &HeaderMap) -> bool {
+pub(crate) fn request_is_https(headers: &HeaderMap) -> bool {
     headers
         .get("x-forwarded-proto")
         .and_then(|value| value.to_str().ok())
@@ -613,7 +614,7 @@ fn request_is_https(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-fn request_is_localhost(headers: &HeaderMap) -> bool {
+pub(crate) fn request_is_localhost(headers: &HeaderMap) -> bool {
     let Some(host) = headers
         .get(header::HOST)
         .and_then(|value| value.to_str().ok())
@@ -657,7 +658,7 @@ fn unauthorized(message: &str) -> Response {
         .into_response()
 }
 
-fn internal_error(error: anyhow::Error) -> Response {
+pub(crate) fn internal_error(error: anyhow::Error) -> Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ErrorResponse {

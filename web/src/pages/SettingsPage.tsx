@@ -69,6 +69,8 @@ import {
   getOperationalWebhook,
   updateOperationalWebhook,
 } from "../api/webhookApi";
+import { OidcSettings, getOidcSettings } from "../api/oidcApi";
+import { OidcSettingsCard } from "../components/settings/OidcSettingsCard";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
 import { CopyButton } from "../components/settings/CopyButton";
@@ -157,6 +159,7 @@ export function SettingsPage() {
     useState(false);
   const [operationalWebhookSaved, setOperationalWebhookSaved] = useState(false);
   const [operationalWebhookError, setOperationalWebhookError] = useState("");
+  const [oidc, setOidc] = useState<OidcSettings | null>(null);
   const [serverUpdate, setServerUpdate] = useState<ServerUpdateStatus | null>(
     null
   );
@@ -223,6 +226,12 @@ export function SettingsPage() {
       )
       .finally(() => setLoadingOperationalWebhook(false));
   }, [t]);
+
+  useEffect(() => {
+    getOidcSettings()
+      .then(setOidc)
+      .catch(() => setOidc(null));
+  }, []);
 
   async function handleRequestServerUpdate() {
     setRequestingServerUpdate(true);
@@ -671,7 +680,7 @@ export function SettingsPage() {
           }
           onSave={() => void handleSaveDiskGuard()}
         />
-        <OperationalWebhookCard
+                <OperationalWebhookCard
           settings={operationalWebhook}
           loading={loadingOperationalWebhook}
           saving={savingOperationalWebhook}
@@ -694,6 +703,10 @@ export function SettingsPage() {
             void handleSaveOperationalWebhook(nextSettings);
           }}
           onSave={() => void handleSaveOperationalWebhook()}
+        />
+        <OidcSettingsCard
+          settings={oidc}
+          onSettingsUpdated={setOidc}
         />
         <ServerUpdateCard
           status={serverUpdate}

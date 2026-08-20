@@ -38,7 +38,9 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
         .route("/api/setup/status", get(setup::routes::status))
         .route("/api/setup/unlock", post(setup::routes::unlock))
         .route("/api/setup/complete", post(setup::routes::complete))
-        .route("/api/auth/login", post(auth::login))
+                .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/oidc/login", get(auth::oidc::login_oidc))
+        .route("/api/auth/oidc/callback", get(auth::oidc::callback_oidc))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/auth/me", get(auth::me))
         .route(
@@ -5439,6 +5441,7 @@ mod tests {
             }),
             gc: Default::default(),
             webhook: Default::default(),
+            oidc: Default::default(),
         };
         let raw_config = toml::to_string(&config).expect("serialize config");
         fs::write(paths.config_file(), raw_config).expect("write config");

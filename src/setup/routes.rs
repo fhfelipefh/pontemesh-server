@@ -54,6 +54,8 @@ pub struct SetupStatusResponse {
     public_web_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     public_s3_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    oidc_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +99,9 @@ pub async fn status(State(state): State<AppState>) -> Response {
     let public_s3_url = crate::config::configured_public_s3_url(&state.paths)
         .ok()
         .flatten();
+    let oidc_enabled = crate::config::load_instance_config(&state.paths)
+        .ok()
+        .map(|c| c.oidc.enabled);
     Json(SetupStatusResponse {
         setup_required,
         server_version: Some(env!("CARGO_PKG_VERSION")),
@@ -104,6 +109,7 @@ pub async fn status(State(state): State<AppState>) -> Response {
         internal_s3_port: Some(s3_bind_addr.port()),
         public_web_url,
         public_s3_url,
+        oidc_enabled,
     })
     .into_response()
 }
@@ -289,6 +295,7 @@ pub(crate) async fn complete_setup(
         replica,
         gc: Default::default(),
         webhook: Default::default(),
+        oidc: Default::default(),
     };
 
     crate::config::write_instance_config(&state.paths, &config)?;
@@ -536,6 +543,7 @@ mod tests {
             internal_s3_port: Some(9000),
             public_web_url: Some("https://origin.example.com".to_owned()),
             public_s3_url: Some("https://origin.example.com:9443".to_owned()),
+            oidc_enabled: None,
         };
 
         assert_eq!(

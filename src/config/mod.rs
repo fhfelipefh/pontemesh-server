@@ -132,6 +132,8 @@ pub struct InstanceConfig {
     pub gc: GcSection,
     #[serde(default)]
     pub webhook: WebhookSection,
+    #[serde(default)]
+    pub oidc: OidcSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,8 +180,22 @@ pub struct StorageSection {
     pub guards: StorageGuardsSection,
 }
 
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OidcSection {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub issuer_url: Option<String>,
+    #[serde(default)]
+    pub client_id: Option<String>,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookSection {
+
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]

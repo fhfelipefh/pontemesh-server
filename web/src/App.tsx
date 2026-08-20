@@ -23,6 +23,7 @@ function SetupRoutes() {
   const [internalS3Port, setInternalS3Port] = useState(9000);
   const [publicWebUrl, setPublicWebUrl] = useState<string | null>(null);
   const [publicS3Url, setPublicS3Url] = useState<string | null>(null);
+  const [oidcEnabled, setOidcEnabled] = useState<boolean>(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authLoaded, setAuthLoaded] = useState(false);
 
@@ -35,6 +36,7 @@ function SetupRoutes() {
         setInternalS3Port(status.internalS3Port ?? 9000);
         setPublicWebUrl(status.publicWebUrl ?? null);
         setPublicS3Url(status.publicS3Url ?? null);
+        setOidcEnabled(status.oidcEnabled ?? false);
       })
       .catch(() => {
         setSetupRequired(false);
@@ -116,7 +118,7 @@ function SetupRoutes() {
           ) : authenticated ? (
             <Navigate to="/dashboard" replace />
           ) : (
-            <LoginPage onAuthenticated={setUser} />
+            <LoginPage onAuthenticated={setUser} oidcEnabled={oidcEnabled} />
           )
         }
       />
