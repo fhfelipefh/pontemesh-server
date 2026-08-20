@@ -93,7 +93,8 @@ type DestructiveConfirmation =
   | { kind: "mcpToken"; id: string; name: string }
   | null;
 
-export function SettingsPage() {
+export function SettingsPage({ role }: { role?: string }) {
+  const isAdmin = role === "admin";
   const { t } = useTranslation();
   const [keys, setKeys] = useState<S3AccessKeySummary[]>([]);
   const [createdKey, setCreatedKey] = useState<CreatedS3AccessKey | null>(null);
@@ -662,6 +663,7 @@ export function SettingsPage() {
           saving={savingDiskGuard}
           saved={diskGuardSaved}
           error={diskGuardError}
+          isAdmin={isAdmin}
           onChange={nextSettings => {
             setDiskGuardSaved(false);
             setDiskGuard(nextSettings);
@@ -764,13 +766,15 @@ export function SettingsPage() {
             setDestructiveConfirmation({ kind: "s3Key", id, name })
           }
         />
-        <ConfigurationBackupCard
-          importing={configurationImporting}
-          result={configurationResult}
-          error={configurationError}
-          onExport={() => void handleExportConfiguration()}
-          onImport={file => void handleImportConfiguration(file)}
-        />
+        {isAdmin ? (
+          <ConfigurationBackupCard
+            importing={configurationImporting}
+            result={configurationResult}
+            error={configurationError}
+            onExport={() => void handleExportConfiguration()}
+            onImport={file => void handleImportConfiguration(file)}
+          />
+        ) : null}
       </div>
       {destructiveConfirmation ? (
         <ConfirmDialog
@@ -829,6 +833,7 @@ function StorageCapacityCard({
   saving,
   saved,
   error,
+  isAdmin,
   onChange,
   onToggle,
   onSave,
@@ -838,6 +843,7 @@ function StorageCapacityCard({
   saving: boolean;
   saved: boolean;
   error: string;
+  isAdmin: boolean;
   onChange: (settings: DiskGuardSettings) => void;
   onToggle: (enabled: boolean) => void;
   onSave: () => void;
@@ -873,7 +879,7 @@ function StorageCapacityCard({
               <ToggleRow
                 label={t("setup.settings.storage.enabled")}
                 checked={settings.enabled}
-                disabled={saving}
+                disabled={saving || !isAdmin}
                 onChange={onToggle}
               />
             </div>
@@ -883,7 +889,7 @@ function StorageCapacityCard({
                 <ToggleRow
                   label={t("setup.settings.storage.enabled")}
                   checked={settings.enabled}
-                  disabled={saving}
+                  disabled={saving || !isAdmin}
                   onChange={onToggle}
                 />
                 <div className="storage-capacity-form__usage">
@@ -900,7 +906,7 @@ function StorageCapacityCard({
                   id="storage-warning-percent"
                   label={t("setup.settings.storage.warningPercent")}
                   value={settings.warningPercent}
-                  disabled={saving || !settings.enabled}
+                  disabled={saving || !settings.enabled || !isAdmin}
                   onChange={warningPercent =>
                     onChange({ ...settings, warningPercent })
                   }
@@ -909,7 +915,7 @@ function StorageCapacityCard({
                   id="storage-degraded-percent"
                   label={t("setup.settings.storage.degradedPercent")}
                   value={settings.degradedPercent}
-                  disabled={saving || !settings.enabled}
+                  disabled={saving || !settings.enabled || !isAdmin}
                   onChange={degradedPercent =>
                     onChange({ ...settings, degradedPercent })
                   }
@@ -918,7 +924,7 @@ function StorageCapacityCard({
                   id="storage-block-percent"
                   label={t("setup.settings.storage.blockPercent")}
                   value={settings.blockPercent}
-                  disabled={saving || !settings.enabled}
+                  disabled={saving || !settings.enabled || !isAdmin}
                   onChange={blockPercent =>
                     onChange({ ...settings, blockPercent })
                   }
@@ -940,7 +946,7 @@ function StorageCapacityCard({
                   data-testid="save-storage-capacity"
                   type="submit"
                   loading={saving}
-                  disabled={saving || !thresholdsValid}
+                  disabled={saving || !thresholdsValid || !isAdmin}
                   icon={<Save size={17} aria-hidden="true" />}
                 >
                   {t("setup.common.save")}
