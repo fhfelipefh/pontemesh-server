@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { LogIn } from "lucide-react";
+import { LogIn, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { AuthUser, login } from "../api/authApi";
 import { Button } from "../components/Button";
@@ -9,9 +9,10 @@ import { TextInput } from "../components/TextInput";
 
 type LoginPageProps = {
   onAuthenticated: (user: AuthUser) => void;
+  oidcEnabled?: boolean;
 };
 
-export function LoginPage({ onAuthenticated }: LoginPageProps) {
+export function LoginPage({ onAuthenticated, oidcEnabled }: LoginPageProps) {
   const { t } = useTranslation();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
@@ -63,6 +64,16 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
         >
           {submitting ? t("setup.auth.signingIn") : t("setup.auth.signIn")}
         </Button>
+        {oidcEnabled && (
+          <Button
+            type="button"
+            variant="secondary"
+            icon={<ShieldCheck size={18} aria-hidden="true" />}
+            onClick={() => { window.location.href = "/api/auth/oidc/login"; }}
+          >
+            Sign in with SSO
+          </Button>
+        )}
       </form>
     </PageShell>
   );
