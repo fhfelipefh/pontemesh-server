@@ -1,5 +1,5 @@
 import "../styles/replicas-modern.css";
-import { FormEvent, ReactNode, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Ban, Plus, ServerCog } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
