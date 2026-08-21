@@ -600,11 +600,10 @@
   place-items: center;
   width: 58px;
   height: 58px;
-  border: 1px solid var(--pm-primary-soft);
-  border-radius: 18px;
+  border: 1px solid var(--pm-border-soft);
+  border-radius: 8px;
   color: var(--pm-primary-blue);
-  background: linear-gradient(135deg, var(--pm-primary-faint), var(--pm-surface-strong));
-  box-shadow: 0 12px 28px var(--pm-shadow-panel-soft-color, rgb(var(--pm-deep-navy-rgb) / 0.08));
+  background: var(--pm-surface-strong);
 }
 
 .replica-summary-grid {
@@ -621,11 +620,10 @@
   align-items: center;
   min-height: 88px;
   border: 1px solid var(--pm-border-soft);
-  border-radius: 16px;
+  border-radius: 8px;
   padding: 16px;
   color: var(--pm-primary-blue);
   background: var(--pm-surface-strong);
-  box-shadow: 0 12px 28px var(--pm-shadow-panel-soft-color, rgb(var(--pm-deep-navy-rgb) / 0.06));
 }
 
 .replica-summary[data-tone="success"] {
@@ -819,9 +817,8 @@
 .settings-card,
 .settings-help-card {
   border: 1px solid var(--pm-border-soft);
-  border-radius: 20px;
+  border-radius: 12px;
   background: var(--pm-surface-strong);
-  box-shadow: 0 16px 42px var(--pm-shadow-panel-soft-color, rgb(var(--pm-deep-navy-rgb) / 0.07));
 }
 
 .settings-card {
