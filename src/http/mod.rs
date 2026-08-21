@@ -5501,7 +5501,7 @@ mod tests {
         assert_eq!(list_res.status(), StatusCode::OK);
 
         let body_text = response_text(list_res).await;
-        let users: Vec<serde_json::Value> = serde_json::from_str(&body_text).unwrap();
+        let users: Vec<serde_json::Value> = serde_json::from_str(&body_text).expect("users JSON");
 
         assert!(users.len() >= 2);
         let test_user = users
