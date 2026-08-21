@@ -444,7 +444,6 @@
         "confirmRevokeTokenTitle": "Revogar token MCP",
         "confirmRevokeTokenDescription": "{{name}}",
         "noTokens": "Nenhum token MCP.",
-        "recentActivity": "Atividade recente",
         "noActivity": "Nenhuma chamada registrada ainda.",
         "loadFailed": "Falha ao carregar configuração MCP.",
         "saveFailed": "Falha ao salvar configuração MCP.",

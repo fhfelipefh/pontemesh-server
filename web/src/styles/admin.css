@@ -1166,6 +1166,48 @@
   }
 }
 
+.mcp-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--pm-border-soft);
+  margin-bottom: 18px;
+  padding-bottom: 8px;
+  overflow-x: auto;
+}
+
+.mcp-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  font-size: 0.85rem;
+  color: var(--pm-text-secondary);
+  font-weight: 500;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.mcp-tab:hover {
+  background: var(--pm-surface-hover, var(--pm-surface));
+  color: var(--pm-text);
+}
+
+.mcp-tab--active {
+  background: var(--pm-surface);
+  border-color: var(--pm-border-soft);
+  color: var(--pm-primary-blue);
+}
+
+.mcp-tab-content {
+  animation: mcpTabFadeIn 0.2s ease-out;
+}
+
+@keyframes mcpTabFadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .mcp-summary-grid,
 .mcp-settings-grid {
   display: grid;
