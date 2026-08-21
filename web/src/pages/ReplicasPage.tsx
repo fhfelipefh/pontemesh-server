@@ -118,9 +118,11 @@ export function ReplicasPage() {
                 <input value={allowedBuckets} onChange={(event) => setAllowedBuckets(event.target.value)} placeholder={t("setup.replicas.allowedBucketsPlaceholder")} aria-label={t("setup.replicas.allowedBuckets")} />
                 <span className="rm-form-hint">{t("setup.replicas.allowedBucketsHint")}</span>
               </div>
-              <Button type="submit" loading={submitting} disabled={!name.trim() || !allowedBuckets.trim()} icon={<Plus size={17} aria-hidden="true" />}>
-                {t("setup.replicas.create")}
-              </Button>
+              <div className="rm-form-submit">
+                <Button type="submit" loading={submitting} disabled={!name.trim() || !allowedBuckets.trim()} icon={<Plus size={17} aria-hidden="true" />}>
+                  {t("setup.replicas.create")}
+                </Button>
+              </div>
             </form>
             <ErrorMessage message={error} />
             {created ? <CreatedReplicaToken created={created} /> : null}
