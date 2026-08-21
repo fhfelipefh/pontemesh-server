@@ -2539,13 +2539,10 @@ impl Catalog {
         let Some(row) = row else {
             bail!("object not found: {object_key}");
         };
-        let deleted_at = if deleted { "now()" } else { "NULL" };
-        let update_sql = format!(
-            "UPDATE objects SET state = $1, deleted_at = {deleted_at}, updated_at = now() WHERE id = $2::uuid"
-        );
-        query(&update_sql)
+        query("UPDATE objects SET state = $1, deleted_at = CASE WHEN $3 THEN now() ELSE NULL END, updated_at = now() WHERE id = $2::uuid")
             .bind(state)
             .bind(row.get::<String, _>("id"))
+            .bind(deleted)
             .execute(&mut *tx)
             .await
             .context("failed to update object state")?;

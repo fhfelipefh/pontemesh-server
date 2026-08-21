@@ -193,6 +193,12 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             schema: json!({"type":"object","properties":{"name":{"type":"string"}}}),
             permission: ToolPermission::Admin,
         },
+        ToolDefinition {
+            name: "pontemesh_speed_test",
+            description: "Testa a velocidade da rede (download/upload) entre o servidor e o cliente MCP.",
+            schema: json!({"type":"object","properties":{"mode":{"type":"string","enum":["download","upload"]},"size_bytes":{"type":"integer"},"payload":{"type":"string"}},"required":["mode"]}),
+            permission: ToolPermission::Read,
+        },
     ]
 }
 
@@ -480,6 +486,23 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
         "pontemesh_create_s3_access_key" => {
             let name = arguments.get("name").and_then(Value::as_str);
             json!(agent::create_s3_key_for_mcp(state, name).await?)
+        }
+        "pontemesh_speed_test" => {
+            let mode = required_str(&arguments, "mode")?;
+            if mode == "download" {
+                let size_bytes = arguments
+                    .get("size_bytes")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1024 * 1024) as usize;
+                let size_bytes = size_bytes.clamp(1, 10 * 1024 * 1024);
+                let payload = "A".repeat(size_bytes);
+                json!({ "mode": "download", "sizeBytes": payload.len(), "payload": payload })
+            } else if mode == "upload" {
+                let payload = required_str(&arguments, "payload")?;
+                json!({ "mode": "upload", "receivedBytes": payload.len() })
+            } else {
+                bail!("mode must be 'download' or 'upload'");
+            }
         }
         _ => bail!("unknown MCP tool: {name}"),
     };

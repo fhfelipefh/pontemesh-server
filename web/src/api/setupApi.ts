@@ -25,6 +25,7 @@ export type SetupStatusResponse = {
   internalS3Port?: number;
   publicWebUrl?: string | null;
   publicS3Url?: string | null;
+  oidcEnabled?: boolean | null;
 };
 
 export type InitialS3AccessKey = {

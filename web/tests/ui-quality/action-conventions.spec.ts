@@ -36,6 +36,7 @@ test.describe("Admin action conventions", () => {
     await expect(page.getByText(/revoke application|revogar aplicação/i)).toBeVisible();
     await page.getByTestId("confirm-dialog-close").click();
 
+    await page.getByRole("button", { name: /tokens de acesso/i }).click();
     await page.getByRole("button", { name: /revoke token|revogar token/i }).first().click();
     await expect(page.getByTestId("confirm-dialog")).toBeVisible();
     await expect(page.getByText(/revoke mcp token|revogar token mcp/i)).toBeVisible();
