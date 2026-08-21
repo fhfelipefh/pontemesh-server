@@ -15,7 +15,7 @@ test.describe("Replicas page", () => {
     await expect(page.getByLabel(/replica name|nome da réplica/i)).toBeVisible();
     await expect(page.getByRole("textbox", { name: /allowed buckets|buckets permitidos/i })).toBeVisible();
 
-    const card = page.locator(".replica-card");
+    const card = page.locator(".rm-list-item");
     await expect(card).toHaveCount(1);
     await expect(card.getByText("Replica QA", { exact: true })).toBeVisible();
     await expect(card.getByText("assets", { exact: true })).toBeVisible();
