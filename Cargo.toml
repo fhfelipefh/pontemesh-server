@@ -57,7 +57,7 @@ tower-http = { version = "0.6", features = ["trace", "compression-full", "cors"]
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-zip = { version = "6", default-features = false, features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 chrono-tz = { version = "0.10", features = ["serde"] }
 openidconnect = { version = "4.0.1", features = ["reqwest", "rustls-tls"] }
 
