@@ -28,12 +28,13 @@ describe("theme", () => {
 
   describe("resolveInitialTheme", () => {
     it("returns stored theme if valid", () => {
-      const getItem = vi.fn((key) => key === THEME_STORAGE_KEY ? "dark" : null);
+      let storedValue: string | null = "dark";
+      const getItem = vi.fn((key) => key === THEME_STORAGE_KEY ? storedValue : null);
       vi.stubGlobal("window", { localStorage: { getItem } });
 
       expect(resolveInitialTheme()).toBe("dark");
 
-      getItem.mockImplementation((key) => key === THEME_STORAGE_KEY ? "light" : null);
+      storedValue = "light";
       expect(resolveInitialTheme()).toBe("light");
     });
 
