@@ -251,7 +251,7 @@
   background: var(--pm-glass-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 18px 46px rgb(var(--pm-deep-navy-rgb) / 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  box-shadow: 0 18px 46px rgb(var(--pm-deep-navy-rgb) / 0.08), inset 0 1px 0 var(--pm-glass-highlight);
 }
 
 .admin-hero {
@@ -704,7 +704,7 @@
   background: var(--pm-glass-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 1px 0 var(--pm-glass-highlight);
 }
 
 .replica-card[data-revoked="true"] {
@@ -829,7 +829,7 @@
   background: var(--pm-glass-bg, var(--pm-surface-strong));
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 16px 42px var(--pm-shadow-panel-soft-color, rgb(var(--pm-deep-navy-rgb) / 0.07)), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  box-shadow: 0 16px 42px var(--pm-shadow-panel-soft-color, rgb(var(--pm-deep-navy-rgb) / 0.07)), inset 0 1px 0 var(--pm-glass-highlight);
 }
 
 .settings-card {

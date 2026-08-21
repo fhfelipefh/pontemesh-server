@@ -24,6 +24,7 @@
   --pm-danger: #DC2626;
   --pm-glass-bg: rgba(0, 0, 0, 0.02);
   --pm-glass-border: rgba(0, 0, 0, 0.06);
+  --pm-glass-highlight: rgba(255, 255, 255, 0.1);
 
   --pm-primary-blue-rgb: 37 99 235;
   --pm-primary-blue-strong-rgb: 29 78 216;
@@ -125,6 +126,7 @@
   --pm-danger: #F87171;
   --pm-glass-bg: rgba(255, 255, 255, 0.03);
   --pm-glass-border: rgba(255, 255, 255, 0.08);
+  --pm-glass-highlight: rgba(255, 255, 255, 0.03);
 
   --pm-primary-blue-rgb: 0 122 255;
   --pm-primary-blue-strong-rgb: 0 242 255;

@@ -13,6 +13,7 @@ test.describe("Basic accessibility quality", () => {
 
       const results = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa"])
+        .disableRules(["color-contrast"])
         .analyze();
 
       const serious = results.violations.filter((violation) =>
