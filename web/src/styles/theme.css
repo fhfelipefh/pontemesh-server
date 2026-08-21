@@ -22,6 +22,8 @@
   --pm-border: #D7DEE8;
   --pm-muted: #64748B;
   --pm-danger: #DC2626;
+  --pm-glass-bg: rgba(0, 0, 0, 0.02);
+  --pm-glass-border: rgba(0, 0, 0, 0.06);
 
   --pm-primary-blue-rgb: 37 99 235;
   --pm-primary-blue-strong-rgb: 29 78 216;
@@ -99,10 +101,10 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --pm-primary-blue: #60A5FA;
-  --pm-primary-blue-strong: #93C5FD;
-  --pm-deep-navy: #E5EEF8;
-  --pm-accent-cyan-blue: #38BDF8;
+  --pm-primary-blue: #007AFF;
+  --pm-primary-blue-strong: #00F2FF;
+  --pm-deep-navy: #FFFFFF;
+  --pm-accent-cyan-blue: #00F2FF;
   --pm-accent-teal: #2DD4BF;
   --pm-danger-strong: #FCA5A5;
   --pm-danger-deep: #FDA4AF;
@@ -112,31 +114,33 @@
   --pm-neutral: #B6C2D1;
   --pm-subtle: #7C8A9C;
 
-  --pm-bg: #0B1120;
-  --pm-bg-soft: #0F172A;
-  --pm-bg-elevated: #172033;
-  --pm-bg-muted: #243044;
-  --pm-bg-hero-end: #101B31;
-  --pm-surface: #111827;
-  --pm-border: #314156;
+  --pm-bg: #0A0A0B;
+  --pm-bg-soft: #0A0A0B;
+  --pm-bg-elevated: #121214;
+  --pm-bg-muted: #1A1A1D;
+  --pm-bg-hero-end: #0A0A0B;
+  --pm-surface: #0A0A0B;
+  --pm-border: #2A2A2E;
   --pm-muted: #9AA8BA;
   --pm-danger: #F87171;
+  --pm-glass-bg: rgba(255, 255, 255, 0.03);
+  --pm-glass-border: rgba(255, 255, 255, 0.08);
 
-  --pm-primary-blue-rgb: 96 165 250;
-  --pm-primary-blue-strong-rgb: 147 197 253;
-  --pm-deep-navy-rgb: 226 237 248;
-  --pm-accent-cyan-blue-rgb: 56 189 248;
+  --pm-primary-blue-rgb: 0 122 255;
+  --pm-primary-blue-strong-rgb: 0 242 255;
+  --pm-deep-navy-rgb: 255 255 255;
+  --pm-accent-cyan-blue-rgb: 0 242 255;
   --pm-accent-teal-rgb: 45 212 191;
   --pm-danger-rgb: 248 113 113;
   --pm-danger-strong-rgb: 252 165 165;
   --pm-danger-deep-rgb: 253 164 175;
   --pm-success-rgb: 110 231 183;
   --pm-warning-rgb: 252 211 77;
-  --pm-border-rgb: 49 65 86;
+  --pm-border-rgb: 42 42 46;
   --pm-muted-rgb: 154 168 186;
   --pm-subtle-rgb: 124 138 156;
-  --pm-bg-elevated-rgb: 23 32 51;
-  --pm-surface-rgb: 17 24 39;
+  --pm-bg-elevated-rgb: 18 18 20;
+  --pm-surface-rgb: 10 10 11;
 
   --pm-warning-soft: rgb(var(--pm-warning-rgb) / 0.12);
   --pm-overlay: rgb(2 6 23 / 0.68);

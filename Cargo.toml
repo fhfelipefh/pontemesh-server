@@ -1,6 +1,6 @@
 [package]
 name = "pontemesh-server"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/fhfelipefh/pontemesh-server"
@@ -59,6 +59,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 zip = { version = "6", default-features = false, features = ["deflate"] }
 chrono-tz = { version = "0.10", features = ["serde"] }
+openidconnect = { version = "4.0.1", features = ["reqwest", "rustls-tls"] }
 
 [dev-dependencies]
 postgresql_embedded = { version = "0.21", default-features = false, features = ["theseus", "tls-rustls-ring", "tokio"] }
