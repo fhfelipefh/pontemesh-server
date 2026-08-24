@@ -1350,66 +1350,111 @@ pub async fn get_object(
         .get_object_record(&bucket_name, &object_key)
         .await
     {
-        Ok(Some(object)) if object.state == "AVAILABLE" => match fs::read(&object.storage_path) {
-            Ok(bytes) => {
-                let total_size = bytes.len() as u64;
-                let range = match headers.get(header::RANGE) {
-                    Some(value) => {
-                        let raw = match value.to_str() {
-                            Ok(raw) => raw,
-                            Err(_) => {
-                                return bad_request(anyhow::anyhow!(
-                                    "Range header is not valid UTF-8"
-                                ));
-                            }
-                        };
-                        match parse_range(raw, total_size) {
-                            Ok(range) => Some(range),
-                            Err(error) => return bad_request(error),
-                        }
-                    }
-                    None => None,
-                };
-                let (status, partial_bytes, content_length) = match range {
-                    Some(range) => {
-                        let start = match usize::try_from(range.start) {
-                            Ok(start) => start,
-                            Err(error) => return bad_request(anyhow::Error::new(error)),
-                        };
-                        let end = match usize::try_from(range.end) {
-                            Ok(end) => end,
-                            Err(error) => return bad_request(anyhow::Error::new(error)),
-                        };
-                        let slice = bytes[start..=end].to_vec();
-                        let len = slice.len();
-                        (StatusCode::PARTIAL_CONTENT, slice, len.to_string())
-                    }
-                    None => (StatusCode::OK, bytes, total_size.to_string()),
-                };
-                let mut builder = Response::builder()
-                    .status(status)
-                    .header(header::CONTENT_TYPE, object.content_type.as_str())
-                    .header(header::CONTENT_LENGTH, content_length)
-                    .header(header::ACCEPT_RANGES, "bytes")
+        Ok(Some(object)) if object.state == "AVAILABLE" => {
+            let precondition = crate::http::preconditions::evaluate_preconditions(
+                &headers,
+                "GET",
+                &object.sha256,
+                &object.created_at,
+            );
+            if precondition == crate::http::preconditions::PreconditionResult::NotModified {
+                let http_date = crate::http::preconditions::format_http_date(&object.created_at);
+                return Response::builder()
+                    .status(StatusCode::NOT_MODIFIED)
+                    .header("ETag", format!("\"{}\"", object.sha256))
+                    .header("Last-Modified", http_date.as_str())
                     .header(
-                        header::CONTENT_DISPOSITION,
-                        format!(
-                            "attachment; filename=\"{}\"",
-                            download_filename(&object.key)
-                        ),
-                    );
-                if let Some(range) = range {
-                    builder = builder.header(
-                        header::CONTENT_RANGE,
-                        format!("bytes {}-{}/{}", range.start, range.end, total_size),
-                    );
-                }
-                builder
-                    .body(Body::from(partial_bytes))
-                    .expect("valid object download response")
+                        header::CACHE_CONTROL,
+                        "public, max-age=60, stale-while-revalidate=300",
+                    )
+                    .body(Body::empty())
+                    .expect("valid not modified response");
             }
-            Err(error) => internal_error(anyhow::Error::new(error)),
-        },
+            if precondition == crate::http::preconditions::PreconditionResult::PreconditionFailed {
+                return Response::builder()
+                    .status(StatusCode::PRECONDITION_FAILED)
+                    .body(Body::empty())
+                    .expect("valid precondition failed response");
+            }
+
+            match fs::read(&object.storage_path) {
+                Ok(bytes) => {
+                    let total_size = bytes.len() as u64;
+                    let if_range_valid = crate::http::preconditions::evaluate_if_range(
+                        &headers,
+                        &object.sha256,
+                        &object.created_at,
+                    );
+                    let range = if if_range_valid {
+                        match headers.get(header::RANGE) {
+                            Some(value) => {
+                                let raw = match value.to_str() {
+                                    Ok(raw) => raw,
+                                    Err(_) => {
+                                        return bad_request(anyhow::anyhow!(
+                                            "Range header is not valid UTF-8"
+                                        ));
+                                    }
+                                };
+                                match parse_range(raw, total_size) {
+                                    Ok(range) => Some(range),
+                                    Err(error) => return bad_request(error),
+                                }
+                            }
+                            None => None,
+                        }
+                    } else {
+                        None
+                    };
+                    let (status, partial_bytes, content_length) = match range {
+                        Some(range) => {
+                            let start = match usize::try_from(range.start) {
+                                Ok(start) => start,
+                                Err(error) => return bad_request(anyhow::Error::new(error)),
+                            };
+                            let end = match usize::try_from(range.end) {
+                                Ok(end) => end,
+                                Err(error) => return bad_request(anyhow::Error::new(error)),
+                            };
+                            let slice = bytes[start..=end].to_vec();
+                            let len = slice.len();
+                            (StatusCode::PARTIAL_CONTENT, slice, len.to_string())
+                        }
+                        None => (StatusCode::OK, bytes, total_size.to_string()),
+                    };
+                    let http_date =
+                        crate::http::preconditions::format_http_date(&object.created_at);
+                    let mut builder = Response::builder()
+                        .status(status)
+                        .header(header::CONTENT_TYPE, object.content_type.as_str())
+                        .header(header::CONTENT_LENGTH, content_length)
+                        .header(header::ACCEPT_RANGES, "bytes")
+                        .header("ETag", format!("\"{}\"", object.sha256))
+                        .header("Last-Modified", http_date.as_str())
+                        .header(
+                            header::CACHE_CONTROL,
+                            "public, max-age=60, stale-while-revalidate=300",
+                        )
+                        .header(
+                            header::CONTENT_DISPOSITION,
+                            format!(
+                                "attachment; filename=\"{}\"",
+                                download_filename(&object.key)
+                            ),
+                        );
+                    if let Some(range) = range {
+                        builder = builder.header(
+                            header::CONTENT_RANGE,
+                            format!("bytes {}-{}/{}", range.start, range.end, total_size),
+                        );
+                    }
+                    builder
+                        .body(Body::from(partial_bytes))
+                        .expect("valid object download response")
+                }
+                Err(error) => internal_error(anyhow::Error::new(error)),
+            }
+        }
         Ok(Some(_)) => bad_request(anyhow::anyhow!("object is not available")),
         Ok(None) => not_found("object not found"),
         Err(error) => bad_request(error),

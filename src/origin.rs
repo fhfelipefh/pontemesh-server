@@ -628,27 +628,62 @@ pub async fn head_object(
         .await
     {
         Ok(Some(object)) if object.state == "AVAILABLE" && !object.is_delete_marker => {
+            let precondition = crate::http::preconditions::evaluate_preconditions(
+                &headers,
+                "HEAD",
+                &object.sha256,
+                &object.created_at,
+            );
+            match precondition {
+                crate::http::preconditions::PreconditionResult::NotModified => {
+                    return object_metadata_response(&object, StatusCode::NOT_MODIFIED, None, true);
+                }
+                crate::http::preconditions::PreconditionResult::PreconditionFailed => {
+                    return s3_error(
+                        StatusCode::PRECONDITION_FAILED,
+                        "PreconditionFailed",
+                        "At least one of the pre-conditions you specified did not hold",
+                        Some(&bucket_name),
+                        Some(&object_key),
+                    );
+                }
+                crate::http::preconditions::PreconditionResult::Proceed => {}
+            }
+
             let total_size = object.size_bytes as u64;
-            let range = match headers.get(header::RANGE) {
-                Some(value) => {
-                    let raw = match value.to_str() {
-                        Ok(raw) => raw,
-                        Err(_) => {
-                            return s3_bad_request(
-                                anyhow::anyhow!("Range header is not valid UTF-8"),
-                                Some(&bucket_name),
-                                Some(&object_key),
-                            );
-                        }
-                    };
-                    match parse_range(raw, total_size) {
-                        Ok(range) => Some(range),
-                        Err(error) => {
-                            return s3_bad_request(error, Some(&bucket_name), Some(&object_key));
+            let if_range_valid = crate::http::preconditions::evaluate_if_range(
+                &headers,
+                &object.sha256,
+                &object.created_at,
+            );
+            let range = if if_range_valid {
+                match headers.get(header::RANGE) {
+                    Some(value) => {
+                        let raw = match value.to_str() {
+                            Ok(raw) => raw,
+                            Err(_) => {
+                                return s3_bad_request(
+                                    anyhow::anyhow!("Range header is not valid UTF-8"),
+                                    Some(&bucket_name),
+                                    Some(&object_key),
+                                );
+                            }
+                        };
+                        match parse_range(raw, total_size) {
+                            Ok(range) => Some(range),
+                            Err(error) => {
+                                return s3_bad_request(
+                                    error,
+                                    Some(&bucket_name),
+                                    Some(&object_key),
+                                );
+                            }
                         }
                     }
+                    None => None,
                 }
-                None => None,
+            } else {
+                None
             };
             let status = if range.is_some() {
                 StatusCode::PARTIAL_CONTENT
@@ -2701,18 +2736,49 @@ async fn get_object_inner(
     if object.state != "AVAILABLE" || object.is_delete_marker {
         bail!("object is not available");
     }
+
+    let precondition = crate::http::preconditions::evaluate_preconditions(
+        headers,
+        "GET",
+        &object.sha256,
+        &object.created_at,
+    );
+    match precondition {
+        crate::http::preconditions::PreconditionResult::NotModified => {
+            return Ok(ServedObjectResponse {
+                response: object_metadata_response(&object, StatusCode::NOT_MODIFIED, None, false),
+                bytes_served: 0,
+                range: None,
+                status_code: StatusCode::NOT_MODIFIED.as_u16(),
+            });
+        }
+        crate::http::preconditions::PreconditionResult::PreconditionFailed => {
+            bail!(
+                "PreconditionFailed: At least one of the pre-conditions you specified did not hold"
+            );
+        }
+        crate::http::preconditions::PreconditionResult::Proceed => {}
+    }
+
+    let if_range_valid =
+        crate::http::preconditions::evaluate_if_range(headers, &object.sha256, &object.created_at);
+
     if object.encryption_algorithm.is_none() {
         let path = PathBuf::from(&object.storage_path);
         let metadata = tokio::fs::metadata(&path)
             .await
             .with_context(|| format!("failed to inspect object data {}", object.storage_path))?;
         let total_size = metadata.len();
-        let range = match headers.get(header::RANGE) {
-            Some(value) => Some(parse_range(
-                value.to_str().context("Range header is not valid UTF-8")?,
-                total_size,
-            )?),
-            None => None,
+        let range = if if_range_valid {
+            match headers.get(header::RANGE) {
+                Some(value) => Some(parse_range(
+                    value.to_str().context("Range header is not valid UTF-8")?,
+                    total_size,
+                )?),
+                None => None,
+            }
+        } else {
+            None
         };
         let (body, _, content_length) =
             crate::system::streaming::file_body(&path, range.map(|value| (value.start, value.end)))
@@ -2736,7 +2802,12 @@ async fn get_object_inner(
         .with_context(|| format!("failed to read object data {}", object.storage_path))?;
 
     let total_size = bytes.len() as u64;
-    let Some(range_header) = headers.get(header::RANGE) else {
+    let range_header = if if_range_valid {
+        headers.get(header::RANGE)
+    } else {
+        None
+    };
+    let Some(range_header) = range_header else {
         let bytes_served = i64::try_from(bytes.len()).context("object response is too large")?;
         return Ok(ServedObjectResponse {
             response: object_body_response(&object, StatusCode::OK, bytes, None),
@@ -2775,21 +2846,30 @@ fn object_metadata_response(
     range: Option<ResolvedRange>,
     head_only: bool,
 ) -> Response {
-    let content_length = match range {
-        Some(range) => range
-            .end
-            .saturating_sub(range.start)
-            .saturating_add(1)
-            .to_string(),
-        None => object.size_bytes.to_string(),
+    let content_length = if status == StatusCode::NOT_MODIFIED {
+        "0".to_string()
+    } else {
+        match range {
+            Some(range) => range
+                .end
+                .saturating_sub(range.start)
+                .saturating_add(1)
+                .to_string(),
+            None => object.size_bytes.to_string(),
+        }
     };
+    let http_date = crate::http::preconditions::format_http_date(&object.created_at);
     let mut builder = Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, object.content_type.as_str())
         .header(header::CONTENT_LENGTH, content_length)
         .header(header::ACCEPT_RANGES, "bytes")
         .header("ETag", format!("\"{}\"", object.sha256))
-        .header("Last-Modified", object.created_at.as_str())
+        .header("Last-Modified", http_date.as_str())
+        .header(
+            header::CACHE_CONTROL,
+            "public, max-age=60, stale-while-revalidate=300",
+        )
         .header("x-amz-version-id", object.version_id.as_str())
         .header("x-amz-request-id", request_id())
         .header("x-amz-bucket-region", "us-east-1")
@@ -2798,10 +2878,12 @@ fn object_metadata_response(
     builder = add_s3_metadata_headers(builder, object);
 
     if let Some(range) = range {
-        builder = builder.header(
-            header::CONTENT_RANGE,
-            format!("bytes {}-{}/{}", range.start, range.end, object.size_bytes),
-        );
+        if status != StatusCode::NOT_MODIFIED {
+            builder = builder.header(
+                header::CONTENT_RANGE,
+                format!("bytes {}-{}/{}", range.start, range.end, object.size_bytes),
+            );
+        }
     }
 
     if head_only {
@@ -2819,13 +2901,18 @@ fn object_body_response(
     bytes: Vec<u8>,
     range: Option<ResolvedRange>,
 ) -> Response {
+    let http_date = crate::http::preconditions::format_http_date(&object.created_at);
     let mut builder = Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, object.content_type.as_str())
         .header(header::CONTENT_LENGTH, bytes.len().to_string())
         .header(header::ACCEPT_RANGES, "bytes")
         .header("ETag", format!("\"{}\"", object.sha256))
-        .header("Last-Modified", object.created_at.as_str())
+        .header("Last-Modified", http_date.as_str())
+        .header(
+            header::CACHE_CONTROL,
+            "public, max-age=60, stale-while-revalidate=300",
+        )
         .header("x-amz-version-id", object.version_id.as_str())
         .header("x-amz-request-id", request_id())
         .header("x-amz-bucket-region", "us-east-1")
@@ -2851,13 +2938,18 @@ fn object_stream_response(
     content_length: u64,
     range: Option<ResolvedRange>,
 ) -> Response {
+    let http_date = crate::http::preconditions::format_http_date(&object.created_at);
     let mut builder = Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, object.content_type.as_str())
         .header(header::CONTENT_LENGTH, content_length.to_string())
         .header(header::ACCEPT_RANGES, "bytes")
         .header("ETag", format!("\"{}\"", object.sha256))
-        .header("Last-Modified", object.created_at.as_str())
+        .header("Last-Modified", http_date.as_str())
+        .header(
+            header::CACHE_CONTROL,
+            "public, max-age=60, stale-while-revalidate=300",
+        )
         .header("x-amz-version-id", object.version_id.as_str())
         .header("x-amz-request-id", request_id())
         .header("x-amz-bucket-region", "us-east-1")
@@ -2926,7 +3018,13 @@ fn bucket_storage_dir(storage_path: PathBuf, bucket_name: &str) -> PathBuf {
 
 fn s3_bad_request(error: anyhow::Error, bucket: Option<&str>, key: Option<&str>) -> Response {
     let message = error.to_string();
-    let (status, code, user_message) = if message == "requested range is not satisfiable" {
+    let (status, code, user_message) = if message.contains("PreconditionFailed") {
+        (
+            StatusCode::PRECONDITION_FAILED,
+            "PreconditionFailed",
+            "At least one of the pre-conditions you specified did not hold",
+        )
+    } else if message == "requested range is not satisfiable" {
         (
             StatusCode::RANGE_NOT_SATISFIABLE,
             "InvalidRange",
@@ -4183,7 +4281,11 @@ mod tests {
         );
         assert_eq!(
             header_text(&response, "Last-Modified"),
-            "2026-06-29T12:00:00Z"
+            "Mon, 29 Jun 2026 12:00:00 GMT"
+        );
+        assert_eq!(
+            header_text(&response, header::CACHE_CONTROL),
+            "public, max-age=60, stale-while-revalidate=300"
         );
         assert_eq!(header_text(&response, "x-amz-bucket-region"), "us-east-1");
         assert_eq!(

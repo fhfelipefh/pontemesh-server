@@ -1,3 +1,5 @@
+pub mod preconditions;
+
 use crate::{
     admin, auth, catalog::Catalog, config::PontemeshHome, health, mcp, mesh, origin, replica,
     s3_auth, setup, web_assets,
@@ -5765,5 +5767,200 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(delete_res.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn s3_and_admin_conditional_requests_and_caching() {
+        let Some(ctx) = TestContext::new("conditional-requests").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let s3_app = ctx.s3_app.clone();
+        let web_app = ctx.app.clone();
+
+        let _ = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/cache-bucket/")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+
+        let object_bytes = b"streaming video payload and cached media chunk";
+        let put_res = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::PUT)
+                        .uri("/cache-bucket/video.mp4")
+                        .header(header::CONTENT_TYPE, "video/mp4")
+                        .body(Body::from(object_bytes.as_slice())),
+                    object_bytes,
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(put_res.status(), StatusCode::OK);
+        let etag = header_value(&put_res, "ETag").to_owned();
+
+        let get_full = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/cache-bucket/video.mp4")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_full.status(), StatusCode::OK);
+        assert_eq!(
+            header_value(&get_full, header::CACHE_CONTROL),
+            "public, max-age=60, stale-while-revalidate=300"
+        );
+        let last_modified = header_value(&get_full, "Last-Modified").to_owned();
+        assert!(!last_modified.is_empty());
+
+        let get_not_mod = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/cache-bucket/video.mp4")
+                        .header(header::IF_NONE_MATCH, &etag)
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_not_mod.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(header_value(&get_not_mod, "ETag"), etag);
+        assert!(response_bytes(get_not_mod).await.is_empty());
+
+        let head_not_mod = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::HEAD)
+                        .uri("/cache-bucket/video.mp4")
+                        .header(header::IF_NONE_MATCH, &etag)
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(head_not_mod.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(header_value(&head_not_mod, "ETag"), etag);
+
+        let get_if_mod_since = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/cache-bucket/video.mp4")
+                        .header(header::IF_MODIFIED_SINCE, &last_modified)
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_if_mod_since.status(), StatusCode::NOT_MODIFIED);
+
+        let get_precondition_failed = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/cache-bucket/video.mp4")
+                        .header(header::IF_MATCH, "\"wrong-sha256\"")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            get_precondition_failed.status(),
+            StatusCode::PRECONDITION_FAILED
+        );
+
+        let get_if_range_valid = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/cache-bucket/video.mp4")
+                        .header(header::RANGE, "bytes=0-8")
+                        .header(header::IF_RANGE, &etag)
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_if_range_valid.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            response_bytes(get_if_range_valid).await,
+            b"streaming".as_slice()
+        );
+
+        let get_if_range_mismatch = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/cache-bucket/video.mp4")
+                        .header(header::RANGE, "bytes=0-8")
+                        .header(header::IF_RANGE, "\"different-etag\"")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(get_if_range_mismatch.status(), StatusCode::OK);
+        assert_eq!(
+            response_bytes(get_if_range_mismatch).await,
+            object_bytes.as_slice()
+        );
+
+        let admin_cookie = login_cookie(web_app.clone()).await;
+        let admin_not_mod = web_app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/buckets/cache-bucket/objects/video.mp4")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::IF_NONE_MATCH, &etag)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(admin_not_mod.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(header_value(&admin_not_mod, "ETag"), etag);
     }
 }
