@@ -1101,14 +1101,18 @@ fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
         bail!("cannot apply Range to empty object");
     }
     let range = raw
+        .trim()
         .strip_prefix("bytes=")
-        .ok_or_else(|| anyhow::anyhow!("only bytes ranges are supported"))?;
+        .ok_or_else(|| anyhow::anyhow!("only bytes ranges are supported"))?
+        .trim();
     if range.contains(',') {
         bail!("multiple ranges are not supported");
     }
     let (start, end) = range
         .split_once('-')
         .ok_or_else(|| anyhow::anyhow!("invalid Range header"))?;
+    let start = start.trim();
+    let end = end.trim();
     let (start, end) = if start.is_empty() {
         let suffix_len: u64 = end
             .parse()

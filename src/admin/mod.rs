@@ -15,12 +15,12 @@ use crate::{
     },
     system::{application_logs, disk_guard, environment, resources, storage, update, webhook},
 };
-use anyhow::Context;
+use anyhow::{Context, bail};
 use axum::{
     Extension, Json,
     body::Body,
     extract::{Multipart, Path, Query, State, multipart::Field},
-    http::{StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -1339,6 +1339,7 @@ pub async fn upload_object(
 pub async fn get_object(
     State(state): State<AppState>,
     Extension(session): Extension<AdminSession>,
+    headers: HeaderMap,
     Path((bucket_name, object_key)): Path<(String, String)>,
 ) -> Response {
     if let Err(error) = require_bucket_access(&state, &session, &bucket_name).await {
@@ -1350,19 +1351,63 @@ pub async fn get_object(
         .await
     {
         Ok(Some(object)) if object.state == "AVAILABLE" => match fs::read(&object.storage_path) {
-            Ok(bytes) => Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, object.content_type.as_str())
-                .header(header::CONTENT_LENGTH, bytes.len().to_string())
-                .header(
-                    header::CONTENT_DISPOSITION,
-                    format!(
-                        "attachment; filename=\"{}\"",
-                        download_filename(&object.key)
-                    ),
-                )
-                .body(Body::from(bytes))
-                .expect("valid object download response"),
+            Ok(bytes) => {
+                let total_size = bytes.len() as u64;
+                let range = match headers.get(header::RANGE) {
+                    Some(value) => {
+                        let raw = match value.to_str() {
+                            Ok(raw) => raw,
+                            Err(_) => {
+                                return bad_request(anyhow::anyhow!(
+                                    "Range header is not valid UTF-8"
+                                ));
+                            }
+                        };
+                        match parse_range(raw, total_size) {
+                            Ok(range) => Some(range),
+                            Err(error) => return bad_request(error),
+                        }
+                    }
+                    None => None,
+                };
+                let (status, partial_bytes, content_length) = match range {
+                    Some(range) => {
+                        let start = match usize::try_from(range.start) {
+                            Ok(start) => start,
+                            Err(error) => return bad_request(anyhow::Error::new(error)),
+                        };
+                        let end = match usize::try_from(range.end) {
+                            Ok(end) => end,
+                            Err(error) => return bad_request(anyhow::Error::new(error)),
+                        };
+                        let slice = bytes[start..=end].to_vec();
+                        let len = slice.len();
+                        (StatusCode::PARTIAL_CONTENT, slice, len.to_string())
+                    }
+                    None => (StatusCode::OK, bytes, total_size.to_string()),
+                };
+                let mut builder = Response::builder()
+                    .status(status)
+                    .header(header::CONTENT_TYPE, object.content_type.as_str())
+                    .header(header::CONTENT_LENGTH, content_length)
+                    .header(header::ACCEPT_RANGES, "bytes")
+                    .header(
+                        header::CONTENT_DISPOSITION,
+                        format!(
+                            "attachment; filename=\"{}\"",
+                            download_filename(&object.key)
+                        ),
+                    );
+                if let Some(range) = range {
+                    builder = builder.header(
+                        header::CONTENT_RANGE,
+                        format!("bytes {}-{}/{}", range.start, range.end, total_size),
+                    );
+                }
+                builder
+                    .body(Body::from(partial_bytes))
+                    .expect("valid object download response")
+            }
             Err(error) => internal_error(anyhow::Error::new(error)),
         },
         Ok(Some(_)) => bad_request(anyhow::anyhow!("object is not available")),
@@ -2270,14 +2315,65 @@ fn resolve_application_scopes(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ResolvedRange {
+    start: u64,
+    end: u64,
+}
+
+fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
+    if total_size == 0 {
+        bail!("cannot apply Range to empty object");
+    }
+    let range = raw
+        .trim()
+        .strip_prefix("bytes=")
+        .ok_or_else(|| anyhow::anyhow!("only bytes ranges are supported"))?
+        .trim();
+    if range.contains(',') {
+        bail!("multiple ranges are not supported");
+    }
+    let (start, end) = range
+        .split_once('-')
+        .ok_or_else(|| anyhow::anyhow!("invalid Range header"))?;
+    let start = start.trim();
+    let end = end.trim();
+    let (start, end) = if start.is_empty() {
+        let suffix_len: u64 = end.parse().context("invalid suffix byte range")?;
+        if suffix_len == 0 {
+            bail!("suffix byte range must be greater than zero");
+        }
+        let start = total_size.saturating_sub(suffix_len);
+        (start, total_size - 1)
+    } else {
+        let start: u64 = start.parse().context("invalid range start")?;
+        let end = if end.is_empty() {
+            total_size - 1
+        } else {
+            end.parse().context("invalid range end")?
+        };
+        (start, end)
+    };
+    if start >= total_size || end >= total_size || start > end {
+        bail!("requested range is not satisfiable");
+    }
+    Ok(ResolvedRange { start, end })
+}
+
 fn bad_request(error: anyhow::Error) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(ErrorResponse {
-            error: error.to_string(),
-        }),
-    )
-        .into_response()
+    let message = error.to_string();
+    let status = if message == "requested range is not satisfiable" {
+        StatusCode::RANGE_NOT_SATISFIABLE
+    } else {
+        StatusCode::BAD_REQUEST
+    };
+    let mut response = (status, Json(ErrorResponse { error: message })).into_response();
+    if status == StatusCode::RANGE_NOT_SATISFIABLE {
+        response
+            .headers_mut()
+            .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    }
+    response
 }
 
 fn not_found(message: &str) -> Response {
