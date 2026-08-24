@@ -1799,6 +1799,182 @@ mod tests {
         );
         assert_eq!(response_text(range_get).await, "hello");
 
+        let single_byte_range_get = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/compat-bucket/prefix/hello.txt")
+                        .header(header::RANGE, "bytes=0-0")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(single_byte_range_get.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            single_byte_range_get
+                .headers()
+                .get(header::CONTENT_LENGTH)
+                .expect("Content-Length")
+                .to_str()
+                .expect("content-length text"),
+            "1"
+        );
+        assert_eq!(
+            single_byte_range_get
+                .headers()
+                .get(header::CONTENT_RANGE)
+                .expect("Content-Range")
+                .to_str()
+                .expect("content-range text"),
+            format!("bytes 0-0/{}", object_body.len())
+        );
+        assert_eq!(response_text(single_byte_range_get).await, "h");
+
+        let open_range_get = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/compat-bucket/prefix/hello.txt")
+                        .header(header::RANGE, "bytes=6-")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(open_range_get.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response_text(open_range_get).await, "world");
+
+        let suffix_range_get = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/compat-bucket/prefix/hello.txt")
+                        .header(header::RANGE, "bytes=-5")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(suffix_range_get.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response_text(suffix_range_get).await, "world");
+
+        let head_object_range = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::HEAD)
+                        .uri("/compat-bucket/prefix/hello.txt")
+                        .header(header::RANGE, "bytes=0-4")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid head range request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(head_object_range.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            head_object_range
+                .headers()
+                .get(header::CONTENT_LENGTH)
+                .expect("HeadObject range content length")
+                .to_str()
+                .expect("content length text"),
+            "5"
+        );
+        assert_eq!(
+            head_object_range
+                .headers()
+                .get(header::CONTENT_RANGE)
+                .expect("HeadObject Content-Range")
+                .to_str()
+                .expect("content-range text"),
+            format!("bytes 0-4/{}", object_body.len())
+        );
+        assert_eq!(
+            head_object_range
+                .headers()
+                .get(header::ACCEPT_RANGES)
+                .expect("HeadObject Accept-Ranges")
+                .to_str()
+                .expect("accept-ranges text"),
+            "bytes"
+        );
+        assert!(response_bytes(head_object_range).await.is_empty());
+
+        let head_object_invalid_range = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .method(Method::HEAD)
+                        .uri("/compat-bucket/prefix/hello.txt")
+                        .header(header::RANGE, "bytes=100-200")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid head invalid range request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            head_object_invalid_range.status(),
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
+        assert_eq!(
+            head_object_invalid_range
+                .headers()
+                .get(header::ACCEPT_RANGES)
+                .expect("HeadObject Accept-Ranges")
+                .to_str()
+                .expect("accept-ranges text"),
+            "bytes"
+        );
+
+        let invalid_range_get = s3_app
+            .clone()
+            .oneshot(
+                signed_s3_request(
+                    Request::builder()
+                        .uri("/compat-bucket/prefix/hello.txt")
+                        .header(header::RANGE, "bytes=500-1000")
+                        .body(Body::empty()),
+                    b"",
+                )
+                .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            invalid_range_get.status(),
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
+        assert_eq!(
+            invalid_range_get
+                .headers()
+                .get(header::ACCEPT_RANGES)
+                .expect("Accept-Ranges")
+                .to_str()
+                .expect("accept-ranges text"),
+            "bytes"
+        );
+        assert!(
+            response_text(invalid_range_get)
+                .await
+                .contains("<Code>InvalidRange</Code>")
+        );
+
         let missing_object = s3_app
             .clone()
             .oneshot(
@@ -3465,6 +3641,68 @@ mod tests {
         assert_eq!(
             response_bytes(replacement_download).await.as_ref(),
             replacement_body
+        );
+
+        let admin_range_download = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/admin-objects/objects/folder/hello%20world.txt")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::RANGE, "bytes=0-4")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(admin_range_download.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(
+            admin_range_download
+                .headers()
+                .get(header::CONTENT_RANGE)
+                .expect("Content-Range")
+                .to_str()
+                .expect("content-range text"),
+            format!("bytes 0-4/{}", replacement_body.len())
+        );
+        assert_eq!(
+            admin_range_download
+                .headers()
+                .get(header::ACCEPT_RANGES)
+                .expect("Accept-Ranges")
+                .to_str()
+                .expect("accept-ranges text"),
+            "bytes"
+        );
+        assert_eq!(
+            response_bytes(admin_range_download).await.as_ref(),
+            &replacement_body[0..=4]
+        );
+
+        let admin_invalid_range_download = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/buckets/admin-objects/objects/folder/hello%20world.txt")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::RANGE, "bytes=500-1000")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            admin_invalid_range_download.status(),
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
+        assert_eq!(
+            admin_invalid_range_download
+                .headers()
+                .get(header::ACCEPT_RANGES)
+                .expect("Accept-Ranges")
+                .to_str()
+                .expect("accept-ranges text"),
+            "bytes"
         );
 
         let bucket_summary = app

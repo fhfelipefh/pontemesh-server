@@ -608,6 +608,7 @@ pub async fn post_object(
 pub async fn head_object(
     State(state): State<AppState>,
     Extension(identity): Extension<S3Identity>,
+    headers: HeaderMap,
     Path((bucket_name, object_key)): Path<(String, String)>,
     Query(query): Query<ObjectMultipartQuery>,
 ) -> Response {
@@ -627,7 +628,34 @@ pub async fn head_object(
         .await
     {
         Ok(Some(object)) if object.state == "AVAILABLE" && !object.is_delete_marker => {
-            object_metadata_response(&object, true)
+            let total_size = object.size_bytes as u64;
+            let range = match headers.get(header::RANGE) {
+                Some(value) => {
+                    let raw = match value.to_str() {
+                        Ok(raw) => raw,
+                        Err(_) => {
+                            return s3_bad_request(
+                                anyhow::anyhow!("Range header is not valid UTF-8"),
+                                Some(&bucket_name),
+                                Some(&object_key),
+                            );
+                        }
+                    };
+                    match parse_range(raw, total_size) {
+                        Ok(range) => Some(range),
+                        Err(error) => {
+                            return s3_bad_request(error, Some(&bucket_name), Some(&object_key));
+                        }
+                    }
+                }
+                None => None,
+            };
+            let status = if range.is_some() {
+                StatusCode::PARTIAL_CONTENT
+            } else {
+                StatusCode::OK
+            };
+            object_metadata_response(&object, status, range, true)
         }
         Ok(Some(_)) => s3_error(
             StatusCode::FORBIDDEN,
@@ -2741,11 +2769,24 @@ struct ServedObjectResponse {
     status_code: u16,
 }
 
-fn object_metadata_response(object: &ObjectRecord, head_only: bool) -> Response {
+fn object_metadata_response(
+    object: &ObjectRecord,
+    status: StatusCode,
+    range: Option<ResolvedRange>,
+    head_only: bool,
+) -> Response {
+    let content_length = match range {
+        Some(range) => range
+            .end
+            .saturating_sub(range.start)
+            .saturating_add(1)
+            .to_string(),
+        None => object.size_bytes.to_string(),
+    };
     let mut builder = Response::builder()
-        .status(StatusCode::OK)
+        .status(status)
         .header(header::CONTENT_TYPE, object.content_type.as_str())
-        .header(header::CONTENT_LENGTH, object.size_bytes.to_string())
+        .header(header::CONTENT_LENGTH, content_length)
         .header(header::ACCEPT_RANGES, "bytes")
         .header("ETag", format!("\"{}\"", object.sha256))
         .header("Last-Modified", object.created_at.as_str())
@@ -2755,6 +2796,13 @@ fn object_metadata_response(object: &ObjectRecord, head_only: bool) -> Response 
         .header("x-pontemesh-object-state", object.state.as_str())
         .header("x-pontemesh-created-at", object.created_at.as_str());
     builder = add_s3_metadata_headers(builder, object);
+
+    if let Some(range) = range {
+        builder = builder.header(
+            header::CONTENT_RANGE,
+            format!("bytes {}-{}/{}", range.start, range.end, object.size_bytes),
+        );
+    }
 
     if head_only {
         builder = builder.header("x-pontemesh-object-key", object.key.as_str());
@@ -2835,14 +2883,18 @@ fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
         bail!("cannot apply Range to empty object");
     }
     let range = raw
+        .trim()
         .strip_prefix("bytes=")
-        .ok_or_else(|| anyhow::anyhow!("only bytes ranges are supported"))?;
+        .ok_or_else(|| anyhow::anyhow!("only bytes ranges are supported"))?
+        .trim();
     if range.contains(',') {
         bail!("multiple ranges are not supported");
     }
     let (start, end) = range
         .split_once('-')
         .ok_or_else(|| anyhow::anyhow!("invalid Range header"))?;
+    let start = start.trim();
+    let end = end.trim();
 
     let (start, end) = if start.is_empty() {
         let suffix_len: u64 = end.parse().context("invalid suffix byte range")?;
@@ -4119,7 +4171,7 @@ mod tests {
     #[tokio::test]
     async fn object_metadata_response_sets_s3_headers_without_body() {
         let object = object_record();
-        let response = object_metadata_response(&object, true);
+        let response = object_metadata_response(&object, StatusCode::OK, None, true);
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(header_text(&response, header::CONTENT_TYPE), "text/plain");
@@ -4142,7 +4194,20 @@ mod tests {
             header_text(&response, "x-pontemesh-object-key"),
             "folder/hello.txt"
         );
+        assert!(response.headers().get(header::CONTENT_RANGE).is_none());
         assert!(response_text(response).await.is_empty());
+
+        let partial = object_metadata_response(
+            &object,
+            StatusCode::PARTIAL_CONTENT,
+            Some(ResolvedRange { start: 0, end: 4 }),
+            true,
+        );
+        assert_eq!(partial.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(header_text(&partial, header::CONTENT_LENGTH), "5");
+        assert_eq!(header_text(&partial, header::CONTENT_RANGE), "bytes 0-4/11");
+        assert_eq!(header_text(&partial, header::ACCEPT_RANGES), "bytes");
+        assert!(response_text(partial).await.is_empty());
     }
 
     #[tokio::test]
@@ -4172,11 +4237,23 @@ mod tests {
         let first = parse_range("bytes=0-4", 11).expect("first range");
         assert_eq!((first.start, first.end), (0, 4));
 
+        let single = parse_range("bytes=0-0", 11).expect("single byte start");
+        assert_eq!((single.start, single.end), (0, 0));
+
+        let single_end = parse_range("bytes=10-10", 11).expect("single byte end");
+        assert_eq!((single_end.start, single_end.end), (10, 10));
+
         let open = parse_range("bytes=6-", 11).expect("open range");
         assert_eq!((open.start, open.end), (6, 10));
 
         let suffix = parse_range("bytes=-5", 11).expect("suffix range");
         assert_eq!((suffix.start, suffix.end), (6, 10));
+
+        let large_suffix = parse_range("bytes=-50", 11).expect("large suffix range");
+        assert_eq!((large_suffix.start, large_suffix.end), (0, 10));
+
+        let spaced = parse_range("  bytes= 2 - 6  ", 11).expect("spaced range");
+        assert_eq!((spaced.start, spaced.end), (2, 6));
     }
 
     #[test]
@@ -4186,6 +4263,8 @@ mod tests {
         assert!(parse_range("bytes=0-99", 11).is_err());
         assert!(parse_range("bytes=0-1,3-4", 11).is_err());
         assert!(parse_range("bytes=-0", 11).is_err());
+        assert!(parse_range("bytes=11-12", 11).is_err());
+        assert!(parse_range("bytes=0-4", 0).is_err());
     }
 
     fn object_record() -> ObjectRecord {
