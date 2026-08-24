@@ -4140,6 +4140,41 @@ mod tests {
         assert_eq!(metrics_body["rangeRequests"], 2);
         assert_eq!(metrics_body["totalBytesServed"], 10);
 
+        let metrics_1h = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/origin-traffic?period=1h")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(metrics_1h.status(), StatusCode::OK);
+        let metrics_1h_body: serde_json::Value =
+            serde_json::from_str(&response_text(metrics_1h).await).expect("metrics JSON");
+        assert_eq!(metrics_1h_body["totalRequests"], 2);
+
+        let past_until = (chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
+        let metrics_past = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/admin/metrics/origin-traffic?until={past_until}"
+                    ))
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(metrics_past.status(), StatusCode::OK);
+        let metrics_past_body: serde_json::Value =
+            serde_json::from_str(&response_text(metrics_past).await).expect("metrics JSON");
+        assert_eq!(metrics_past_body["totalRequests"], 0);
+
         let create_replica = app
             .clone()
             .oneshot(

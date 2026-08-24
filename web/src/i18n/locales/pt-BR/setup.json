@@ -301,7 +301,15 @@
       "originOffloadBytes": "Bytes desviados do Origin",
       "fallbackEvents": "Eventos de fallback",
       "integrityFailures": "Falhas de integridade",
-      "loadFailed": "Falha ao carregar métricas do Origin."
+      "loadFailed": "Falha ao carregar métricas do Origin.",
+      "periodLabel": "Filtrar período",
+      "periods": {
+        "1h": "1 hora",
+        "24h": "24 horas",
+        "7d": "7 dias",
+        "30d": "30 dias",
+        "all": "Tudo"
+      }
     },
     "replicas": {
       "title": "Réplicas",
