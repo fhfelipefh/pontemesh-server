@@ -177,8 +177,15 @@ export async function updateInstanceName(name: string): Promise<InstanceSummary>
   return updateInstanceSettings(name);
 }
 
-export async function getOriginTrafficMetrics(): Promise<OriginTrafficMetrics> {
-  const response = await fetch("/api/admin/metrics/origin-traffic", {
+function metricsUrl(path: string, period?: string): string {
+  if (!period || period === "all") {
+    return path;
+  }
+  return `${path}?period=${encodeURIComponent(period)}`;
+}
+
+export async function getOriginTrafficMetrics(period?: string): Promise<OriginTrafficMetrics> {
+  const response = await fetch(metricsUrl("/api/admin/metrics/origin-traffic", period), {
     headers: {
       accept: "application/json"
     }
@@ -187,8 +194,8 @@ export async function getOriginTrafficMetrics(): Promise<OriginTrafficMetrics> {
   return response.json() as Promise<OriginTrafficMetrics>;
 }
 
-export async function getReplicaTrafficMetrics(): Promise<ReplicaTrafficMetrics> {
-  const response = await fetch("/api/admin/metrics/replica-traffic", {
+export async function getReplicaTrafficMetrics(period?: string): Promise<ReplicaTrafficMetrics> {
+  const response = await fetch(metricsUrl("/api/admin/metrics/replica-traffic", period), {
     headers: {
       accept: "application/json"
     }
@@ -197,8 +204,8 @@ export async function getReplicaTrafficMetrics(): Promise<ReplicaTrafficMetrics>
   return response.json() as Promise<ReplicaTrafficMetrics>;
 }
 
-export async function getBucketTrafficMetrics(): Promise<BucketTrafficMetric[]> {
-  const response = await fetch("/api/admin/metrics/buckets", {
+export async function getBucketTrafficMetrics(period?: string): Promise<BucketTrafficMetric[]> {
+  const response = await fetch(metricsUrl("/api/admin/metrics/buckets", period), {
     headers: {
       accept: "application/json"
     }
@@ -207,8 +214,8 @@ export async function getBucketTrafficMetrics(): Promise<BucketTrafficMetric[]> 
   return response.json() as Promise<BucketTrafficMetric[]>;
 }
 
-export async function getObjectTrafficMetrics(): Promise<ObjectTrafficMetric[]> {
-  const response = await fetch("/api/admin/metrics/objects", {
+export async function getObjectTrafficMetrics(period?: string): Promise<ObjectTrafficMetric[]> {
+  const response = await fetch(metricsUrl("/api/admin/metrics/objects", period), {
     headers: {
       accept: "application/json"
     }
@@ -217,8 +224,9 @@ export async function getObjectTrafficMetrics(): Promise<ObjectTrafficMetric[]> 
   return response.json() as Promise<ObjectTrafficMetric[]>;
 }
 
-export async function getReplicaDetailMetrics(replicaId: string): Promise<ReplicaDetailMetric> {
-  const response = await fetch(`/api/admin/metrics/replicas/${encodeURIComponent(replicaId)}`, {
+export async function getReplicaDetailMetrics(replicaId: string, period?: string): Promise<ReplicaDetailMetric> {
+  const path = `/api/admin/metrics/replicas/${encodeURIComponent(replicaId)}`;
+  const response = await fetch(metricsUrl(path, period), {
     headers: {
       accept: "application/json"
     }

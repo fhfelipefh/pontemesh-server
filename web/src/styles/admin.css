@@ -302,6 +302,72 @@
   font-size: 1.02rem;
 }
 
+.admin-hero--with-controls {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.metrics-period-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--pm-glass-bg);
+  border: 1px solid var(--pm-glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.metrics-period-pill {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--pm-muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  line-height: 1.2;
+}
+
+.metrics-period-pill:hover {
+  color: var(--pm-deep-navy);
+  background: rgb(var(--pm-primary-blue-rgb) / 0.08);
+}
+
+.metrics-period-pill--active {
+  background: var(--pm-primary-blue);
+  color: var(--pm-surface) !important;
+  border-color: var(--pm-primary-blue-strong);
+  box-shadow: 0 4px 12px rgb(var(--pm-primary-blue-rgb) / 0.25);
+}
+
+.metrics-period-pill:focus-visible {
+  outline: 2px solid var(--pm-accent-cyan-blue);
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  .admin-hero--with-controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .metrics-period-filter {
+    width: 100%;
+    overflow-x: auto;
+    justify-content: space-between;
+  }
+  .metrics-period-pill {
+    flex: 1;
+    text-align: center;
+    padding: 6px 8px;
+    font-size: 0.78rem;
+  }
+}
+
 .dashboard-update-error {
   grid-column: 1 / -1;
   display: flex;

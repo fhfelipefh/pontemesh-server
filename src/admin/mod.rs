@@ -206,6 +206,39 @@ pub struct ApplicationLogsQuery {
     limit: Option<usize>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricsQuery {
+    pub period: Option<String>,
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
+    pub until: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+pub fn resolve_metrics_time_window(
+    query: &MetricsQuery,
+) -> (
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<chrono::DateTime<chrono::Utc>>,
+) {
+    if query.since.is_some() || query.until.is_some() {
+        return (query.since, query.until);
+    }
+    let now = chrono::Utc::now();
+    match query
+        .period
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_lowercase)
+        .as_deref()
+    {
+        Some("1h") => (Some(now - chrono::Duration::hours(1)), None),
+        Some("24h") => (Some(now - chrono::Duration::hours(24)), None),
+        Some("7d") => (Some(now - chrono::Duration::days(7)), None),
+        Some("30d") => (Some(now - chrono::Duration::days(30)), None),
+        _ => (None, None),
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigurationBackup {
@@ -881,29 +914,45 @@ pub async fn mcp_activity(State(state): State<AppState>) -> Response {
     }
 }
 
-pub async fn origin_traffic_metrics(State(state): State<AppState>) -> Response {
-    match state.catalog.origin_traffic_summary().await {
+pub async fn origin_traffic_metrics(
+    State(state): State<AppState>,
+    Query(query): Query<MetricsQuery>,
+) -> Response {
+    let (since, until) = resolve_metrics_time_window(&query);
+    match state.catalog.origin_traffic_summary(since, until).await {
         Ok(summary) => Json(summary).into_response(),
         Err(error) => internal_error(error),
     }
 }
 
-pub async fn replica_traffic_metrics(State(state): State<AppState>) -> Response {
-    match state.catalog.replica_traffic_summary().await {
+pub async fn replica_traffic_metrics(
+    State(state): State<AppState>,
+    Query(query): Query<MetricsQuery>,
+) -> Response {
+    let (since, until) = resolve_metrics_time_window(&query);
+    match state.catalog.replica_traffic_summary(since, until).await {
         Ok(summary) => Json(summary).into_response(),
         Err(error) => internal_error(error),
     }
 }
 
-pub async fn bucket_traffic_metrics(State(state): State<AppState>) -> Response {
-    match state.catalog.bucket_traffic_metrics().await {
+pub async fn bucket_traffic_metrics(
+    State(state): State<AppState>,
+    Query(query): Query<MetricsQuery>,
+) -> Response {
+    let (since, until) = resolve_metrics_time_window(&query);
+    match state.catalog.bucket_traffic_metrics(since, until).await {
         Ok(summary) => Json(summary).into_response(),
         Err(error) => internal_error(error),
     }
 }
 
-pub async fn object_traffic_metrics(State(state): State<AppState>) -> Response {
-    match state.catalog.object_traffic_metrics().await {
+pub async fn object_traffic_metrics(
+    State(state): State<AppState>,
+    Query(query): Query<MetricsQuery>,
+) -> Response {
+    let (since, until) = resolve_metrics_time_window(&query);
+    match state.catalog.object_traffic_metrics(since, until).await {
         Ok(summary) => Json(summary).into_response(),
         Err(error) => internal_error(error),
     }
@@ -912,8 +961,14 @@ pub async fn object_traffic_metrics(State(state): State<AppState>) -> Response {
 pub async fn replica_detail_metrics(
     State(state): State<AppState>,
     Path(replica_id): Path<String>,
+    Query(query): Query<MetricsQuery>,
 ) -> Response {
-    match state.catalog.replica_detail_metrics(&replica_id).await {
+    let (since, until) = resolve_metrics_time_window(&query);
+    match state
+        .catalog
+        .replica_detail_metrics(&replica_id, since, until)
+        .await
+    {
         Ok(Some(summary)) => Json(summary).into_response(),
         Ok(None) => not_found("replica not found"),
         Err(error) => bad_request(error),
@@ -2499,5 +2554,70 @@ mod tests {
     #[test]
     fn unsupported_application_preset_is_rejected() {
         assert!(resolve_application_scopes(None, Some("anonymous-admin")).is_err());
+    }
+
+    #[test]
+    fn resolve_metrics_time_window_presets() {
+        let q_empty = MetricsQuery::default();
+        assert_eq!(resolve_metrics_time_window(&q_empty), (None, None));
+
+        let q_all = MetricsQuery {
+            period: Some("all".into()),
+            since: None,
+            until: None,
+        };
+        assert_eq!(resolve_metrics_time_window(&q_all), (None, None));
+
+        let q_1h = MetricsQuery {
+            period: Some("1h".into()),
+            since: None,
+            until: None,
+        };
+        let (since_1h, until_1h) = resolve_metrics_time_window(&q_1h);
+        assert!(until_1h.is_none());
+        let diff_1h = chrono::Utc::now() - since_1h.expect("since_1h");
+        assert!(diff_1h.num_minutes() >= 59 && diff_1h.num_minutes() <= 61);
+
+        let q_24h = MetricsQuery {
+            period: Some("24h".into()),
+            since: None,
+            until: None,
+        };
+        let (since_24h, until_24h) = resolve_metrics_time_window(&q_24h);
+        assert!(until_24h.is_none());
+        let diff_24h = chrono::Utc::now() - since_24h.expect("since_24h");
+        assert!(diff_24h.num_hours() >= 23 && diff_24h.num_hours() <= 25);
+
+        let q_7d = MetricsQuery {
+            period: Some("7d".into()),
+            since: None,
+            until: None,
+        };
+        let (since_7d, until_7d) = resolve_metrics_time_window(&q_7d);
+        assert!(until_7d.is_none());
+        let diff_7d = chrono::Utc::now() - since_7d.expect("since_7d");
+        assert!(diff_7d.num_days() >= 6 && diff_7d.num_days() <= 8);
+
+        let q_30d = MetricsQuery {
+            period: Some("30d".into()),
+            since: None,
+            until: None,
+        };
+        let (since_30d, until_30d) = resolve_metrics_time_window(&q_30d);
+        assert!(until_30d.is_none());
+        let diff_30d = chrono::Utc::now() - since_30d.expect("since_30d");
+        assert!(diff_30d.num_days() >= 29 && diff_30d.num_days() <= 31);
+
+        let fixed_since = chrono::Utc::now() - chrono::Duration::hours(2);
+        let fixed_until = chrono::Utc::now() - chrono::Duration::hours(1);
+        let q_custom = MetricsQuery {
+            period: Some("1h".into()),
+            since: Some(fixed_since),
+            until: Some(fixed_until),
+        };
+        assert_eq!(
+            resolve_metrics_time_window(&q_custom),
+            (Some(fixed_since), Some(fixed_until))
+        );
     }
 }

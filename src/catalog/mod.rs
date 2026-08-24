@@ -3,6 +3,7 @@ use crate::{
     security::{random::secure_url_token, token::hash_bearer_token},
 };
 use anyhow::{Context, bail};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use sha2::{Digest, Sha256};
@@ -4629,7 +4630,11 @@ impl Catalog {
         Ok(replica_metric_from_row(row))
     }
 
-    pub async fn replica_traffic_summary(&self) -> anyhow::Result<ReplicaTrafficSummary> {
+    pub async fn replica_traffic_summary(
+        &self,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> anyhow::Result<ReplicaTrafficSummary> {
         let row = query(
             r#"
             SELECT
@@ -4642,8 +4647,12 @@ impl Catalog {
                 COALESCE(SUM(sync_failures), 0)::bigint AS sync_failures,
                 COALESCE(SUM(auth_failures), 0)::bigint AS auth_failures
             FROM replica_metric_events
+            WHERE ($1::timestamptz IS NULL OR reported_at >= $1)
+              AND ($2::timestamptz IS NULL OR reported_at <= $2)
             "#,
         )
+        .bind(since)
+        .bind(until)
         .fetch_one(&self.pool)
         .await
         .context("failed to summarize replica traffic")?;
@@ -5120,7 +5129,11 @@ impl Catalog {
         Ok(())
     }
 
-    pub async fn origin_traffic_summary(&self) -> anyhow::Result<OriginTrafficSummary> {
+    pub async fn origin_traffic_summary(
+        &self,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> anyhow::Result<OriginTrafficSummary> {
         let row = query(
             r#"
             SELECT
@@ -5131,18 +5144,28 @@ impl Catalog {
                 (
                     SELECT COALESCE(SUM(CASE WHEN event_type = 'FALLBACK_DECISION' THEN 1 ELSE 0 END), 0)::bigint
                     FROM fragment_transfer_events
+                    WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+                      AND ($2::timestamptz IS NULL OR created_at <= $2)
                 ) AS fallback_events,
                 (
                     SELECT COALESCE(SUM(CASE WHEN event_type = 'HASH_MISMATCH' OR outcome = 'REJECTED' THEN 1 ELSE 0 END), 0)::bigint
                     FROM fragment_transfer_events
+                    WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+                      AND ($2::timestamptz IS NULL OR created_at <= $2)
                 ) AS integrity_failures,
                 (
                     SELECT COALESCE(SUM(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') AND outcome = 'SUCCESS' AND event_type <> 'FRAGMENT_SYNCED' THEN bytes_transferred ELSE 0 END), 0)::bigint
                     FROM fragment_transfer_events
+                    WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+                      AND ($2::timestamptz IS NULL OR created_at <= $2)
                 ) AS origin_offload_bytes
             FROM origin_transfer_events
+            WHERE ($1::timestamptz IS NULL OR served_at >= $1)
+              AND ($2::timestamptz IS NULL OR served_at <= $2)
             "#,
         )
+        .bind(since)
+        .bind(until)
         .fetch_one(&self.pool)
         .await
         .context("failed to summarize Origin traffic")?;
@@ -5158,13 +5181,19 @@ impl Catalog {
         })
     }
 
-    pub async fn bucket_traffic_metrics(&self) -> anyhow::Result<Vec<BucketTrafficMetric>> {
+    pub async fn bucket_traffic_metrics(
+        &self,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> anyhow::Result<Vec<BucketTrafficMetric>> {
         let rows = query(
             r#"
             WITH origin AS (
                 SELECT bucket_id, SUM(bytes_served)::bigint AS bytes_served,
                        COUNT(*)::bigint AS requests
                 FROM origin_transfer_events
+                WHERE ($1::timestamptz IS NULL OR served_at >= $1)
+                  AND ($2::timestamptz IS NULL OR served_at <= $2)
                 GROUP BY bucket_id
             ),
             fragments AS (
@@ -5178,6 +5207,8 @@ impl Catalog {
                        AVG(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') THEN latency_ms ELSE NULL END)::float8 AS avg_auxiliary_latency_ms,
                        COUNT(*)::bigint AS fragment_events
                 FROM fragment_transfer_events
+                WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+                  AND ($2::timestamptz IS NULL OR created_at <= $2)
                 GROUP BY bucket_id
             )
             SELECT
@@ -5207,6 +5238,8 @@ impl Catalog {
             ORDER BY b.name ASC
             "#,
         )
+        .bind(since)
+        .bind(until)
         .fetch_all(&self.pool)
         .await
         .context("failed to load bucket traffic metrics")?;
@@ -5231,13 +5264,19 @@ impl Catalog {
             .collect())
     }
 
-    pub async fn object_traffic_metrics(&self) -> anyhow::Result<Vec<ObjectTrafficMetric>> {
+    pub async fn object_traffic_metrics(
+        &self,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> anyhow::Result<Vec<ObjectTrafficMetric>> {
         let rows = query(
             r#"
             WITH origin AS (
                 SELECT object_id, SUM(bytes_served)::bigint AS bytes_served,
                        COUNT(*)::bigint AS requests
                 FROM origin_transfer_events
+                WHERE ($1::timestamptz IS NULL OR served_at >= $1)
+                  AND ($2::timestamptz IS NULL OR served_at <= $2)
                 GROUP BY object_id
             ),
             fragments AS (
@@ -5251,6 +5290,8 @@ impl Catalog {
                        AVG(CASE WHEN source_type IN ('REPLICA_EDGE', 'PEER') THEN latency_ms ELSE NULL END)::float8 AS avg_auxiliary_latency_ms,
                        COUNT(*)::bigint AS fragment_events
                 FROM fragment_transfer_events
+                WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+                  AND ($2::timestamptz IS NULL OR created_at <= $2)
                 GROUP BY object_id
             )
             SELECT
@@ -5284,6 +5325,8 @@ impl Catalog {
             LIMIT 500
             "#,
         )
+        .bind(since)
+        .bind(until)
         .fetch_all(&self.pool)
         .await
         .context("failed to load object traffic metrics")?;
@@ -5312,6 +5355,8 @@ impl Catalog {
     pub async fn replica_detail_metrics(
         &self,
         replica_id: &str,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
     ) -> anyhow::Result<Option<ReplicaDetailMetric>> {
         let row = query(
             r#"
@@ -5324,11 +5369,15 @@ impl Catalog {
                        SUM(sync_failures)::bigint AS sync_failures,
                        SUM(auth_failures)::bigint AS auth_failures
                 FROM replica_metric_events
+                WHERE ($2::timestamptz IS NULL OR reported_at >= $2)
+                  AND ($3::timestamptz IS NULL OR reported_at <= $3)
                 GROUP BY replica_id
             ),
             fragments AS (
                 SELECT replica_id, COUNT(*)::bigint AS fragment_events
                 FROM fragment_transfer_events
+                WHERE ($2::timestamptz IS NULL OR created_at >= $2)
+                  AND ($3::timestamptz IS NULL OR created_at <= $3)
                 GROUP BY replica_id
             )
             SELECT
@@ -5348,6 +5397,8 @@ impl Catalog {
             "#,
         )
         .bind(replica_id)
+        .bind(since)
+        .bind(until)
         .fetch_optional(&self.pool)
         .await
         .context("failed to load replica detail metrics")?;

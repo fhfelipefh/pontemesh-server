@@ -333,19 +333,29 @@ describe("admin API clients", () => {
         syncFailures: 0,
         authFailures: 0,
         fragmentEvents: 1
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        totalRequests: 5,
+        fullObjectRequests: 2,
+        rangeRequests: 3,
+        totalBytesServed: 100
       }));
 
-    await getBucketTrafficMetrics();
-    await getObjectTrafficMetrics();
-    await getReplicaDetailMetrics("replica/1");
+    await getBucketTrafficMetrics("24h");
+    await getObjectTrafficMetrics("7d");
+    await getReplicaDetailMetrics("replica/1", "1h");
+    await getOriginTrafficMetrics("30d");
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/metrics/buckets", {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/metrics/buckets?period=24h", {
       headers: { accept: "application/json" }
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/metrics/objects", {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/metrics/objects?period=7d", {
       headers: { accept: "application/json" }
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/metrics/replicas/replica%2F1", {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/metrics/replicas/replica%2F1?period=1h", {
+      headers: { accept: "application/json" }
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/metrics/origin-traffic?period=30d", {
       headers: { accept: "application/json" }
     });
   });

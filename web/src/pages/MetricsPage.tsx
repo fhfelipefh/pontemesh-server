@@ -11,15 +11,30 @@ import {
 } from "../api/dashboardApi";
 import { ErrorMessage } from "../components/ErrorMessage";
 
+type PeriodOption = "1h" | "24h" | "7d" | "30d" | "all";
+
+const PERIOD_OPTIONS: { key: PeriodOption; label: (t: (k: string) => string) => string }[] = [
+  { key: "1h", label: (t) => t("setup.metrics.periods.1h") },
+  { key: "24h", label: (t) => t("setup.metrics.periods.24h") },
+  { key: "7d", label: (t) => t("setup.metrics.periods.7d") },
+  { key: "30d", label: (t) => t("setup.metrics.periods.30d") },
+  { key: "all", label: (t) => t("setup.metrics.periods.all") }
+];
+
 export function MetricsPage() {
   const { t } = useTranslation();
+  const [period, setPeriod] = useState<PeriodOption>("all");
   const [metrics, setMetrics] = useState<OriginTrafficMetrics | null>(null);
   const [replicaMetrics, setReplicaMetrics] = useState<ReplicaTrafficMetrics | null>(null);
   const [bucketMetrics, setBucketMetrics] = useState<BucketTrafficMetric[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.all([getOriginTrafficMetrics(), getReplicaTrafficMetrics(), getBucketTrafficMetrics()])
+    Promise.all([
+      getOriginTrafficMetrics(period),
+      getReplicaTrafficMetrics(period),
+      getBucketTrafficMetrics(period)
+    ])
       .then(([origin, replicas, buckets]) => {
         setMetrics(origin);
         setReplicaMetrics(replicas);
@@ -28,7 +43,7 @@ export function MetricsPage() {
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : t("setup.metrics.loadFailed"));
       });
-  }, [t]);
+  }, [t, period]);
 
   if (error) {
     return <ErrorMessage message={error} />;
@@ -50,10 +65,22 @@ export function MetricsPage() {
 
   return (
     <div className="dashboard-grid">
-      <section className="admin-hero">
+      <section className="admin-hero admin-hero--with-controls">
         <div>
           <span>{t("setup.metrics.overview")}</span>
           <h1>{t("setup.metrics.title")}</h1>
+        </div>
+        <div className="metrics-period-filter" role="group" aria-label={t("setup.metrics.periodLabel")}>
+          {PERIOD_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              className={`metrics-period-pill ${period === opt.key ? "metrics-period-pill--active" : ""}`}
+              onClick={() => setPeriod(opt.key)}
+            >
+              {opt.label(t)}
+            </button>
+          ))}
         </div>
       </section>
       <Metric icon={<Activity size={20} />} label={t("setup.metrics.totalRequests")} value={String(metrics.totalRequests)} />
