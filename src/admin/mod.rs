@@ -467,6 +467,72 @@ pub async fn get_operational_webhook(State(state): State<AppState>) -> Response 
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OidcSettingsDto {
+    pub enabled: bool,
+    pub issuer_url: Option<String>,
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+}
+
+impl From<config::OidcSection> for OidcSettingsDto {
+    fn from(section: config::OidcSection) -> Self {
+        Self {
+            enabled: section.enabled,
+            issuer_url: section.issuer_url,
+            client_id: section.client_id,
+            client_secret: section.client_secret,
+        }
+    }
+}
+
+pub async fn get_oidc_settings(State(state): State<AppState>) -> Response {
+    match config::load_instance_config(&state.paths) {
+        Ok(config) => Json(OidcSettingsDto::from(config.oidc)).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn update_oidc_settings(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(request): Json<OidcSettingsDto>,
+) -> Response {
+    let mut config = match config::load_instance_config(&state.paths) {
+        Ok(c) => c,
+        Err(e) => return internal_error(e),
+    };
+
+    config.oidc = config::OidcSection {
+        enabled: request.enabled,
+        issuer_url: request.issuer_url,
+        client_id: request.client_id,
+        client_secret: request.client_secret,
+    };
+
+    if let Err(error) = config::write_instance_config(&state.paths, &config) {
+        return internal_error(error);
+    }
+    
+    audit::event(
+        "oidc_settings_updated",
+        Some(&session.username),
+        "success",
+        "OIDC settings updated",
+    );
+    record_admin_audit(
+        &state,
+        "oidc_settings_updated",
+        &session.username,
+        "success",
+        "OIDC settings updated",
+    )
+    .await;
+
+    Json(OidcSettingsDto::from(config.oidc)).into_response()
+}
+
 pub async fn update_operational_webhook(
     State(state): State<AppState>,
     Extension(session): Extension<AdminSession>,

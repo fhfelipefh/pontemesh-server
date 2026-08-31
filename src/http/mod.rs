@@ -176,6 +176,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             get(admin::export_configuration).post(admin::import_configuration),
         )
         .route(
+            "/api/admin/oidc/settings",
+            get(admin::get_oidc_settings).put(admin::update_oidc_settings),
+        )
+        .route(
             "/api/admin/mcp/settings",
             get(admin::get_mcp_settings).put(admin::update_mcp_settings),
         )
