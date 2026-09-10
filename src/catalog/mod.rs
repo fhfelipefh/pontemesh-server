@@ -3,9 +3,9 @@ use crate::{
     security::{random::secure_url_token, token::hash_bearer_token},
 };
 use anyhow::{Context, bail};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, PgPoolOptions, PgRow, Postgres};
 use sqlx_core::{query::query, query_scalar::query_scalar, row::Row, transaction::Transaction};
@@ -3335,10 +3335,11 @@ impl Catalog {
                 let id: String = row.get("id");
                 let client_id: String = row.get("client_id");
                 let scopes: Vec<String> = row.get("scopes");
-                let _ = query("UPDATE mcp_oauth_tokens SET last_used_at = now() WHERE id = $1::uuid")
-                    .bind(&id)
-                    .execute(&self.pool)
-                    .await;
+                let _ =
+                    query("UPDATE mcp_oauth_tokens SET last_used_at = now() WHERE id = $1::uuid")
+                        .bind(&id)
+                        .execute(&self.pool)
+                        .await;
                 return Ok(Some(McpTokenAuthorization {
                     id,
                     name: client_id,
@@ -3408,7 +3409,10 @@ impl Catalog {
         Ok(())
     }
 
-    pub async fn find_mcp_oauth_client(&self, client_id: &str) -> anyhow::Result<Option<McpOAuthClient>> {
+    pub async fn find_mcp_oauth_client(
+        &self,
+        client_id: &str,
+    ) -> anyhow::Result<Option<McpOAuthClient>> {
         let row = query(
             r#"
             SELECT id::text, client_id, client_name, redirect_uris, scopes, is_active, created_at
@@ -3568,7 +3572,8 @@ impl Catalog {
         let code_challenge: Option<String> = row.get("code_challenge");
         let code_challenge_method: Option<String> = row.get("code_challenge_method");
         if let Some(challenge) = code_challenge {
-            let verifier = code_verifier.ok_or_else(|| anyhow::anyhow!("code_verifier required for PKCE"))?;
+            let verifier =
+                code_verifier.ok_or_else(|| anyhow::anyhow!("code_verifier required for PKCE"))?;
             let method = code_challenge_method.as_deref().unwrap_or("plain");
             if method == "S256" {
                 let computed = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
@@ -3655,7 +3660,9 @@ impl Catalog {
             .await
             .context("failed to deactivate refreshed token")?;
 
-        let (new_access, new_refresh, expires_in) = self.issue_mcp_oauth_tokens(&token_client_id, &scopes).await?;
+        let (new_access, new_refresh, expires_in) = self
+            .issue_mcp_oauth_tokens(&token_client_id, &scopes)
+            .await?;
         Ok((new_access, new_refresh, expires_in, scopes))
     }
 
@@ -5973,7 +5980,9 @@ fn mcp_settings_from_row(row: PgRow) -> McpSettings {
         endpoint_path: row.get("endpoint_path"),
         bind_host: row.get("bind_host"),
         require_auth: row.get("require_auth"),
-        auth_mode: row.try_get("auth_mode").unwrap_or_else(|_| "hybrid".to_string()),
+        auth_mode: row
+            .try_get("auth_mode")
+            .unwrap_or_else(|_| "hybrid".to_string()),
         read_tools_enabled: row.get("read_tools_enabled"),
         write_tools_enabled: row.get("write_tools_enabled"),
         admin_tools_enabled: row.get("admin_tools_enabled"),

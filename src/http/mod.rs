@@ -1493,7 +1493,9 @@ mod tests {
             .expect("router response");
         assert_eq!(refresh_req.status(), StatusCode::OK);
         let refresh_body = json_body(refresh_req).await;
-        let new_access_token = refresh_body["access_token"].as_str().expect("new access_token");
+        let new_access_token = refresh_body["access_token"]
+            .as_str()
+            .expect("new access_token");
 
         let health = mcp_call(
             app.clone(),
@@ -1505,7 +1507,10 @@ mod tests {
             }),
         )
         .await;
-        assert_eq!(health["result"]["structuredContent"]["databaseConnected"], true);
+        assert_eq!(
+            health["result"]["structuredContent"]["databaseConnected"],
+            true
+        );
 
         let client_creds = app
             .clone()

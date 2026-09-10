@@ -516,7 +516,7 @@ pub async fn update_oidc_settings(
     if let Err(error) = config::write_instance_config(&state.paths, &config) {
         return internal_error(error);
     }
-    
+
     audit::event(
         "oidc_settings_updated",
         Some(&session.username),

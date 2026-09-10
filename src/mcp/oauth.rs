@@ -48,7 +48,10 @@ pub struct DynamicRegistrationRequest {
 
 pub fn resolve_base_url(headers: &HeaderMap) -> String {
     let mut scheme = "https";
-    if let Some(proto) = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) {
+    if let Some(proto) = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+    {
         if proto.starts_with("http") {
             scheme = proto;
         }
@@ -130,11 +133,7 @@ pub async fn get_authorize(
     let code_challenge_method = query.code_challenge_method.unwrap_or_default();
 
     if client_id.is_empty() || redirect_uri.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            "Missing client_id or redirect_uri",
-        )
-            .into_response();
+        return (StatusCode::BAD_REQUEST, "Missing client_id or redirect_uri").into_response();
     }
 
     let is_authenticated = check_admin_session(&state, &headers).await;
@@ -289,7 +288,10 @@ pub async fn post_token(
 ) -> Response {
     let mut params = parse_body_params(&body);
 
-    if let Some(auth_val) = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
+    if let Some(auth_val) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+    {
         if let Some(basic) = auth_val.strip_prefix("Basic ") {
             if let Ok(decoded) = STANDARD.decode(basic.trim()) {
                 if let Ok(cred_str) = String::from_utf8(decoded) {
@@ -321,7 +323,11 @@ pub async fn post_token(
 
             if let Some(secret) = params.get("client_secret") {
                 if !secret.is_empty() {
-                    match state.catalog.verify_mcp_oauth_client(client_id, secret).await {
+                    match state
+                        .catalog
+                        .verify_mcp_oauth_client(client_id, secret)
+                        .await
+                    {
                         Ok(Some(_)) => {}
                         _ => {
                             return (
@@ -349,17 +355,20 @@ pub async fn post_token(
                 }
             };
 
-            let (access_token, refresh_token, expires_in) =
-                match state.catalog.issue_mcp_oauth_tokens(client_id, &scopes).await {
-                    Ok(res) => res,
-                    Err(e) => {
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "server_error", "error_description": e.to_string()})),
-                        )
-                            .into_response();
-                    }
-                };
+            let (access_token, refresh_token, expires_in) = match state
+                .catalog
+                .issue_mcp_oauth_tokens(client_id, &scopes)
+                .await
+            {
+                Ok(res) => res,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "server_error", "error_description": e.to_string()})),
+                    )
+                        .into_response();
+                }
+            };
 
             (
                 StatusCode::OK,
@@ -420,17 +429,20 @@ pub async fn post_token(
                 client.scopes
             };
 
-            let (access_token, refresh_token, expires_in) =
-                match state.catalog.issue_mcp_oauth_tokens(client_id, &scopes).await {
-                    Ok(res) => res,
-                    Err(e) => {
-                        return (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "server_error", "error_description": e.to_string()})),
-                        )
-                            .into_response();
-                    }
-                };
+            let (access_token, refresh_token, expires_in) = match state
+                .catalog
+                .issue_mcp_oauth_tokens(client_id, &scopes)
+                .await
+            {
+                Ok(res) => res,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": "server_error", "error_description": e.to_string()})),
+                    )
+                        .into_response();
+                }
+            };
 
             (
                 StatusCode::OK,
@@ -458,17 +470,20 @@ pub async fn post_token(
             };
             let client_id = params.get("client_id").map(String::as_str);
 
-            let (access_token, new_refresh, expires_in, scopes) =
-                match state.catalog.refresh_mcp_oauth_token(refresh_token, client_id).await {
-                    Ok(res) => res,
-                    Err(e) => {
-                        return (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({"error": "invalid_grant", "error_description": e.to_string()})),
-                        )
-                            .into_response();
-                    }
-                };
+            let (access_token, new_refresh, expires_in, scopes) = match state
+                .catalog
+                .refresh_mcp_oauth_token(refresh_token, client_id)
+                .await
+            {
+                Ok(res) => res,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": "invalid_grant", "error_description": e.to_string()})),
+                    )
+                        .into_response();
+                }
+            };
 
             (
                 StatusCode::OK,
