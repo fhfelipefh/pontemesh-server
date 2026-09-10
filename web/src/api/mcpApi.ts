@@ -1,10 +1,13 @@
 import { ensureOk } from "./http";
 
+export type McpAuthMode = "hybrid" | "token" | "oauth2";
+
 export type McpSettings = {
   enabled: boolean;
   endpointPath: string;
   bindHost: string | null;
   requireAuth: boolean;
+  authMode: McpAuthMode;
   readToolsEnabled: boolean;
   writeToolsEnabled: boolean;
   adminToolsEnabled: boolean;
@@ -15,7 +18,9 @@ export type McpSettings = {
   updatedAt: string;
 };
 
-export type McpSettingsUpdate = Omit<McpSettings, "createdAt" | "updatedAt">;
+export type McpSettingsUpdate = Omit<McpSettings, "createdAt" | "updatedAt" | "authMode"> & {
+  authMode?: McpAuthMode;
+};
 
 export type McpStatus = {
   enabled: boolean;
@@ -127,4 +132,56 @@ export async function listMcpActivity(): Promise<McpActivityRecord[]> {
   });
   await ensureOk(response);
   return response.json() as Promise<McpActivityRecord[]>;
+}
+
+export type McpOAuthClientSummary = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  redirectUris: string[];
+  clientUri: string | null;
+  scopes: string[];
+  active: boolean;
+  createdAt: string;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+};
+
+export type CreatedMcpOAuthClient = {
+  client: McpOAuthClientSummary;
+  clientSecret: string;
+};
+
+export async function listMcpOAuthClients(): Promise<McpOAuthClientSummary[]> {
+  const response = await fetch("/api/admin/mcp/oauth-clients", {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<McpOAuthClientSummary[]>;
+}
+
+export async function createMcpOAuthClient(
+  clientName: string,
+  redirectUris: string[],
+  scopes: string[] = ["read"]
+): Promise<CreatedMcpOAuthClient> {
+  const response = await fetch("/api/admin/mcp/oauth-clients", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ clientName: clientName.trim(), redirectUris, scopes })
+  });
+  await ensureOk(response);
+  return response.json() as Promise<CreatedMcpOAuthClient>;
+}
+
+export async function revokeMcpOAuthClient(id: string): Promise<void> {
+  const response = await fetch(`/api/admin/mcp/oauth-clients/${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+  await ensureOk(response);
 }

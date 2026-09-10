@@ -460,7 +460,16 @@
         "adminTools": "Tools administrativas",
         "fullAdmin": "Administração completa",
         "tokenScopes": "Escopos",
-        "permissionWarning": "Escopos write e admin alteram dados do servidor."
+        "permissionWarning": "Escopos write e admin alteram dados do servidor.",
+        "authMode": "Modelo de autenticação",
+        "authModeHybrid": "Híbrido (OAuth 2.0 + Token Estático)",
+        "authModeOAuth2": "OAuth 2.0 (Gemini Spark / RFC 9728)",
+        "authModeToken": "Token Estático (Padrão Ponte Mesh)",
+        "geminiSparkHint": "Suporte a Gemini Spark (Connected Apps): Compatível com RFC 9728 e RFC 8414. Use a URL do servidor MCP com OAuth 2.0 ou credenciais de cliente.",
+        "oauthEndpoints": "Endpoints OAuth 2.0",
+        "resourceMetadata": "Resource Metadata (RFC 9728)",
+        "authServerMetadata": "Auth Server Metadata (RFC 8414)",
+        "tokenEndpoint": "Token Endpoint"
       },
       "s3": {
         "title": "Credenciais S3",

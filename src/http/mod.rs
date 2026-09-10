@@ -52,9 +52,31 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
         .route(
             "/mcp",
             post(mcp::transport_http::post_mcp)
-                .get(mcp::transport_http::method_not_allowed)
+                .get(mcp::transport_http::get_mcp)
                 .delete(mcp::transport_http::method_not_allowed),
         )
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(mcp::oauth::get_protected_resource_metadata),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource/mcp",
+            get(mcp::oauth::get_protected_resource_metadata),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(mcp::oauth::get_authorization_server_metadata),
+        )
+        .route(
+            "/.well-known/openid-configuration",
+            get(mcp::oauth::get_authorization_server_metadata),
+        )
+        .route(
+            "/oauth/authorize",
+            get(mcp::oauth::get_authorize).post(mcp::oauth::post_authorize),
+        )
+        .route("/oauth/token", post(mcp::oauth::post_token))
+        .route("/oauth/register", post(mcp::oauth::post_register))
         .nest("/pontemesh", pontemesh_routes(state.clone()))
         .merge(admin_routes(state.clone()))
         .route("/api/{*path}", any(setup::routes::api_not_found))
@@ -191,6 +213,14 @@ fn admin_routes(state: AppState) -> Router<AppState> {
         .route(
             "/api/admin/mcp/tokens/{id}",
             delete(admin::revoke_mcp_token),
+        )
+        .route(
+            "/api/admin/mcp/oauth-clients",
+            get(admin::list_mcp_oauth_clients).post(admin::create_mcp_oauth_client),
+        )
+        .route(
+            "/api/admin/mcp/oauth-clients/{id}",
+            delete(admin::revoke_mcp_oauth_client),
         )
         .route("/api/admin/mcp/activity", get(admin::mcp_activity))
         .route(
@@ -1265,6 +1295,243 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(limited.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn mcp_oauth_discovery_and_flows() {
+        let Some(ctx) = TestContext::new("mcp-oauth-flows").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let cookie = login_cookie(app.clone()).await;
+
+        let enable = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/mcp/settings")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"enabled":true,"endpointPath":"/mcp","bindHost":null,"requireAuth":true,"authMode":"hybrid","readToolsEnabled":true,"writeToolsEnabled":false,"adminToolsEnabled":false,"exposeResources":true,"exposePrompts":true,"allowLocalhostOnly":true}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(enable.status(), StatusCode::OK);
+
+        let protected_resource = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/.well-known/oauth-protected-resource")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(protected_resource.status(), StatusCode::OK);
+        let pr_body = json_body(protected_resource).await;
+        assert!(pr_body["authorization_servers"].is_array());
+        assert!(pr_body["scopes_supported"].is_array());
+
+        let auth_server = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/.well-known/oauth-authorization-server")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(auth_server.status(), StatusCode::OK);
+        let as_body = json_body(auth_server).await;
+        assert!(as_body["authorization_endpoint"].is_string());
+        assert!(as_body["token_endpoint"].is_string());
+        assert!(as_body["registration_endpoint"].is_string());
+
+        let mcp_unauth = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/mcp")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(mcp_unauth.status(), StatusCode::UNAUTHORIZED);
+        let auth_header = mcp_unauth
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or_default();
+        assert!(auth_header.contains("resource_metadata="));
+
+        let register = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/oauth/register")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"client_name":"gemini-test","redirect_uris":["https://gemini.google.com/auth/callback"]}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(register.status(), StatusCode::CREATED);
+        let reg_body = json_body(register).await;
+        let client_id = reg_body["client_id"].as_str().expect("client_id");
+        let client_secret = reg_body["client_secret"].as_str().expect("client_secret");
+
+        let verifier = "abcdefghijklmnopqrstuvwxyz0123456789-_.~ABCDEF";
+        let mut hasher = Sha256::new();
+        hasher.update(verifier.as_bytes());
+        let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hasher.finalize());
+
+        let authorize_get = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!(
+                        "/oauth/authorize?client_id={client_id}&redirect_uri=https://gemini.google.com/auth/callback&response_type=code&code_challenge={challenge}&code_challenge_method=S256&state=state123"
+                    ))
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(authorize_get.status(), StatusCode::OK);
+
+        let authorize_post = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/oauth/authorize")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!(
+                        "client_id={client_id}&redirect_uri=https://gemini.google.com/auth/callback&code_challenge={challenge}&code_challenge_method=S256&state=state123&scopes=read"
+                    )))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(authorize_post.status(), StatusCode::SEE_OTHER);
+        let location = authorize_post
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or_default();
+        assert!(location.starts_with("https://gemini.google.com/auth/callback"));
+        assert!(location.contains("state=state123"));
+
+        let code = location
+            .split("code=")
+            .nth(1)
+            .and_then(|s| s.split('&').next())
+            .expect("code in redirect");
+
+        let token_req = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/oauth/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!(
+                        "grant_type=authorization_code&client_id={client_id}&client_secret={client_secret}&code={code}&redirect_uri=https://gemini.google.com/auth/callback&code_verifier={verifier}"
+                    )))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(token_req.status(), StatusCode::OK);
+        let token_body = json_body(token_req).await;
+        let access_token = token_body["access_token"].as_str().expect("access_token");
+        let refresh_token = token_body["refresh_token"].as_str().expect("refresh_token");
+
+        let init = mcp_call(
+            app.clone(),
+            access_token,
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "oauth-test", "version": "0.1.0" }
+            }),
+        )
+        .await;
+        assert_eq!(init["result"]["serverInfo"]["name"], "pontemesh-server");
+
+        let refresh_req = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/oauth/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!(
+                        "grant_type=refresh_token&client_id={client_id}&client_secret={client_secret}&refresh_token={refresh_token}"
+                    )))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(refresh_req.status(), StatusCode::OK);
+        let refresh_body = json_body(refresh_req).await;
+        let new_access_token = refresh_body["access_token"]
+            .as_str()
+            .expect("new access_token");
+
+        let health = mcp_call(
+            app.clone(),
+            new_access_token,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_get_health",
+                "arguments": {}
+            }),
+        )
+        .await;
+        assert_eq!(
+            health["result"]["structuredContent"]["databaseConnected"],
+            true
+        );
+
+        let client_creds = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/oauth/token")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!(
+                        "grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}"
+                    )))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(client_creds.status(), StatusCode::OK);
+        let cc_body = json_body(client_creds).await;
+        let cc_token = cc_body["access_token"].as_str().expect("access_token");
+
+        let ping = mcp_call(app.clone(), cc_token, "ping", serde_json::json!({})).await;
+        assert_eq!(ping["result"], serde_json::json!({}));
     }
 
     #[tokio::test]

@@ -59,6 +59,7 @@ describe("mcpApi", () => {
       endpointPath: "/mcp",
       bindHost: null,
       requireAuth: true,
+      authMode: "hybrid" as const,
       readToolsEnabled: true,
       writeToolsEnabled: false,
       adminToolsEnabled: false,

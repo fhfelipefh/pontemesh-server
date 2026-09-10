@@ -179,6 +179,7 @@ pub async fn run(paths: PontemeshHome, options: SetupAgentOptions) -> anyhow::Re
             endpoint_path: mcp::config::DEFAULT_ENDPOINT_PATH.to_owned(),
             bind_host: None,
             require_auth: true,
+            auth_mode: Some("hybrid".to_string()),
             read_tools_enabled: true,
             write_tools_enabled: options
                 .mcp_scopes

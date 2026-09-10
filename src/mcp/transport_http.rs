@@ -7,7 +7,7 @@ use axum::{
     Json,
     body::{Body, to_bytes},
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde_json::{Value, json};
@@ -64,7 +64,7 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
     }
 
     let authorization = if settings.require_auth {
-        match auth::authorize_request(&state, &headers).await {
+        match auth::authorize_request(&state, &headers, &settings.auth_mode).await {
             Ok(authorization) => authorization,
             Err(error) => {
                 let _ = state
@@ -78,11 +78,16 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
                     )
                     .await;
                 warn!(request_id = %request_id, "mcp_auth_failed");
-                return protocol::http_json_rpc_error(
-                    StatusCode::UNAUTHORIZED,
-                    -32000,
-                    error.to_string(),
+                let base_url = crate::mcp::oauth::resolve_base_url(&headers);
+                let www_auth = format!(
+                    "Bearer resource_metadata=\"{base_url}/.well-known/oauth-protected-resource\", error=\"unauthorized\""
                 );
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    [(header::WWW_AUTHENTICATE, www_auth)],
+                    Json(protocol::error(None, -32000, error.to_string())),
+                )
+                    .into_response();
             }
         }
     } else {
@@ -191,6 +196,57 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
             Json(protocol::error(id, -32603, error.to_string())).into_response()
         }
     }
+}
+
+pub async fn get_mcp(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let settings = match state.catalog.get_mcp_settings().await {
+        Ok(settings) => settings,
+        Err(error) => {
+            return protocol::http_json_rpc_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                -32603,
+                error.to_string(),
+            );
+        }
+    };
+    if !settings.enabled || settings.endpoint_path != config::DEFAULT_ENDPOINT_PATH {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let base_url = crate::mcp::oauth::resolve_base_url(&headers);
+    let www_auth = format!(
+        "Bearer resource_metadata=\"{base_url}/.well-known/oauth-protected-resource\", error=\"unauthorized\""
+    );
+
+    let authorization = match auth::authorize_request(&state, &headers, &settings.auth_mode).await {
+        Ok(auth) => auth,
+        Err(_) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                [
+                    (header::WWW_AUTHENTICATE, www_auth),
+                    (header::CONTENT_TYPE, "application/json".to_string()),
+                ],
+                Json(json!({
+                    "error": "unauthorized",
+                    "message": "Authentication required. See WWW-Authenticate header.",
+                    "resource_metadata": format!("{base_url}/.well-known/oauth-protected-resource")
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json".to_string())],
+        Json(json!({
+            "status": "connected",
+            "protocol": "streamable-http",
+            "client": authorization.name,
+            "scopes": authorization.scopes
+        })),
+    )
+        .into_response()
 }
 
 pub async fn method_not_allowed() -> Response {

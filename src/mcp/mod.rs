@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod config;
+pub mod oauth;
 pub mod prompts;
 pub mod protocol;
 pub mod resources;

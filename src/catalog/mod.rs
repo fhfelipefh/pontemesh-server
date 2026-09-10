@@ -3,9 +3,9 @@ use crate::{
     security::{random::secure_url_token, token::hash_bearer_token},
 };
 use anyhow::{Context, bail};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, PgPoolOptions, PgRow, Postgres};
 use sqlx_core::{query::query, query_scalar::query_scalar, row::Row, transaction::Transaction};
@@ -703,6 +703,7 @@ pub struct McpSettings {
     pub endpoint_path: String,
     pub bind_host: Option<String>,
     pub require_auth: bool,
+    pub auth_mode: String,
     pub read_tools_enabled: bool,
     pub write_tools_enabled: bool,
     pub admin_tools_enabled: bool,
@@ -720,12 +721,32 @@ pub struct McpSettingsUpdate {
     pub endpoint_path: String,
     pub bind_host: Option<String>,
     pub require_auth: bool,
+    pub auth_mode: Option<String>,
     pub read_tools_enabled: bool,
     pub write_tools_enabled: bool,
     pub admin_tools_enabled: bool,
     pub expose_resources: bool,
     pub expose_prompts: bool,
     pub allow_localhost_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpOAuthClient {
+    pub id: String,
+    pub client_id: String,
+    pub client_name: String,
+    pub redirect_uris: Vec<String>,
+    pub scopes: Vec<String>,
+    pub is_active: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedMcpOAuthClient {
+    pub client: McpOAuthClient,
+    pub client_secret: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3110,7 +3131,7 @@ impl Catalog {
             INSERT INTO mcp_settings (id)
             VALUES (TRUE)
             ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
-            RETURNING enabled, endpoint_path, bind_host, require_auth,
+            RETURNING enabled, endpoint_path, bind_host, require_auth, auth_mode,
                 read_tools_enabled, write_tools_enabled, admin_tools_enabled, expose_resources,
                 expose_prompts, allow_localhost_only, created_at, updated_at
             "#,
@@ -3126,19 +3147,21 @@ impl Catalog {
         update: McpSettingsUpdate,
     ) -> anyhow::Result<McpSettings> {
         validate_mcp_settings_update(&update)?;
+        let auth_mode = update.auth_mode.unwrap_or_else(|| "hybrid".to_string());
         let row = query(
             r#"
             INSERT INTO mcp_settings (
-                id, enabled, endpoint_path, bind_host, require_auth,
+                id, enabled, endpoint_path, bind_host, require_auth, auth_mode,
                 read_tools_enabled, write_tools_enabled, admin_tools_enabled, expose_resources,
                 expose_prompts, allow_localhost_only, updated_at
             )
-            VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+            VALUES (TRUE, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
             ON CONFLICT (id) DO UPDATE
             SET enabled = EXCLUDED.enabled,
                 endpoint_path = EXCLUDED.endpoint_path,
                 bind_host = EXCLUDED.bind_host,
                 require_auth = EXCLUDED.require_auth,
+                auth_mode = EXCLUDED.auth_mode,
                 read_tools_enabled = EXCLUDED.read_tools_enabled,
                 write_tools_enabled = EXCLUDED.write_tools_enabled,
                 admin_tools_enabled = EXCLUDED.admin_tools_enabled,
@@ -3146,7 +3169,7 @@ impl Catalog {
                 expose_prompts = EXCLUDED.expose_prompts,
                 allow_localhost_only = EXCLUDED.allow_localhost_only,
                 updated_at = now()
-            RETURNING enabled, endpoint_path, bind_host, require_auth,
+            RETURNING enabled, endpoint_path, bind_host, require_auth, auth_mode,
                 read_tools_enabled, write_tools_enabled, admin_tools_enabled, expose_resources,
                 expose_prompts, allow_localhost_only, created_at, updated_at
             "#,
@@ -3155,6 +3178,7 @@ impl Catalog {
         .bind(&update.endpoint_path)
         .bind(update.bind_host.as_deref())
         .bind(update.require_auth)
+        .bind(&auth_mode)
         .bind(update.read_tools_enabled)
         .bind(update.write_tools_enabled)
         .bind(update.admin_tools_enabled)
@@ -3280,6 +3304,366 @@ impl Catalog {
             name: row.get("name"),
             scopes: row.get("scopes"),
         }))
+    }
+
+    pub async fn authorize_mcp_token_or_oauth(
+        &self,
+        token: &str,
+        auth_mode: &str,
+    ) -> anyhow::Result<Option<McpTokenAuthorization>> {
+        if auth_mode == "token" || auth_mode == "hybrid" {
+            if let Some(auth) = self.authorize_mcp_token(token).await? {
+                return Ok(Some(auth));
+            }
+        }
+        if auth_mode == "oauth2" || auth_mode == "hybrid" {
+            let token_hash = hash_bearer_token(token);
+            let row = query(
+                r#"
+                SELECT id::text, client_id, scopes
+                FROM mcp_oauth_tokens
+                WHERE token_hash = $1
+                  AND is_active = TRUE
+                  AND expires_at > now()
+                "#,
+            )
+            .bind(&token_hash)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to authorize MCP OAuth token")?;
+            if let Some(row) = row {
+                let id: String = row.get("id");
+                let client_id: String = row.get("client_id");
+                let scopes: Vec<String> = row.get("scopes");
+                let _ =
+                    query("UPDATE mcp_oauth_tokens SET last_used_at = now() WHERE id = $1::uuid")
+                        .bind(&id)
+                        .execute(&self.pool)
+                        .await;
+                return Ok(Some(McpTokenAuthorization {
+                    id,
+                    name: client_id,
+                    scopes,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn create_mcp_oauth_client(
+        &self,
+        name: &str,
+        redirect_uris: &[String],
+        scopes: &[String],
+    ) -> anyhow::Result<CreatedMcpOAuthClient> {
+        let name = name.trim();
+        validate_credential_name(name, "MCP OAuth client name")?;
+        let scopes = validate_mcp_scopes(scopes)?;
+        let client_id = secure_url_token("pm_oauth_client_", 24);
+        let secret = secure_url_token("pm_oauth_sec_", 32);
+        let secret_hash = hash_bearer_token(&secret);
+        let row = query(
+            r#"
+            INSERT INTO mcp_oauth_clients (client_id, client_secret_hash, client_name, redirect_uris, scopes)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id::text, client_id, client_name, redirect_uris, scopes, is_active, created_at
+            "#,
+        )
+        .bind(&client_id)
+        .bind(secret_hash)
+        .bind(name)
+        .bind(redirect_uris)
+        .bind(&scopes)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to create MCP OAuth client")?;
+        Ok(CreatedMcpOAuthClient {
+            client: mcp_oauth_client_from_row(row),
+            client_secret: secret,
+        })
+    }
+
+    pub async fn list_mcp_oauth_clients(&self) -> anyhow::Result<Vec<McpOAuthClient>> {
+        let rows = query(
+            r#"
+            SELECT id::text, client_id, client_name, redirect_uris, scopes, is_active, created_at
+            FROM mcp_oauth_clients
+            ORDER BY created_at DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list MCP OAuth clients")?;
+        Ok(rows.into_iter().map(mcp_oauth_client_from_row).collect())
+    }
+
+    pub async fn revoke_mcp_oauth_client(&self, id: &str) -> anyhow::Result<()> {
+        let result = query("UPDATE mcp_oauth_clients SET is_active = FALSE WHERE id = $1::uuid")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .context("failed to revoke MCP OAuth client")?;
+        if result.rows_affected() == 0 {
+            bail!("MCP OAuth client not found: {id}");
+        }
+        Ok(())
+    }
+
+    pub async fn find_mcp_oauth_client(
+        &self,
+        client_id: &str,
+    ) -> anyhow::Result<Option<McpOAuthClient>> {
+        let row = query(
+            r#"
+            SELECT id::text, client_id, client_name, redirect_uris, scopes, is_active, created_at
+            FROM mcp_oauth_clients
+            WHERE client_id = $1 AND is_active = TRUE
+            "#,
+        )
+        .bind(client_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to find MCP OAuth client")?;
+        if let Some(row) = row {
+            return Ok(Some(mcp_oauth_client_from_row(row)));
+        }
+        let token_row = query(
+            r#"
+            SELECT id::text, name, token_prefix, scopes, is_active, created_at
+            FROM mcp_access_tokens
+            WHERE (token_prefix = $1 OR id::text = $1)
+              AND is_active = TRUE
+              AND revoked_at IS NULL
+            "#,
+        )
+        .bind(client_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to check MCP access token as client")?;
+        if let Some(row) = token_row {
+            return Ok(Some(McpOAuthClient {
+                id: row.get("id"),
+                client_id: row.get("token_prefix"),
+                client_name: row.get("name"),
+                redirect_uris: vec![],
+                scopes: row.get("scopes"),
+                is_active: row.get("is_active"),
+                created_at: format_datetime(row.get("created_at")),
+            }));
+        }
+        Ok(None)
+    }
+
+    pub async fn verify_mcp_oauth_client(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+    ) -> anyhow::Result<Option<McpOAuthClient>> {
+        let secret_hash = hash_bearer_token(client_secret);
+        let row = query(
+            r#"
+            SELECT id::text, client_id, client_name, redirect_uris, scopes, is_active, created_at
+            FROM mcp_oauth_clients
+            WHERE client_id = $1
+              AND client_secret_hash = $2
+              AND is_active = TRUE
+            "#,
+        )
+        .bind(client_id)
+        .bind(&secret_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to verify MCP OAuth client")?;
+        if let Some(row) = row {
+            return Ok(Some(mcp_oauth_client_from_row(row)));
+        }
+        let token_row = query(
+            r#"
+            SELECT id::text, name, token_prefix, scopes, is_active, created_at
+            FROM mcp_access_tokens
+            WHERE (token_prefix = $1 OR id::text = $1)
+              AND token_hash = $2
+              AND is_active = TRUE
+              AND revoked_at IS NULL
+            "#,
+        )
+        .bind(client_id)
+        .bind(&secret_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to verify MCP access token as client credentials")?;
+        if let Some(row) = token_row {
+            return Ok(Some(McpOAuthClient {
+                id: row.get("id"),
+                client_id: row.get("token_prefix"),
+                client_name: row.get("name"),
+                redirect_uris: vec![],
+                scopes: row.get("scopes"),
+                is_active: row.get("is_active"),
+                created_at: format_datetime(row.get("created_at")),
+            }));
+        }
+        Ok(None)
+    }
+
+    pub async fn create_mcp_oauth_code(
+        &self,
+        client_id: &str,
+        redirect_uri: &str,
+        scopes: &[String],
+        code_challenge: Option<&str>,
+        code_challenge_method: Option<&str>,
+    ) -> anyhow::Result<String> {
+        let code = secure_url_token("pm_code_", 32);
+        query(
+            r#"
+            INSERT INTO mcp_oauth_codes (code, client_id, redirect_uri, scopes, code_challenge, code_challenge_method, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6, now() + interval '5 minutes')
+            "#,
+        )
+        .bind(&code)
+        .bind(client_id)
+        .bind(redirect_uri)
+        .bind(scopes)
+        .bind(code_challenge)
+        .bind(code_challenge_method)
+        .execute(&self.pool)
+        .await
+        .context("failed to create MCP OAuth code")?;
+        Ok(code)
+    }
+
+    pub async fn consume_mcp_oauth_code(
+        &self,
+        code: &str,
+        client_id: &str,
+        redirect_uri: &str,
+        code_verifier: Option<&str>,
+    ) -> anyhow::Result<Vec<String>> {
+        let row = query(
+            r#"
+            SELECT code, client_id, redirect_uri, scopes, code_challenge, code_challenge_method, expires_at, used
+            FROM mcp_oauth_codes
+            WHERE code = $1
+            "#,
+        )
+        .bind(code)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to query MCP OAuth code")?
+        .ok_or_else(|| anyhow::anyhow!("invalid authorization code"))?;
+
+        let used: bool = row.get("used");
+        if used {
+            bail!("authorization code has already been used");
+        }
+        let expires_at: chrono::DateTime<chrono::Utc> = row.get("expires_at");
+        if expires_at < chrono::Utc::now() {
+            bail!("authorization code has expired");
+        }
+        let expected_client_id: String = row.get("client_id");
+        if expected_client_id != client_id {
+            bail!("authorization code client_id mismatch");
+        }
+        let expected_redirect_uri: String = row.get("redirect_uri");
+        if !expected_redirect_uri.is_empty() && expected_redirect_uri != redirect_uri {
+            bail!("authorization code redirect_uri mismatch");
+        }
+        let code_challenge: Option<String> = row.get("code_challenge");
+        let code_challenge_method: Option<String> = row.get("code_challenge_method");
+        if let Some(challenge) = code_challenge {
+            let verifier =
+                code_verifier.ok_or_else(|| anyhow::anyhow!("code_verifier required for PKCE"))?;
+            let method = code_challenge_method.as_deref().unwrap_or("plain");
+            if method == "S256" {
+                let computed = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+                if computed != challenge {
+                    bail!("PKCE verification failed");
+                }
+            } else if method == "plain" {
+                if verifier != challenge {
+                    bail!("PKCE plain verification failed");
+                }
+            } else {
+                bail!("unsupported code_challenge_method: {method}");
+            }
+        }
+        query("UPDATE mcp_oauth_codes SET used = TRUE WHERE code = $1")
+            .bind(code)
+            .execute(&self.pool)
+            .await
+            .context("failed to mark MCP OAuth code as used")?;
+
+        let scopes: Vec<String> = row.get("scopes");
+        Ok(scopes)
+    }
+
+    pub async fn issue_mcp_oauth_tokens(
+        &self,
+        client_id: &str,
+        scopes: &[String],
+    ) -> anyhow::Result<(String, String, i64)> {
+        let access_token = secure_url_token("pm_at_", 32);
+        let refresh_token = secure_url_token("pm_rt_", 32);
+        let token_hash = hash_bearer_token(&access_token);
+        let refresh_token_hash = hash_bearer_token(&refresh_token);
+        let expires_in: i64 = 86400;
+
+        query(
+            r#"
+            INSERT INTO mcp_oauth_tokens (client_id, token_hash, refresh_token_hash, scopes, expires_at)
+            VALUES ($1, $2, $3, $4, now() + interval '24 hours')
+            "#,
+        )
+        .bind(client_id)
+        .bind(&token_hash)
+        .bind(&refresh_token_hash)
+        .bind(scopes)
+        .execute(&self.pool)
+        .await
+        .context("failed to issue MCP OAuth tokens")?;
+
+        Ok((access_token, refresh_token, expires_in))
+    }
+
+    pub async fn refresh_mcp_oauth_token(
+        &self,
+        refresh_token: &str,
+        client_id: Option<&str>,
+    ) -> anyhow::Result<(String, String, i64, Vec<String>)> {
+        let refresh_hash = hash_bearer_token(refresh_token);
+        let row = query(
+            r#"
+            SELECT id::text, client_id, scopes, is_active
+            FROM mcp_oauth_tokens
+            WHERE refresh_token_hash = $1
+              AND is_active = TRUE
+            "#,
+        )
+        .bind(&refresh_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to query refresh token")?
+        .ok_or_else(|| anyhow::anyhow!("invalid refresh token"))?;
+
+        let token_client_id: String = row.get("client_id");
+        if let Some(expected_id) = client_id {
+            if expected_id != token_client_id {
+                bail!("client_id mismatch for refresh token");
+            }
+        }
+        let id: String = row.get("id");
+        let scopes: Vec<String> = row.get("scopes");
+        query("UPDATE mcp_oauth_tokens SET is_active = FALSE WHERE id = $1::uuid")
+            .bind(&id)
+            .execute(&self.pool)
+            .await
+            .context("failed to deactivate refreshed token")?;
+
+        let (new_access, new_refresh, expires_in) = self
+            .issue_mcp_oauth_tokens(&token_client_id, &scopes)
+            .await?;
+        Ok((new_access, new_refresh, expires_in, scopes))
     }
 
     pub async fn record_mcp_token_used(&self, token_id: &str) -> anyhow::Result<()> {
@@ -5596,6 +5980,9 @@ fn mcp_settings_from_row(row: PgRow) -> McpSettings {
         endpoint_path: row.get("endpoint_path"),
         bind_host: row.get("bind_host"),
         require_auth: row.get("require_auth"),
+        auth_mode: row
+            .try_get("auth_mode")
+            .unwrap_or_else(|_| "hybrid".to_string()),
         read_tools_enabled: row.get("read_tools_enabled"),
         write_tools_enabled: row.get("write_tools_enabled"),
         admin_tools_enabled: row.get("admin_tools_enabled"),
@@ -5604,6 +5991,18 @@ fn mcp_settings_from_row(row: PgRow) -> McpSettings {
         allow_localhost_only: row.get("allow_localhost_only"),
         created_at: format_datetime(row.get("created_at")),
         updated_at: format_datetime(row.get("updated_at")),
+    }
+}
+
+fn mcp_oauth_client_from_row(row: PgRow) -> McpOAuthClient {
+    McpOAuthClient {
+        id: row.get("id"),
+        client_id: row.get("client_id"),
+        client_name: row.get("client_name"),
+        redirect_uris: row.get("redirect_uris"),
+        scopes: row.get("scopes"),
+        is_active: row.get("is_active"),
+        created_at: format_datetime(row.get("created_at")),
     }
 }
 
@@ -6143,6 +6542,11 @@ fn validate_mcp_settings_update(update: &McpSettingsUpdate) -> anyhow::Result<()
     if !update.require_auth {
         bail!("MCP authentication cannot be disabled");
     }
+    if let Some(auth_mode) = &update.auth_mode {
+        if auth_mode != "hybrid" && auth_mode != "token" && auth_mode != "oauth2" {
+            bail!("authMode must be 'hybrid', 'token', or 'oauth2'");
+        }
+    }
     Ok(())
 }
 
@@ -6598,6 +7002,7 @@ mod tests {
             endpoint_path: "/mcp".to_string(),
             bind_host: Some("127.0.0.1".to_string()),
             require_auth: true,
+            auth_mode: Some("hybrid".to_string()),
             read_tools_enabled: true,
             write_tools_enabled: false,
             admin_tools_enabled: false,

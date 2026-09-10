@@ -5,14 +5,15 @@ use axum::http::{HeaderMap, header};
 pub async fn authorize_request(
     state: &AppState,
     headers: &HeaderMap,
+    auth_mode: &str,
 ) -> anyhow::Result<McpTokenAuthorization> {
     let token =
         bearer_token(headers).ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
     let authorization = state
         .catalog
-        .authorize_mcp_token(&token)
+        .authorize_mcp_token_or_oauth(&token, auth_mode)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("MCP token is invalid or revoked"))?;
+        .ok_or_else(|| anyhow::anyhow!("MCP token is invalid, expired, or revoked"))?;
     state
         .catalog
         .record_mcp_token_used(&authorization.id)
