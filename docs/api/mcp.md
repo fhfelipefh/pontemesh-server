@@ -30,10 +30,47 @@ GET /api/admin/mcp/activity
 
 Essas rotas exigem sessão administrativa.
 
-## Segurança
+## Segurança e Modelos de Autenticação
 
 MCP mantém autenticação obrigatória. A configuração não permite desabilitar
 `requireAuth`.
+
+O Ponte Mesh Server suporta três modelos de autenticação configuráveis:
+
+1. **Híbrido (`hybrid`, padrão)**: Aceita tanto tokens Bearer estáticos (`pm_mcp_...`)
+   quanto tokens de acesso emitidos via OAuth 2.0 (Authorization Code + PKCE,
+   Client Credentials e Refresh Token). Compatível simultaneamente com clientes
+   tradicionais MCP e plataformas como Gemini Spark.
+2. **OAuth 2.0 (`oauth2`)**: Exige tokens de acesso emitidos pelos fluxos OAuth 2.0
+   do servidor. Ideal para integrações com Gemini Spark (Connected Apps) e
+   provedores corporativos.
+3. **Token Estático (`token`)**: Aceita exclusivamente tokens Bearer pré-compartilhados
+   gerados pelo administrador.
+
+### Integração com Gemini Spark (Connected Apps)
+
+O Gemini exige autenticação padrão OAuth 2.0 para conexões de servidor MCP. Para
+atender aos requisitos do ecossistema Gemini e da especificação Model Context Protocol,
+o servidor implementa:
+
+* **RFC 9728 (OAuth 2.0 Protected Resource Metadata)**:
+  `GET /.well-known/oauth-protected-resource`
+* **RFC 8414 (OAuth 2.0 Authorization Server Metadata)**:
+  `GET /.well-known/oauth-authorization-server`
+* **RFC 7591 (Dynamic Client Registration)**:
+  `POST /oauth/register`
+* **RFC 7636 (Proof Key for Code Exchange - PKCE com S256)**:
+  `GET/POST /oauth/authorize` e `POST /oauth/token`
+* **Client Credentials Grant**:
+  `POST /oauth/token` com `grant_type=client_credentials`
+* **Descoberta via HTTP 401**:
+  Ao receber requisições não autenticadas em `/mcp`, o servidor responde com status
+  `401 Unauthorized` e o cabeçalho:
+  `WWW-Authenticate: Bearer resource_metadata="https://<host>/.well-known/oauth-protected-resource"`
+
+Clientes podem utilizar tanto o fluxo de autorização com consentimento administrativo
+quanto autenticação direta via Client Credentials (onde o prefixo do token MCP atua
+como `client_id` e o segredo completo como `client_secret`).
 
 Controles aplicados:
 

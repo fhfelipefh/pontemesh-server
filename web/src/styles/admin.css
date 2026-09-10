@@ -1337,6 +1337,53 @@
   min-height: 52px;
 }
 
+.settings-toggle-row select {
+  min-width: 140px;
+  border: 1px solid var(--pm-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--pm-surface);
+  color: var(--pm-deep-navy);
+  font-size: 0.85rem;
+}
+
+.mcp-oauth-endpoints-box {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--pm-surface);
+  border: 1px solid var(--pm-border-soft);
+}
+
+.mcp-oauth-endpoints-box h4 {
+  margin: 0 0 6px 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--pm-deep-navy);
+}
+
+.mcp-oauth-endpoints-box p {
+  margin: 0 0 10px 0;
+  font-size: 0.82rem;
+  color: var(--pm-muted);
+}
+
+.mcp-oauth-endpoints-list {
+  display: grid;
+  gap: 6px;
+  font-size: 0.82rem;
+}
+
+.mcp-oauth-endpoints-list code {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--pm-surface-strong);
+  border: 1px solid var(--pm-border-soft);
+  color: var(--pm-primary-blue);
+  font-family: monospace;
+}
+
 .settings-toggle-row button {
   flex: 0 0 auto;
   position: relative;

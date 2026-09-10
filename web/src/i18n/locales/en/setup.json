@@ -460,7 +460,16 @@
         "adminTools": "Admin tools",
         "fullAdmin": "Full administration",
         "tokenScopes": "Scopes",
-        "permissionWarning": "Write and admin scopes change server data."
+        "permissionWarning": "Write and admin scopes change server data.",
+        "authMode": "Authentication model",
+        "authModeHybrid": "Hybrid (OAuth 2.0 + Static Token)",
+        "authModeOAuth2": "OAuth 2.0 (Gemini Spark / RFC 9728)",
+        "authModeToken": "Static Token (Ponte Mesh Default)",
+        "geminiSparkHint": "Gemini Spark (Connected Apps) support: RFC 9728 and RFC 8414 compliant. Connect using your MCP server URL with OAuth 2.0 or client credentials.",
+        "oauthEndpoints": "OAuth 2.0 Endpoints",
+        "resourceMetadata": "Resource Metadata (RFC 9728)",
+        "authServerMetadata": "Auth Server Metadata (RFC 8414)",
+        "tokenEndpoint": "Token Endpoint"
       },
       "s3": {
         "title": "S3 Credentials",

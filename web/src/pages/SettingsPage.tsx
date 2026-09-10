@@ -490,6 +490,7 @@ export function SettingsPage({ role }: { role?: string }) {
         endpointPath: nextSettings.endpointPath,
         bindHost: nextSettings.bindHost,
         requireAuth: nextSettings.requireAuth,
+        authMode: nextSettings.authMode,
         readToolsEnabled: nextSettings.readToolsEnabled,
         writeToolsEnabled: nextSettings.writeToolsEnabled,
         adminToolsEnabled: nextSettings.adminToolsEnabled,

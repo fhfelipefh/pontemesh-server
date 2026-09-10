@@ -158,7 +158,8 @@ export function McpSettingsCard({
 
           <div className="mcp-tab-content">
             {activeTab === "settings" && (
-              <div className="mcp-settings-grid">
+              <>
+                <div className="mcp-settings-grid">
                 <ToggleRow
                   label={t("setup.settings.mcp.enable")}
                   checked={settings.enabled}
@@ -170,6 +171,23 @@ export function McpSettingsCard({
                   checked={settings.requireAuth}
                   disabled
                 />
+                <div className="settings-toggle-row">
+                  <span>{t("setup.settings.mcp.authMode")}</span>
+                  <select
+                    value={settings.authMode || "hybrid"}
+                    disabled={saving}
+                    onChange={event =>
+                      update({
+                        authMode: event.target.value as "hybrid" | "token" | "oauth2"
+                      })
+                    }
+                    aria-label={t("setup.settings.mcp.authMode")}
+                  >
+                    <option value="hybrid">{t("setup.settings.mcp.authModeHybrid")}</option>
+                    <option value="oauth2">{t("setup.settings.mcp.authModeOAuth2")}</option>
+                    <option value="token">{t("setup.settings.mcp.authModeToken")}</option>
+                  </select>
+                </div>
                 <ToggleRow
                   label={t("setup.settings.mcp.localhostOnly")}
                   checked={settings.allowLocalhostOnly}
@@ -207,7 +225,28 @@ export function McpSettingsCard({
                   onChange={checked => update({ exposePrompts: checked })}
                 />
               </div>
-            )}
+              {settings.authMode !== "token" && (
+                <div className="mcp-oauth-endpoints-box">
+                  <h4>{t("setup.settings.mcp.oauthEndpoints")}</h4>
+                  <p>{t("setup.settings.mcp.geminiSparkHint")}</p>
+                  <div className="mcp-oauth-endpoints-list">
+                    <div>
+                      <strong>{t("setup.settings.mcp.resourceMetadata")}:</strong>
+                      <code>/.well-known/oauth-protected-resource</code>
+                    </div>
+                    <div>
+                      <strong>{t("setup.settings.mcp.authServerMetadata")}:</strong>
+                      <code>/.well-known/oauth-authorization-server</code>
+                    </div>
+                    <div>
+                      <strong>{t("setup.settings.mcp.tokenEndpoint")}:</strong>
+                      <code>/oauth/token</code>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
 
             {activeTab === "tokens" && (
               <div className="mcp-tokens-tab">

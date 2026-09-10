@@ -255,6 +255,8 @@ pub struct ConfigurationMcpSettings {
     pub endpoint_path: String,
     pub bind_host: Option<String>,
     pub require_auth: bool,
+    #[serde(default)]
+    pub auth_mode: Option<String>,
     pub read_tools_enabled: bool,
     pub write_tools_enabled: bool,
     #[serde(default)]
@@ -769,6 +771,7 @@ pub async fn export_configuration(State(state): State<AppState>) -> Response {
             endpoint_path: settings.endpoint_path,
             bind_host: settings.bind_host,
             require_auth: settings.require_auth,
+            auth_mode: Some(settings.auth_mode),
             read_tools_enabled: settings.read_tools_enabled,
             write_tools_enabled: settings.write_tools_enabled,
             admin_tools_enabled: settings.admin_tools_enabled,
@@ -807,6 +810,7 @@ pub async fn import_configuration(
             endpoint_path: settings.endpoint_path,
             bind_host: settings.bind_host,
             require_auth: settings.require_auth,
+            auth_mode: settings.auth_mode,
             read_tools_enabled: settings.read_tools_enabled,
             write_tools_enabled: settings.write_tools_enabled,
             admin_tools_enabled: settings.admin_tools_enabled,
@@ -966,6 +970,65 @@ pub async fn revoke_mcp_token(
                 Some(&session.username),
                 "success",
                 "MCP token revoked",
+            );
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMcpOAuthClientRequest {
+    pub name: String,
+    pub redirect_uris: Option<Vec<String>>,
+    pub scopes: Option<Vec<String>>,
+}
+
+pub async fn list_mcp_oauth_clients(State(state): State<AppState>) -> Response {
+    match state.catalog.list_mcp_oauth_clients().await {
+        Ok(clients) => Json(clients).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub async fn create_mcp_oauth_client(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(payload): Json<CreateMcpOAuthClientRequest>,
+) -> Response {
+    let redirect_uris = payload.redirect_uris.unwrap_or_default();
+    let scopes = payload.scopes.unwrap_or_else(|| vec!["read".to_string()]);
+    match state
+        .catalog
+        .create_mcp_oauth_client(&payload.name, &redirect_uris, &scopes)
+        .await
+    {
+        Ok(client) => {
+            audit::event(
+                "MCP_OAUTH_CLIENT_CREATED",
+                Some(&session.username),
+                "success",
+                "MCP OAuth client created",
+            );
+            (StatusCode::CREATED, Json(client)).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+pub async fn revoke_mcp_oauth_client(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Path(id): Path<String>,
+) -> Response {
+    match state.catalog.revoke_mcp_oauth_client(&id).await {
+        Ok(()) => {
+            audit::event(
+                "MCP_OAUTH_CLIENT_REVOKED",
+                Some(&session.username),
+                "success",
+                "MCP OAuth client revoked",
             );
             StatusCode::NO_CONTENT.into_response()
         }
