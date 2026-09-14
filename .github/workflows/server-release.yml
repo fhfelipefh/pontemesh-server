@@ -22,6 +22,7 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      should_release: ${{ steps.release.outputs.should_release }}
 
     steps:
       - name: Checkout repository
@@ -39,9 +40,20 @@ jobs:
             echo "Cargo.toml version must use semver format, for example 0.1.0."
             exit 1
           fi
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && git rev-parse "v$version" >/dev/null 2>&1; then
+          git fetch --tags --force origin 2>/dev/null || true
+          tag_exists=false
+          if git rev-parse "refs/tags/v$version" >/dev/null 2>&1 || git rev-parse "v$version" >/dev/null 2>&1; then
+            tag_exists=true
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$tag_exists" = "true" ]; then
             echo "Tag v$version already exists."
             exit 1
+          fi
+          should_release=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            should_release=true
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ] && [ "$tag_exists" = "false" ]; then
+            should_release=true
           fi
           prerelease=false
           if [[ "$version" == *-* ]]; then
@@ -49,11 +61,12 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "should_release=$should_release" >> "$GITHUB_OUTPUT"
 
   web:
     name: Validate and build web panel
     needs: validate
-    if: github.event_name == 'workflow_dispatch'
+    if: needs.validate.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -88,7 +101,7 @@ jobs:
   build:
     name: Build server ${{ matrix.target.name }}
     needs: [validate, web]
-    if: github.event_name == 'workflow_dispatch'
+    if: needs.validate.outputs.should_release == 'true'
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
     strategy:
@@ -173,8 +186,14 @@ jobs:
 
   publish:
     name: Publish server release
-    needs: [validate, build]
-    if: github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner
+    needs: [validate, build, quality]
+    if: >-
+      always() &&
+      needs.validate.result == 'success' &&
+      needs.build.result == 'success' &&
+      (needs.quality.result == 'success' || (github.event_name == 'workflow_dispatch' && needs.quality.result == 'skipped')) &&
+      needs.validate.outputs.should_release == 'true' &&
+      github.actor == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
