@@ -9,6 +9,7 @@ import { ConfigurePage } from "./pages/ConfigurePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MetricsPage } from "./pages/MetricsPage";
+import { McpPage } from "./pages/McpPage";
 import { ObjectsPage } from "./pages/ObjectsPage";
 import { ReplicasPage } from "./pages/ReplicasPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -128,6 +129,7 @@ function SetupRoutes() {
       <Route path="/replicas" element={adminElement(<ReplicasPage />)} />
       <Route path="/metrics" element={adminElement(<MetricsPage />)} />
       <Route path="/users" element={user?.role === "admin" ? adminElement(<UsersPage />) : <Navigate to="/dashboard" replace />} />
+      <Route path="/mcp" element={adminElement(<McpPage />)} />
       <Route path="/settings" element={adminElement(<SettingsPage role={user?.role} />)} />
       <Route path="*" element={<Navigate to={setupRequired ? "/setup" : "/"} replace />} />
     </Routes>

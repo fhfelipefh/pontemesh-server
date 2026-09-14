@@ -17,6 +17,7 @@ import { getInstanceSummary } from "../api/dashboardApi";
 import logoIcon from "../assets/logo-icon.png";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { ThemeToggle } from "./ThemeToggle";
+import { McpIcon } from "./McpIcon";
 
 type AdminLayoutProps = {
   children: ReactNode;
@@ -38,6 +39,7 @@ export function AdminLayout({ children, instanceName, username, role, onLogout }
     { to: "/replicas", label: t("setup.nav.replicas"), icon: Share2, enabled: true, adminOnly: true },
     { to: "/users", label: t("setup.nav.users"), icon: Users, enabled: true, adminOnly: true },
     { to: "/metrics", label: t("setup.nav.metrics"), icon: BarChart3, enabled: true },
+    { to: "/mcp", label: t("setup.nav.mcp"), icon: McpIcon, enabled: true },
     { to: "/settings", label: t("setup.nav.settings"), icon: Settings, enabled: true }
   ];
 

@@ -15,6 +15,7 @@ import { CredentialTable } from "./CredentialTable";
 import { EmptyState } from "./EmptyState";
 import { StatusBadge } from "./StatusBadge";
 import { IconButton } from "./IconButton";
+import { McpIcon } from "../McpIcon";
 
 export type McpSettingsCardProps = {
   settings: McpSettings | null;
@@ -81,7 +82,7 @@ export function McpSettingsCard({
       className="settings-card--wide"
       id="mcp"
       title={t("setup.settings.mcp.title")}
-      icon={<Network size={20} />}
+      icon={<McpIcon size={20} />}
     >
       {error ? <p className="error-message">{error}</p> : null}
 

@@ -6,7 +6,7 @@ import {
   expectNoTinyTextInputs
 } from "./helpers/layoutAssertions";
 
-const routes = ["/dashboard", "/buckets", "/objects", "/settings", "/metrics", "/replicas"];
+const routes = ["/dashboard", "/buckets", "/objects", "/settings", "/metrics", "/replicas", "/mcp"];
 
 test.describe("UI quality checks for main admin pages", () => {
   test.beforeEach(async ({ page }) => {

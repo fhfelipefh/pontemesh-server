@@ -30,20 +30,6 @@ import {
   revokeS3AccessKey,
 } from "../api/s3KeysApi";
 import {
-  CreatedMcpAccessToken,
-  McpAccessTokenSummary,
-  McpActivityRecord,
-  McpSettings,
-  McpStatus,
-  createMcpToken,
-  getMcpSettings,
-  getMcpStatus,
-  listMcpActivity,
-  listMcpTokens,
-  revokeMcpToken,
-  updateMcpSettings,
-} from "../api/mcpApi";
-import {
   ConfigurationImportResult,
   exportConfiguration,
   importConfiguration,
@@ -70,14 +56,12 @@ import { SettingsSection } from "../components/settings/SettingsSection";
 import { SpeedTestCard } from "../components/settings/SpeedTestCard";
 import { StorageCapacityCard } from "../components/settings/StorageCapacityCard";
 import { ConfigurationBackupCard } from "../components/settings/ConfigurationBackupCard";
-import { McpSettingsCard } from "../components/settings/McpSettingsCard";
 import { ApplicationCredentialsCard } from "../components/settings/ApplicationCredentialsCard";
 const S3_KEYS_PAGE_SIZE = 10;
 
 type DestructiveConfirmation =
   | { kind: "s3Key"; id: string; name: string }
   | { kind: "application"; id: string; name: string }
-  | { kind: "mcpToken"; id: string; name: string }
   | null;
 
 export function SettingsPage({ role }: { role?: string }) {
@@ -108,19 +92,7 @@ export function SettingsPage({ role }: { role?: string }) {
     null
   );
   const [applicationError, setApplicationError] = useState("");
-  const [mcpSettings, setMcpSettings] = useState<McpSettings | null>(null);
-  const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null);
-  const [mcpTokens, setMcpTokens] = useState<McpAccessTokenSummary[]>([]);
-  const [mcpActivity, setMcpActivity] = useState<McpActivityRecord[]>([]);
-  const [mcpTokenName, setMcpTokenName] = useState("default-mcp-client");
-  const [mcpTokenScopes, setMcpTokenScopes] = useState<string[]>(["read"]);
-  const [createdMcpToken, setCreatedMcpToken] =
-    useState<CreatedMcpAccessToken | null>(null);
-  const [loadingMcp, setLoadingMcp] = useState(true);
-  const [savingMcp, setSavingMcp] = useState(false);
-  const [creatingMcpToken, setCreatingMcpToken] = useState(false);
-  const [revokingMcpToken, setRevokingMcpToken] = useState<string | null>(null);
-  const [mcpError, setMcpError] = useState("");
+
   const [configurationImporting, setConfigurationImporting] = useState(false);
   const [configurationResult, setConfigurationResult] =
     useState<ConfigurationImportResult | null>(null);
@@ -372,34 +344,7 @@ export function SettingsPage({ role }: { role?: string }) {
     void refreshApplications();
   }, [refreshApplications]);
 
-  const refreshMcp = useCallback(async () => {
-    setLoadingMcp(true);
-    setMcpError("");
-    try {
-      const [settings, status, tokens, activity] = await Promise.all([
-        getMcpSettings(),
-        getMcpStatus(),
-        listMcpTokens(),
-        listMcpActivity(),
-      ]);
-      setMcpSettings(settings);
-      setMcpStatus(status);
-      setMcpTokens(tokens);
-      setMcpActivity(activity);
-    } catch (loadError) {
-      setMcpError(
-        loadError instanceof Error
-          ? loadError.message
-          : t("setup.settings.mcp.loadFailed")
-      );
-    } finally {
-      setLoadingMcp(false);
-    }
-  }, [t]);
 
-  useEffect(() => {
-    void refreshMcp();
-  }, [refreshMcp]);
 
   async function handleCreateKey() {
     setCreating(true);
@@ -481,76 +426,7 @@ export function SettingsPage({ role }: { role?: string }) {
     }
   }
 
-  async function handleUpdateMcpSettings(nextSettings: McpSettings) {
-    setSavingMcp(true);
-    setMcpError("");
-    try {
-      const saved = await updateMcpSettings({
-        enabled: nextSettings.enabled,
-        endpointPath: nextSettings.endpointPath,
-        bindHost: nextSettings.bindHost,
-        requireAuth: nextSettings.requireAuth,
-        authMode: nextSettings.authMode,
-        readToolsEnabled: nextSettings.readToolsEnabled,
-        writeToolsEnabled: nextSettings.writeToolsEnabled,
-        adminToolsEnabled: nextSettings.adminToolsEnabled,
-        exposeResources: nextSettings.exposeResources,
-        exposePrompts: nextSettings.exposePrompts,
-        allowLocalhostOnly: nextSettings.allowLocalhostOnly,
-      });
-      setMcpSettings(saved);
-      setMcpStatus(await getMcpStatus());
-    } catch (saveError) {
-      setMcpError(
-        saveError instanceof Error
-          ? saveError.message
-          : t("setup.settings.mcp.saveFailed")
-      );
-    } finally {
-      setSavingMcp(false);
-    }
-  }
 
-  async function handleCreateMcpToken() {
-    if (!mcpTokenName.trim()) {
-      return;
-    }
-    setCreatingMcpToken(true);
-    setMcpError("");
-    try {
-      const created = await createMcpToken(mcpTokenName, mcpTokenScopes);
-      setCreatedMcpToken(created);
-      setMcpTokenName("");
-      setMcpTokenScopes(["read"]);
-      setMcpTokens(await listMcpTokens());
-    } catch (createError) {
-      setMcpError(
-        createError instanceof Error
-          ? createError.message
-          : t("setup.settings.mcp.createTokenFailed")
-      );
-    } finally {
-      setCreatingMcpToken(false);
-    }
-  }
-
-  async function handleRevokeMcpToken(id: string) {
-    setRevokingMcpToken(id);
-    setMcpError("");
-    try {
-      await revokeMcpToken(id);
-      setDestructiveConfirmation(null);
-      setMcpTokens(await listMcpTokens());
-    } catch (revokeError) {
-      setMcpError(
-        revokeError instanceof Error
-          ? revokeError.message
-          : t("setup.settings.mcp.revokeTokenFailed")
-      );
-    } finally {
-      setRevokingMcpToken(null);
-    }
-  }
 
   async function handleExportConfiguration() {
     setConfigurationError("");
@@ -581,7 +457,7 @@ export function SettingsPage({ role }: { role?: string }) {
     try {
       const result = await importConfiguration(file);
       setConfigurationResult(result);
-      await Promise.all([refreshMcp(), refreshKeys(currentPage)]);
+      await refreshKeys(currentPage);
     } catch (importError) {
       setConfigurationError(
         importError instanceof Error
@@ -705,29 +581,7 @@ export function SettingsPage({ role }: { role?: string }) {
           onUpdate={() => setServerUpdateConfirmation(true)}
         />
         <SpeedTestCard />
-        
-        <McpSettingsCard
-          settings={mcpSettings}
-          status={mcpStatus}
-          tokens={mcpTokens}
-          activity={mcpActivity}
-          tokenName={mcpTokenName}
-          tokenScopes={mcpTokenScopes}
-          onTokenScopesChange={setMcpTokenScopes}
-          createdToken={createdMcpToken}
-          loading={loadingMcp}
-          saving={savingMcp}
-          creatingToken={creatingMcpToken}
-          revokingToken={revokingMcpToken}
-          error={mcpError}
-          onTokenNameChange={setMcpTokenName}
-          onUpdateSettings={handleUpdateMcpSettings}
-          onCreateToken={handleCreateMcpToken}
-          onDismissCreatedToken={() => setCreatedMcpToken(null)}
-          onRevokeToken={(id, name) =>
-            setDestructiveConfirmation({ kind: "mcpToken", id, name })
-          }
-        />
+
         <ApplicationCredentialsCard
           applications={applications}
           createdApplication={createdApplication}
@@ -780,22 +634,16 @@ export function SettingsPage({ role }: { role?: string }) {
           title={
             destructiveConfirmation.kind === "s3Key"
               ? t("setup.settings.s3.confirmRevokeTitle")
-              : destructiveConfirmation.kind === "application"
-                ? t("setup.settings.applications.confirmRevokeTitle")
-                : t("setup.settings.mcp.confirmRevokeTokenTitle")
+              : t("setup.settings.applications.confirmRevokeTitle")
           }
           description={
             destructiveConfirmation.kind === "s3Key"
               ? t("setup.settings.s3.confirmRevokeDescription", {
                   name: destructiveConfirmation.name,
                 })
-              : destructiveConfirmation.kind === "application"
-                ? t("setup.settings.applications.confirmRevokeDescription", {
-                    name: destructiveConfirmation.name,
-                  })
-                : t("setup.settings.mcp.confirmRevokeTokenDescription", {
-                    name: destructiveConfirmation.name,
-                  })
+              : t("setup.settings.applications.confirmRevokeDescription", {
+                  name: destructiveConfirmation.name,
+                })
           }
           onCancel={() => setDestructiveConfirmation(null)}
           onConfirm={() => {
@@ -803,11 +651,7 @@ export function SettingsPage({ role }: { role?: string }) {
               void handleRevokeKey(destructiveConfirmation.id);
               return;
             }
-            if (destructiveConfirmation.kind === "application") {
-              void handleRevokeApplication(destructiveConfirmation.id);
-              return;
-            }
-            void handleRevokeMcpToken(destructiveConfirmation.id);
+            void handleRevokeApplication(destructiveConfirmation.id);
           }}
         />
       ) : null}

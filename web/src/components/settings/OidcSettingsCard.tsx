@@ -66,44 +66,45 @@ export function OidcSettingsCard({ settings, onSettingsUpdated }: OidcSettingsCa
           onChange={setEnabled}
         />
 
-        <div className="settings-form__field">
-          <label htmlFor="oidcIssuerUrl">Issuer URL</label>
-          <input
-            id="oidcIssuerUrl"
-            type="url"
-            value={issuerUrl}
-            onChange={(e) => setIssuerUrl(e.target.value)}
-            placeholder="https://keycloak.example.com/realms/master"
-            disabled={!enabled}
-            required={enabled}
-          />
-        </div>
+        {enabled ? (
+          <>
+            <div className="settings-form__field">
+              <label htmlFor="oidcIssuerUrl">Issuer URL</label>
+              <input
+                id="oidcIssuerUrl"
+                type="url"
+                value={issuerUrl}
+                onChange={(e) => setIssuerUrl(e.target.value)}
+                placeholder="https://keycloak.example.com/realms/master"
+                required={enabled}
+              />
+            </div>
 
-        <div className="settings-form__field">
-          <label htmlFor="oidcClientId">Client ID</label>
-          <input
-            id="oidcClientId"
-            type="text"
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            placeholder="pontemesh"
-            disabled={!enabled}
-            required={enabled}
-          />
-        </div>
+            <div className="settings-form__field">
+              <label htmlFor="oidcClientId">Client ID</label>
+              <input
+                id="oidcClientId"
+                type="text"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                placeholder="pontemesh"
+                required={enabled}
+              />
+            </div>
 
-        <div className="settings-form__field">
-          <label htmlFor="oidcClientSecret">Client Secret</label>
-          <input
-            id="oidcClientSecret"
-            type="password"
-            value={clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-            placeholder="Client Secret"
-            disabled={!enabled}
-            required={enabled}
-          />
-        </div>
+            <div className="settings-form__field">
+              <label htmlFor="oidcClientSecret">Client Secret</label>
+              <input
+                id="oidcClientSecret"
+                type="password"
+                value={clientSecret}
+                onChange={(e) => setClientSecret(e.target.value)}
+                placeholder="Client Secret"
+                required={enabled}
+              />
+            </div>
+          </>
+        ) : null}
 
         {error ? <p className="error-message">{error}</p> : null}
 
