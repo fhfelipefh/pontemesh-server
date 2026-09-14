@@ -139,12 +139,13 @@ export type McpOAuthClientSummary = {
   clientId: string;
   clientName: string;
   redirectUris: string[];
-  clientUri: string | null;
+  clientUri?: string | null;
   scopes: string[];
-  active: boolean;
+  isActive: boolean;
+  active?: boolean;
   createdAt: string;
-  revokedAt: string | null;
-  lastUsedAt: string | null;
+  revokedAt?: string | null;
+  lastUsedAt?: string | null;
 };
 
 export type CreatedMcpOAuthClient = {

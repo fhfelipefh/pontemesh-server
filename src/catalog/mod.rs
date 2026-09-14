@@ -774,6 +774,7 @@ pub struct McpTokenAuthorization {
     pub id: String,
     pub name: String,
     pub scopes: Vec<String>,
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -3288,7 +3289,7 @@ impl Catalog {
         let token_hash = hash_bearer_token(token);
         let row = query(
             r#"
-            SELECT id::text, name, scopes
+            SELECT id::text, name, scopes, created_by_user_id::text AS user_id
             FROM mcp_access_tokens
             WHERE token_hash = $1
               AND is_active = TRUE
@@ -3303,6 +3304,7 @@ impl Catalog {
             id: row.get("id"),
             name: row.get("name"),
             scopes: row.get("scopes"),
+            user_id: row.get("user_id"),
         }))
     }
 
@@ -3320,7 +3322,7 @@ impl Catalog {
             let token_hash = hash_bearer_token(token);
             let row = query(
                 r#"
-                SELECT id::text, client_id, scopes
+                SELECT id::text, client_id, scopes, user_id::text AS user_id
                 FROM mcp_oauth_tokens
                 WHERE token_hash = $1
                   AND is_active = TRUE
@@ -3335,6 +3337,7 @@ impl Catalog {
                 let id: String = row.get("id");
                 let client_id: String = row.get("client_id");
                 let scopes: Vec<String> = row.get("scopes");
+                let user_id: Option<String> = row.get("user_id");
                 let _ =
                     query("UPDATE mcp_oauth_tokens SET last_used_at = now() WHERE id = $1::uuid")
                         .bind(&id)
@@ -3344,6 +3347,7 @@ impl Catalog {
                     id,
                     name: client_id,
                     scopes,
+                    user_id,
                 }));
             }
         }
@@ -3513,12 +3517,14 @@ impl Catalog {
         scopes: &[String],
         code_challenge: Option<&str>,
         code_challenge_method: Option<&str>,
+        user_id: Option<&str>,
     ) -> anyhow::Result<String> {
         let code = secure_url_token("pm_code_", 32);
+        let user_uuid = user_id.and_then(|id| uuid::Uuid::parse_str(id).ok());
         query(
             r#"
-            INSERT INTO mcp_oauth_codes (code, client_id, redirect_uri, scopes, code_challenge, code_challenge_method, expires_at)
-            VALUES ($1, $2, $3, $4, $5, $6, now() + interval '5 minutes')
+            INSERT INTO mcp_oauth_codes (code, client_id, redirect_uri, scopes, code_challenge, code_challenge_method, user_id, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, now() + interval '5 minutes')
             "#,
         )
         .bind(&code)
@@ -3527,6 +3533,7 @@ impl Catalog {
         .bind(scopes)
         .bind(code_challenge)
         .bind(code_challenge_method)
+        .bind(user_uuid)
         .execute(&self.pool)
         .await
         .context("failed to create MCP OAuth code")?;
@@ -3539,10 +3546,10 @@ impl Catalog {
         client_id: &str,
         redirect_uri: &str,
         code_verifier: Option<&str>,
-    ) -> anyhow::Result<Vec<String>> {
+    ) -> anyhow::Result<(Vec<String>, Option<String>)> {
         let row = query(
             r#"
-            SELECT code, client_id, redirect_uri, scopes, code_challenge, code_challenge_method, expires_at, used
+            SELECT code, client_id, redirect_uri, scopes, code_challenge, code_challenge_method, expires_at, used, user_id::text AS user_id
             FROM mcp_oauth_codes
             WHERE code = $1
             "#,
@@ -3595,30 +3602,34 @@ impl Catalog {
             .context("failed to mark MCP OAuth code as used")?;
 
         let scopes: Vec<String> = row.get("scopes");
-        Ok(scopes)
+        let user_id: Option<String> = row.get("user_id");
+        Ok((scopes, user_id))
     }
 
     pub async fn issue_mcp_oauth_tokens(
         &self,
         client_id: &str,
         scopes: &[String],
+        user_id: Option<&str>,
     ) -> anyhow::Result<(String, String, i64)> {
         let access_token = secure_url_token("pm_at_", 32);
         let refresh_token = secure_url_token("pm_rt_", 32);
         let token_hash = hash_bearer_token(&access_token);
         let refresh_token_hash = hash_bearer_token(&refresh_token);
         let expires_in: i64 = 86400;
+        let user_uuid = user_id.and_then(|id| uuid::Uuid::parse_str(id).ok());
 
         query(
             r#"
-            INSERT INTO mcp_oauth_tokens (client_id, token_hash, refresh_token_hash, scopes, expires_at)
-            VALUES ($1, $2, $3, $4, now() + interval '24 hours')
+            INSERT INTO mcp_oauth_tokens (client_id, token_hash, refresh_token_hash, scopes, user_id, expires_at)
+            VALUES ($1, $2, $3, $4, $5, now() + interval '24 hours')
             "#,
         )
         .bind(client_id)
         .bind(&token_hash)
         .bind(&refresh_token_hash)
         .bind(scopes)
+        .bind(user_uuid)
         .execute(&self.pool)
         .await
         .context("failed to issue MCP OAuth tokens")?;
@@ -3634,7 +3645,7 @@ impl Catalog {
         let refresh_hash = hash_bearer_token(refresh_token);
         let row = query(
             r#"
-            SELECT id::text, client_id, scopes, is_active
+            SELECT id::text, client_id, scopes, is_active, user_id::text AS user_id
             FROM mcp_oauth_tokens
             WHERE refresh_token_hash = $1
               AND is_active = TRUE
@@ -3654,6 +3665,7 @@ impl Catalog {
         }
         let id: String = row.get("id");
         let scopes: Vec<String> = row.get("scopes");
+        let user_id: Option<String> = row.get("user_id");
         query("UPDATE mcp_oauth_tokens SET is_active = FALSE WHERE id = $1::uuid")
             .bind(&id)
             .execute(&self.pool)
@@ -3661,7 +3673,7 @@ impl Catalog {
             .context("failed to deactivate refreshed token")?;
 
         let (new_access, new_refresh, expires_in) = self
-            .issue_mcp_oauth_tokens(&token_client_id, &scopes)
+            .issue_mcp_oauth_tokens(&token_client_id, &scopes, user_id.as_deref())
             .await?;
         Ok((new_access, new_refresh, expires_in, scopes))
     }

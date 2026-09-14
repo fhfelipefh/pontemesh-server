@@ -136,7 +136,8 @@ pub async fn get_authorize(
         return (StatusCode::BAD_REQUEST, "Missing client_id or redirect_uri").into_response();
     }
 
-    let is_authenticated = check_admin_session(&state, &headers).await;
+    let session_user = check_session_user(&state, &headers).await;
+    let is_authenticated = session_user.is_some();
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -205,7 +206,7 @@ pub async fn get_authorize(
             "".to_string()
         } else {
             r#"<div class="field">
-                <label for="username">Usuário Administrador</label>
+                <label for="username">Usuário</label>
                 <input type="text" id="username" name="username" required autocomplete="username">
             </div>
             <div class="field">
@@ -231,19 +232,25 @@ pub async fn post_authorize(
         return Redirect::to(&target).into_response();
     }
 
-    let is_session_authenticated = check_admin_session(&state, &headers).await;
-    let is_credential_authenticated = if let (Some(u), Some(p)) = (form.username, form.password) {
+    let session_user = check_session_user(&state, &headers).await;
+    let (is_authenticated, authenticated_user_id) = if let Some((user_id, _)) = session_user {
+        (true, Some(user_id))
+    } else if let (Some(u), Some(p)) = (form.username, form.password) {
         match state.catalog.find_active_user_by_username(u.trim()).await {
-            Ok(Some(user)) if user.role == "admin" => {
-                verify_admin_password(&p, &user.password_hash).unwrap_or(false)
+            Ok(Some(user)) => {
+                if verify_admin_password(&p, &user.password_hash).unwrap_or(false) {
+                    (true, Some(user.id))
+                } else {
+                    (false, None)
+                }
             }
-            _ => false,
+            _ => (false, None),
         }
     } else {
-        false
+        (false, None)
     };
 
-    if !is_session_authenticated && !is_credential_authenticated {
+    if !is_authenticated {
         let mut target = format!("{}?error=unauthorized_client", form.redirect_uri);
         if let Some(s) = form.state {
             target.push_str(&format!("&state={s}"));
@@ -267,6 +274,7 @@ pub async fn post_authorize(
             &scopes,
             form.code_challenge.as_deref(),
             form.code_challenge_method.as_deref(),
+            authenticated_user_id.as_deref(),
         )
         .await
     {
@@ -340,7 +348,7 @@ pub async fn post_token(
                 }
             }
 
-            let scopes = match state
+            let (scopes, user_id) = match state
                 .catalog
                 .consume_mcp_oauth_code(code, client_id, redirect_uri, code_verifier)
                 .await
@@ -357,7 +365,7 @@ pub async fn post_token(
 
             let (access_token, refresh_token, expires_in) = match state
                 .catalog
-                .issue_mcp_oauth_tokens(client_id, &scopes)
+                .issue_mcp_oauth_tokens(client_id, &scopes, user_id.as_deref())
                 .await
             {
                 Ok(res) => res,
@@ -431,7 +439,7 @@ pub async fn post_token(
 
             let (access_token, refresh_token, expires_in) = match state
                 .catalog
-                .issue_mcp_oauth_tokens(client_id, &scopes)
+                .issue_mcp_oauth_tokens(client_id, &scopes, None)
                 .await
             {
                 Ok(res) => res,
@@ -557,17 +565,15 @@ pub async fn post_register(
     }
 }
 
-async fn check_admin_session(state: &AppState, headers: &HeaderMap) -> bool {
-    let Some(token) = read_auth_session(headers) else {
-        return false;
-    };
-    state
+async fn check_session_user(state: &AppState, headers: &HeaderMap) -> Option<(String, String)> {
+    let token = read_auth_session(headers)?;
+    let session = state
         .catalog
         .find_admin_session_by_token_hash(&hash_session_token(&token))
         .await
         .ok()
-        .flatten()
-        .is_some_and(|session| session.role == "admin")
+        .flatten()?;
+    Some((session.user_id, session.username))
 }
 
 fn parse_body_params(body: &[u8]) -> HashMap<String, String> {

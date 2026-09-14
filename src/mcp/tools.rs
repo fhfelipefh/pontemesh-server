@@ -202,7 +202,33 @@ fn tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
-pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow::Result<Value> {
+async fn verify_bucket_access(
+    state: &AppState,
+    authorization: &catalog::McpTokenAuthorization,
+    bucket_name: &str,
+) -> anyhow::Result<()> {
+    if let Some(user_id) = authorization.user_id.as_deref() {
+        if authorization.scopes.iter().any(|s| s == "admin") {
+            return Ok(());
+        }
+        let bucket = state
+            .catalog
+            .get_bucket(bucket_name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("bucket not found: {bucket_name}"))?;
+        if bucket.owner_id.as_deref() != Some(user_id) {
+            bail!("bucket not found or access denied: {bucket_name}");
+        }
+    }
+    Ok(())
+}
+
+pub async fn call_tool(
+    state: &AppState,
+    authorization: &catalog::McpTokenAuthorization,
+    name: &str,
+    arguments: Value,
+) -> anyhow::Result<Value> {
     if matches!(
         tool_permission(name),
         Some(ToolPermission::Write | ToolPermission::Admin)
@@ -214,15 +240,17 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
         "pontemesh_create_bucket" => {
             let bucket = required_str(&arguments, "bucket")?;
             catalog::validate_bucket_name(bucket)?;
-            json!(state.catalog.create_bucket(bucket, None).await?)
+            json!(state.catalog.create_bucket(bucket, authorization.user_id.as_deref()).await?)
         }
         "pontemesh_delete_bucket" => {
             let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
             state.catalog.delete_bucket(bucket).await?;
             json!({"deleted": true, "bucket": bucket})
         }
         "pontemesh_put_text_object" => {
             let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
             let key = required_str(&arguments, "key")?;
             let content = required_str(&arguments, "content")?;
             let content_type = arguments
@@ -240,6 +268,7 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
         }
         "pontemesh_put_base64_object" => {
             let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
             let key = required_str(&arguments, "key")?;
             let encoded = required_str(&arguments, "contentBase64")?;
             if encoded.len() > MCP_MAX_OBJECT_BYTES * 2 {
@@ -254,6 +283,7 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
         }
         "pontemesh_delete_object" => {
             let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
             let key = required_str(&arguments, "key")?;
             state.catalog.delete_object(bucket, key).await?;
             json!({"deleted": true, "bucket": bucket, "key": key})
@@ -276,16 +306,18 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
             json!(
                 state
                     .catalog
-                    .list_buckets_page(query, page, page_size, None)
+                    .list_buckets_page(query, page, page_size, authorization.user_id.as_deref())
                     .await?
             )
         }
         "pontemesh_get_bucket" => {
             let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
             json!(state.catalog.get_bucket(bucket).await?)
         }
         "pontemesh_list_objects" => {
             let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
             let query = arguments.get("query").and_then(Value::as_str);
             let (page, page_size) = page_args(&arguments);
             json!(
@@ -297,6 +329,7 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
         }
         "pontemesh_get_object_metadata" => {
             let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
             let key = required_str(&arguments, "key")?;
             json!(state.catalog.get_object_record(bucket, key).await?)
         }
@@ -461,8 +494,8 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
         "pontemesh_list_credentials" => {
             json!({
                 "mcpTokens": state.catalog.list_mcp_access_tokens().await?,
-                "applicationCredentials": state.catalog.list_application_credentials(None).await?,
-                "s3AccessKeys": state.catalog.list_s3_access_keys(1, 100, None).await?,
+                "applicationCredentials": state.catalog.list_application_credentials(authorization.user_id.as_deref()).await?,
+                "s3AccessKeys": state.catalog.list_s3_access_keys(1, 100, authorization.user_id.as_deref()).await?,
                 "secretsIncluded": false
             })
         }
@@ -472,7 +505,7 @@ pub async fn call_tool(state: &AppState, name: &str, arguments: Value) -> anyhow
                 .unwrap_or_else(default_application_scopes);
             let created = state
                 .catalog
-                .create_application_credential(name, scopes, None)
+                .create_application_credential(name, scopes, authorization.user_id.as_deref())
                 .await?;
             state
                 .catalog
