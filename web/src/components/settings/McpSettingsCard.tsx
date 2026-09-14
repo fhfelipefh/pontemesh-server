@@ -1,6 +1,18 @@
 import { ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Ban, Check, Network, Plus, ShieldCheck, Wrench } from "lucide-react";
+import {
+  Activity,
+  Ban,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Network,
+  Plus,
+  Search,
+  ShieldCheck,
+  Wrench,
+  X,
+} from "lucide-react";
 import {
   CreatedMcpAccessToken,
   CreatedMcpOAuthClient,
@@ -79,6 +91,49 @@ export function McpSettingsCard({
   const [oauthClientName, setOauthClientName] = useState("");
   const [oauthRedirectUris, setOauthRedirectUris] = useState("");
   const [oauthScopes, setOauthScopes] = useState<string[]>(["read"]);
+  const [oauthSearchQuery, setOauthSearchQuery] = useState("");
+  const [oauthSortOrder, setOauthSortOrder] = useState<"newest" | "oldest" | "name_asc" | "name_desc">("newest");
+  const [oauthPage, setOauthPage] = useState(1);
+  const oauthPageSize = 10;
+
+  const normalizedOauthSearch = oauthSearchQuery.trim().toLowerCase();
+  const filteredOAuthClients = (oauthClients || []).filter(client => {
+    if (!normalizedOauthSearch) {
+      return true;
+    }
+    const nameMatch = client.clientName.toLowerCase().includes(normalizedOauthSearch);
+    const idMatch = client.clientId.toLowerCase().includes(normalizedOauthSearch);
+    const uriMatch = (client.redirectUris || []).some(uri =>
+      uri.toLowerCase().includes(normalizedOauthSearch)
+    );
+    return nameMatch || idMatch || uriMatch;
+  });
+
+  const sortedOAuthClients = [...filteredOAuthClients].sort((a, b) => {
+    if (oauthSortOrder === "newest") {
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    }
+    if (oauthSortOrder === "oldest") {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    }
+    if (oauthSortOrder === "name_asc") {
+      return a.clientName.localeCompare(b.clientName);
+    }
+    if (oauthSortOrder === "name_desc") {
+      return b.clientName.localeCompare(a.clientName);
+    }
+    return 0;
+  });
+
+  const totalOauthClients = sortedOAuthClients.length;
+  const totalOauthPages = Math.max(1, Math.ceil(totalOauthClients / oauthPageSize));
+  const effectiveOauthPage = Math.min(oauthPage, totalOauthPages);
+  const firstVisibleClient = totalOauthClients === 0 ? 0 : (effectiveOauthPage - 1) * oauthPageSize + 1;
+  const lastVisibleClient = Math.min(totalOauthClients, effectiveOauthPage * oauthPageSize);
+  const pagedOAuthClients = sortedOAuthClients.slice(
+    (effectiveOauthPage - 1) * oauthPageSize,
+    effectiveOauthPage * oauthPageSize
+  );
 
   const mcpServerUrl = status && settings ? absoluteMcpUrl(status.endpoint || settings.endpointPath) : "";
   const oauthConnectionConfig =
@@ -621,6 +676,52 @@ export function McpSettingsCard({
                   </section>
                 ) : null}
 
+                <div className="mcp-client-toolbar">
+                  <div className="mcp-client-search">
+                    <Search size={16} aria-hidden="true" className="mcp-client-search__icon" />
+                    <input
+                      type="search"
+                      value={oauthSearchQuery}
+                      onChange={event => {
+                        setOauthSearchQuery(event.target.value);
+                        setOauthPage(1);
+                      }}
+                      placeholder={t("setup.settings.mcp.searchClientsPlaceholder")}
+                      aria-label={t("setup.settings.mcp.searchClientsPlaceholder")}
+                    />
+                    {oauthSearchQuery ? (
+                      <button
+                        type="button"
+                        className="mcp-client-search__clear"
+                        onClick={() => {
+                          setOauthSearchQuery("");
+                          setOauthPage(1);
+                        }}
+                        aria-label={t("setup.settings.mcp.clearSearch")}
+                      >
+                        <X size={14} aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="mcp-client-sort">
+                    <select
+                      value={oauthSortOrder}
+                      onChange={event => {
+                        setOauthSortOrder(
+                          event.target.value as "newest" | "oldest" | "name_asc" | "name_desc"
+                        );
+                        setOauthPage(1);
+                      }}
+                      aria-label={t("setup.settings.mcp.sortClients")}
+                    >
+                      <option value="newest">{t("setup.settings.mcp.sortNewest")}</option>
+                      <option value="oldest">{t("setup.settings.mcp.sortOldest")}</option>
+                      <option value="name_asc">{t("setup.settings.mcp.sortNameAsc")}</option>
+                      <option value="name_desc">{t("setup.settings.mcp.sortNameDesc")}</option>
+                    </select>
+                  </div>
+                </div>
+
                 <CredentialTable
                   columns={[
                     {
@@ -666,8 +767,14 @@ export function McpSettingsCard({
                         <EmptyState title={t("setup.settings.mcp.noClients")} />
                       </td>
                     </tr>
+                  ) : sortedOAuthClients.length === 0 ? (
+                    <tr className="settings-table__empty-row">
+                      <td colSpan={7}>
+                        <EmptyState title={t("setup.settings.mcp.noMatchingClients")} />
+                      </td>
+                    </tr>
                   ) : (
-                    oauthClients.map(client => {
+                    pagedOAuthClients.map(client => {
                       const isActive = client.isActive ?? client.active ?? true;
                       return (
                         <tr key={client.id}>
@@ -707,6 +814,47 @@ export function McpSettingsCard({
                     })
                   )}
                 </CredentialTable>
+
+                {totalOauthClients > oauthPageSize ? (
+                  <nav
+                    className="settings-pagination"
+                    aria-label={t("setup.settings.mcp.oauthPaginationLabel")}
+                  >
+                    <p>
+                      {t("setup.settings.mcp.oauthPaginationSummary", {
+                        start: firstVisibleClient,
+                        end: lastVisibleClient,
+                        total: totalOauthClients,
+                      })}
+                    </p>
+                    <div className="settings-pagination__actions">
+                      <button
+                        type="button"
+                        className="settings-pagination__button"
+                        aria-label={t("setup.settings.s3.previousPage")}
+                        disabled={effectiveOauthPage === 1}
+                        onClick={() => setOauthPage(Math.max(1, effectiveOauthPage - 1))}
+                      >
+                        <ChevronLeft size={16} aria-hidden="true" />
+                      </button>
+                      <span>
+                        {t("setup.settings.s3.pageIndicator", {
+                          page: effectiveOauthPage,
+                          total: totalOauthPages,
+                        })}
+                      </span>
+                      <button
+                        type="button"
+                        className="settings-pagination__button"
+                        aria-label={t("setup.settings.s3.nextPage")}
+                        disabled={effectiveOauthPage === totalOauthPages}
+                        onClick={() => setOauthPage(Math.min(totalOauthPages, effectiveOauthPage + 1))}
+                      >
+                        <ChevronRight size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </nav>
+                ) : null}
               </div>
             )}
 

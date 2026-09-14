@@ -1384,6 +1384,97 @@
   font-family: monospace;
 }
 
+.mcp-client-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0 12px 0;
+  flex-wrap: wrap;
+}
+
+.mcp-client-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 280px;
+  min-width: 240px;
+}
+
+.mcp-client-search svg.mcp-client-search__icon {
+  position: absolute;
+  left: 12px;
+  color: var(--pm-muted);
+  pointer-events: none;
+}
+
+.mcp-client-search input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 0 36px 0 36px;
+  color: var(--pm-deep-navy);
+  background: var(--pm-surface);
+  outline: none;
+  font-size: 0.88rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mcp-client-search input:focus {
+  border-color: var(--pm-accent-cyan-blue);
+  box-shadow: 0 0 0 3px var(--pm-cyan-focus);
+}
+
+.mcp-client-search__clear {
+  position: absolute;
+  right: 10px;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: var(--pm-neutral-soft);
+  color: var(--pm-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.mcp-client-search__clear:hover {
+  background: var(--pm-border);
+  color: var(--pm-deep-navy);
+}
+
+.mcp-client-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-client-sort select {
+  min-height: 40px;
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 0 34px 0 12px;
+  color: var(--pm-deep-navy);
+  background: var(--pm-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+  appearance: none;
+  outline: none;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.mcp-client-sort select:focus {
+  border-color: var(--pm-accent-cyan-blue);
+  box-shadow: 0 0 0 3px var(--pm-cyan-focus);
+}
+
+.mcp-tokens-tab .settings-table-wrap {
+  max-height: 580px;
+  overflow-y: auto;
+}
+
 .settings-toggle-row button {
   flex: 0 0 auto;
   position: relative;
