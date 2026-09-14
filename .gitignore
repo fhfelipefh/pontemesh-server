@@ -5,3 +5,8 @@
 /web/playwright-report
 __pycache__/
 *.py[cod]
+
+pkey.txt
+*.pem
+*.key
+*.priv
