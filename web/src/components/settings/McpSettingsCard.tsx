@@ -276,7 +276,7 @@ export function McpSettingsCard({
                   <div className="mcp-oauth-endpoints-list">
                     <div>
                       <strong>{t("setup.settings.mcp.resourceMetadata")}:</strong>
-                      <code>/.well-known/oauth-protected-resource</code>
+                      <code>/.well-known/oauth-protected-resource/mcp</code>
                     </div>
                     <div>
                       <strong>{t("setup.settings.mcp.authServerMetadata")}:</strong>

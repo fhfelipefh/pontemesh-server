@@ -54,7 +54,7 @@ atender aos requisitos do ecossistema Gemini e da especificação Model Context 
 o servidor implementa:
 
 * **RFC 9728 (OAuth 2.0 Protected Resource Metadata)**:
-  `GET /.well-known/oauth-protected-resource`
+  `GET /.well-known/oauth-protected-resource` e `GET /.well-known/oauth-protected-resource/mcp`
 * **RFC 8414 (OAuth 2.0 Authorization Server Metadata)**:
   `GET /.well-known/oauth-authorization-server`
 * **RFC 7591 (Dynamic Client Registration)**:
@@ -66,7 +66,7 @@ o servidor implementa:
 * **Descoberta via HTTP 401**:
   Ao receber requisições não autenticadas em `/mcp`, o servidor responde com status
   `401 Unauthorized` e o cabeçalho:
-  `WWW-Authenticate: Bearer resource_metadata="https://<host>/.well-known/oauth-protected-resource"`
+  `WWW-Authenticate: Bearer realm="mcp", resource_metadata="https://<host>/.well-known/oauth-protected-resource/mcp", scope="read"`
 
 Clientes podem utilizar tanto o fluxo de autorização com consentimento administrativo
 quanto autenticação direta via Client Credentials (onde o prefixo do token MCP atua
