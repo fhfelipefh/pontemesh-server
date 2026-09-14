@@ -21,7 +21,14 @@ const MCP_MAX_JSON_RPC_BYTES: usize = 2 * 1024 * 1024;
 pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: Body) -> Response {
     let request_id = uuid::Uuid::new_v4().to_string();
     let started = Instant::now();
-    info!(request_id = %request_id, "mcp_request_started");
+    info!(
+        request_id = %request_id,
+        host = ?headers.get(header::HOST).and_then(|v| v.to_str().ok()),
+        x_forwarded_host = ?headers.get("x-forwarded-host").and_then(|v| v.to_str().ok()),
+        x_forwarded_proto = ?headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()),
+        user_agent = ?headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()),
+        "mcp_request_started"
+    );
 
     let settings = match state.catalog.get_mcp_settings().await {
         Ok(settings) => settings,
@@ -78,13 +85,16 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
                     )
                     .await;
                 warn!(request_id = %request_id, "mcp_auth_failed");
-                let base_url = crate::mcp::oauth::resolve_base_url(&headers);
+                let base_url = crate::mcp::oauth::resolve_base_url(&state, &headers);
                 let www_auth = format!(
-                    "Bearer resource_metadata=\"{base_url}/.well-known/oauth-protected-resource\", error=\"unauthorized\""
+                    "Bearer resource_metadata=\"{base_url}/.well-known/oauth-protected-resource\", scope=\"read\""
                 );
                 return (
                     StatusCode::UNAUTHORIZED,
-                    [(header::WWW_AUTHENTICATE, www_auth)],
+                    [
+                        (header::WWW_AUTHENTICATE, www_auth),
+                        (header::CONTENT_TYPE, "application/json".to_string()),
+                    ],
                     Json(protocol::error(None, -32000, error.to_string())),
                 )
                     .into_response();
@@ -212,9 +222,9 @@ pub async fn get_mcp(State(state): State<AppState>, headers: HeaderMap) -> Respo
     if !settings.enabled || settings.endpoint_path != config::DEFAULT_ENDPOINT_PATH {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let base_url = crate::mcp::oauth::resolve_base_url(&headers);
+    let base_url = crate::mcp::oauth::resolve_base_url(&state, &headers);
     let www_auth = format!(
-        "Bearer resource_metadata=\"{base_url}/.well-known/oauth-protected-resource\", error=\"unauthorized\""
+        "Bearer resource_metadata=\"{base_url}/.well-known/oauth-protected-resource\", scope=\"read\""
     );
 
     let authorization = match auth::authorize_request(&state, &headers, &settings.auth_mode).await {
@@ -264,7 +274,14 @@ async fn handle_json_rpc(
     request: &protocol::JsonRpcRequest,
 ) -> anyhow::Result<Option<Value>> {
     match request.method.as_str() {
-        "initialize" => Ok(Some(protocol::initialize_result())),
+        "initialize" => {
+            let requested_version = request
+                .params
+                .as_ref()
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(Value::as_str);
+            Ok(Some(protocol::initialize_result(requested_version)))
+        }
         "notifications/initialized" => Ok(None),
         "ping" => Ok(Some(json!({}))),
         "tools/list" => {

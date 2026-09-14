@@ -46,7 +46,17 @@ pub struct DynamicRegistrationRequest {
     pub scope: Option<String>,
 }
 
-pub fn resolve_base_url(headers: &HeaderMap) -> String {
+pub fn resolve_base_url(state: &AppState, headers: &HeaderMap) -> String {
+    resolve_base_url_paths(&state.paths, headers)
+}
+
+pub fn resolve_base_url_paths(paths: &crate::config::PontemeshHome, headers: &HeaderMap) -> String {
+    if let Ok(Some(url)) = crate::config::configured_public_web_url(paths) {
+        let trimmed = url.trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
     let mut scheme = "https";
     if let Some(proto) = headers
         .get("x-forwarded-proto")
@@ -57,7 +67,9 @@ pub fn resolve_base_url(headers: &HeaderMap) -> String {
         }
     }
     let host = headers
-        .get(header::HOST)
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("x-original-host"))
+        .or_else(|| headers.get(header::HOST))
         .and_then(|v| v.to_str().ok())
         .unwrap_or("127.0.0.1:8443");
     format!("{scheme}://{host}")
@@ -67,7 +79,7 @@ pub async fn get_protected_resource_metadata(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
-    let base_url = resolve_base_url(&headers);
+    let base_url = resolve_base_url(&state, &headers);
     let settings = match state.catalog.get_mcp_settings().await {
         Ok(s) => s,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -93,7 +105,7 @@ pub async fn get_authorization_server_metadata(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
-    let base_url = resolve_base_url(&headers);
+    let base_url = resolve_base_url(&state, &headers);
     let settings = match state.catalog.get_mcp_settings().await {
         Ok(s) => s,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -110,7 +122,8 @@ pub async fn get_authorization_server_metadata(
         "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
         "code_challenge_methods_supported": ["S256", "plain"],
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
-        "scopes_supported": ["read", "write", "admin"]
+        "scopes_supported": ["read", "write", "admin"],
+        "authorization_response_iss_parameter_supported": true
     });
     (
         StatusCode::OK,
@@ -616,4 +629,40 @@ fn percent_decode(raw: &str) -> String {
         index += 1;
     }
     String::from_utf8_lossy(&output).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn test_resolve_base_url_headers() {
+        let root =
+            std::env::temp_dir().join(format!("pontemesh-oauth-test-{}", uuid::Uuid::new_v4()));
+        let paths = crate::config::PontemeshHome::from_path(&root).expect("test home");
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("example.com"));
+        assert_eq!(
+            resolve_base_url_paths(&paths, &headers),
+            "https://example.com"
+        );
+
+        headers.insert("x-forwarded-proto", HeaderValue::from_static("http"));
+        assert_eq!(
+            resolve_base_url_paths(&paths, &headers),
+            "http://example.com"
+        );
+
+        headers.insert(
+            "x-forwarded-host",
+            HeaderValue::from_static("134.65.234.41"),
+        );
+        headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+        assert_eq!(
+            resolve_base_url_paths(&paths, &headers),
+            "https://134.65.234.41"
+        );
+    }
 }
