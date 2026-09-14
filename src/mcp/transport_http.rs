@@ -87,7 +87,7 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
                 warn!(request_id = %request_id, "mcp_auth_failed");
                 let base_url = crate::mcp::oauth::resolve_base_url(&state, &headers);
                 let www_auth = format!(
-                    "Bearer resource_metadata=\"{base_url}/.well-known/oauth-protected-resource\", scope=\"read\""
+                    "Bearer realm=\"mcp\", resource_metadata=\"{base_url}/.well-known/oauth-protected-resource/mcp\", scope=\"read\""
                 );
                 return (
                     StatusCode::UNAUTHORIZED,
@@ -224,7 +224,7 @@ pub async fn get_mcp(State(state): State<AppState>, headers: HeaderMap) -> Respo
     }
     let base_url = crate::mcp::oauth::resolve_base_url(&state, &headers);
     let www_auth = format!(
-        "Bearer resource_metadata=\"{base_url}/.well-known/oauth-protected-resource\", scope=\"read\""
+        "Bearer realm=\"mcp\", resource_metadata=\"{base_url}/.well-known/oauth-protected-resource/mcp\", scope=\"read\""
     );
 
     let authorization = match auth::authorize_request(&state, &headers, &settings.auth_mode).await {
@@ -239,7 +239,7 @@ pub async fn get_mcp(State(state): State<AppState>, headers: HeaderMap) -> Respo
                 Json(json!({
                     "error": "unauthorized",
                     "message": "Authentication required. See WWW-Authenticate header.",
-                    "resource_metadata": format!("{base_url}/.well-known/oauth-protected-resource")
+                    "resource_metadata": format!("{base_url}/.well-known/oauth-protected-resource/mcp")
                 })),
             )
                 .into_response();

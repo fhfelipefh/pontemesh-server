@@ -89,9 +89,11 @@ pub async fn get_protected_resource_metadata(
     }
     let metadata = json!({
         "resource": format!("{base_url}/mcp"),
-        "authorization_servers": [base_url],
-        "scopes_supported": ["read", "write", "admin"],
-        "bearer_methods_supported": ["header"]
+        "authorization_servers": [base_url.clone()],
+        "scopes_supported": ["read", "write", "admin", "mcp", "mcp:tools", "mcp:resources", "offline_access", "openid"],
+        "bearer_methods_supported": ["header"],
+        "jwks_uri": format!("{base_url}/oauth/jwks.json"),
+        "resource_documentation": format!("{base_url}/docs/api/mcp")
     });
     (
         StatusCode::OK,
@@ -114,21 +116,36 @@ pub async fn get_authorization_server_metadata(
         return StatusCode::NOT_FOUND.into_response();
     }
     let metadata = json!({
-        "issuer": base_url,
+        "issuer": base_url.clone(),
         "authorization_endpoint": format!("{base_url}/oauth/authorize"),
         "token_endpoint": format!("{base_url}/oauth/token"),
         "registration_endpoint": format!("{base_url}/oauth/register"),
+        "jwks_uri": format!("{base_url}/oauth/jwks.json"),
         "response_types_supported": ["code"],
+        "response_modes_supported": ["query"],
         "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
-        "code_challenge_methods_supported": ["S256", "plain"],
-        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
-        "scopes_supported": ["read", "write", "admin"],
-        "authorization_response_iss_parameter_supported": true
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
+        "scopes_supported": ["read", "write", "admin", "mcp", "mcp:tools", "mcp:resources", "offline_access", "openid"],
+        "authorization_response_iss_parameter_supported": true,
+        "client_id_metadata_document_supported": true,
+        "protected_resources": [format!("{base_url}/mcp"), base_url.clone()]
     });
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json")],
         Json(metadata),
+    )
+        .into_response()
+}
+
+pub async fn get_jwks() -> Response {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        Json(json!({
+            "keys": []
+        })),
     )
         .into_response()
 }
@@ -238,9 +255,19 @@ pub async fn post_authorize(
     Form(form): Form<AuthorizeForm>,
 ) -> Response {
     if form.action.as_deref() == Some("deny") {
-        let mut target = format!("{}?error=access_denied", form.redirect_uri);
+        let base_url = resolve_base_url(&state, &headers);
+        let sep = if form.redirect_uri.contains('?') {
+            "&"
+        } else {
+            "?"
+        };
+        let mut target = format!(
+            "{}{sep}error=access_denied&iss={}",
+            form.redirect_uri,
+            percent_encode(&base_url)
+        );
         if let Some(s) = form.state {
-            target.push_str(&format!("&state={s}"));
+            target.push_str(&format!("&state={}", percent_encode(&s)));
         }
         return Redirect::to(&target).into_response();
     }
@@ -264,9 +291,19 @@ pub async fn post_authorize(
     };
 
     if !is_authenticated {
-        let mut target = format!("{}?error=unauthorized_client", form.redirect_uri);
+        let base_url = resolve_base_url(&state, &headers);
+        let sep = if form.redirect_uri.contains('?') {
+            "&"
+        } else {
+            "?"
+        };
+        let mut target = format!(
+            "{}{sep}error=unauthorized_client&iss={}",
+            form.redirect_uri,
+            percent_encode(&base_url)
+        );
         if let Some(s) = form.state {
-            target.push_str(&format!("&state={s}"));
+            target.push_str(&format!("&state={}", percent_encode(&s)));
         }
         return Redirect::to(&target).into_response();
     }
@@ -295,9 +332,20 @@ pub async fn post_authorize(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
 
-    let mut target = format!("{}?code={}", form.redirect_uri, code);
+    let base_url = resolve_base_url(&state, &headers);
+    let sep = if form.redirect_uri.contains('?') {
+        "&"
+    } else {
+        "?"
+    };
+    let mut target = format!(
+        "{}{sep}code={}&iss={}",
+        form.redirect_uri,
+        code,
+        percent_encode(&base_url)
+    );
     if let Some(s) = form.state {
-        target.push_str(&format!("&state={s}"));
+        target.push_str(&format!("&state={}", percent_encode(&s)));
     }
     Redirect::to(&target).into_response()
 }
@@ -610,6 +658,22 @@ fn parse_body_params(body: &[u8]) -> HashMap<String, String> {
         params.insert(percent_decode(key), percent_decode(value));
     }
     params
+}
+
+fn percent_encode(raw: &str) -> String {
+    let mut encoded = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                use std::fmt::Write;
+                let _ = write!(encoded, "%{:02X}", byte);
+            }
+        }
+    }
+    encoded
 }
 
 fn percent_decode(raw: &str) -> String {

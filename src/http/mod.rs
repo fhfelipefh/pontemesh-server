@@ -70,9 +70,18 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
                     get(mcp::oauth::get_authorization_server_metadata),
                 )
                 .route(
+                    "/.well-known/oauth-authorization-server/mcp",
+                    get(mcp::oauth::get_authorization_server_metadata),
+                )
+                .route(
                     "/.well-known/openid-configuration",
                     get(mcp::oauth::get_authorization_server_metadata),
                 )
+                .route(
+                    "/.well-known/openid-configuration/mcp",
+                    get(mcp::oauth::get_authorization_server_metadata),
+                )
+                .route("/oauth/jwks.json", get(mcp::oauth::get_jwks))
                 .route(
                     "/oauth/authorize",
                     get(mcp::oauth::get_authorize).post(mcp::oauth::post_authorize),
@@ -87,6 +96,7 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
                             axum::http::Method::POST,
                             axum::http::Method::OPTIONS,
                             axum::http::Method::DELETE,
+                            axum::http::Method::HEAD,
                         ])
                         .allow_headers(tower_http::cors::Any)
                         .expose_headers([
