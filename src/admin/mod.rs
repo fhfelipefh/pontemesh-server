@@ -980,6 +980,7 @@ pub async fn revoke_mcp_token(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateMcpOAuthClientRequest {
+    #[serde(alias = "clientName")]
     pub name: String,
     pub redirect_uris: Option<Vec<String>>,
     pub scopes: Option<Vec<String>>,

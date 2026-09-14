@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { Activity, Ban, Check, Network, Plus, ShieldCheck, Wrench } from "lucide-react";
 import {
   CreatedMcpAccessToken,
+  CreatedMcpOAuthClient,
   McpAccessTokenSummary,
   McpActivityRecord,
+  McpOAuthClientSummary,
   McpSettings,
   McpStatus,
 } from "../../api/mcpApi";
@@ -22,20 +24,27 @@ export type McpSettingsCardProps = {
   status: McpStatus | null;
   tokens: McpAccessTokenSummary[];
   activity: McpActivityRecord[];
+  oauthClients?: McpOAuthClientSummary[];
   tokenName: string;
   tokenScopes: string[];
   onTokenScopesChange: (scopes: string[]) => void;
   createdToken: CreatedMcpAccessToken | null;
+  createdOAuthClient?: CreatedMcpOAuthClient | null;
   loading: boolean;
   saving: boolean;
   creatingToken: boolean;
+  creatingOAuthClient?: boolean;
   revokingToken: string | null;
+  revokingOAuthClient?: string | null;
   error: string;
   onTokenNameChange: (value: string) => void;
   onUpdateSettings: (settings: McpSettings) => void;
   onCreateToken: () => void;
   onDismissCreatedToken: () => void;
   onRevokeToken: (id: string, name: string) => void;
+  onCreateOAuthClient?: (name: string, redirectUris: string[], scopes: string[]) => void;
+  onDismissCreatedOAuthClient?: () => void;
+  onRevokeOAuthClient?: (id: string, name: string) => void;
 };
 
 export function McpSettingsCard({
@@ -43,13 +52,17 @@ export function McpSettingsCard({
   status,
   tokens,
   activity,
+  oauthClients,
   tokenName,
   tokenScopes,
   createdToken,
+  createdOAuthClient,
   loading,
   saving,
   creatingToken,
+  creatingOAuthClient,
   revokingToken,
+  revokingOAuthClient,
   error,
   onTokenNameChange,
   onTokenScopesChange,
@@ -57,9 +70,31 @@ export function McpSettingsCard({
   onCreateToken,
   onDismissCreatedToken,
   onRevokeToken,
+  onCreateOAuthClient,
+  onDismissCreatedOAuthClient,
+  onRevokeOAuthClient,
 }: McpSettingsCardProps) {
   const { t, i18n } = useTranslation();
-  const [activeTab, setActiveTab] = useState<"settings" | "tokens" | "activity">("settings");
+  const [activeTab, setActiveTab] = useState<"settings" | "tokens" | "oauth" | "activity">("settings");
+  const [oauthClientName, setOauthClientName] = useState("");
+  const [oauthRedirectUris, setOauthRedirectUris] = useState("");
+  const [oauthScopes, setOauthScopes] = useState<string[]>(["read"]);
+
+  const mcpServerUrl = status && settings ? absoluteMcpUrl(status.endpoint || settings.endpointPath) : "";
+  const oauthConnectionConfig =
+    createdOAuthClient && mcpServerUrl
+      ? JSON.stringify(
+          {
+            serverUrl: mcpServerUrl,
+            clientId: createdOAuthClient.client.clientId,
+            clientSecret: createdOAuthClient.clientSecret,
+            authType: "oauth2",
+            scopes: createdOAuthClient.client.scopes,
+          },
+          null,
+          2
+        )
+      : "";
 
   const mcpConnectionConfig =
     createdToken && settings && status
@@ -141,19 +176,27 @@ export function McpSettingsCard({
               className={`mcp-tab ${activeTab === "settings" ? "mcp-tab--active" : ""}`}
               onClick={() => setActiveTab("settings")}
             >
-              Configurações
+              {t("setup.settings.mcp.tabSettings")}
             </button>
             <button
               className={`mcp-tab ${activeTab === "tokens" ? "mcp-tab--active" : ""}`}
               onClick={() => setActiveTab("tokens")}
+              aria-label={`${t("setup.settings.mcp.tabTokens")} Tokens de Acesso`}
+              data-testid="mcp-tab-tokens"
             >
-              Tokens de Acesso
+              {t("setup.settings.mcp.tabTokens")}
+            </button>
+            <button
+              className={`mcp-tab ${activeTab === "oauth" ? "mcp-tab--active" : ""}`}
+              onClick={() => setActiveTab("oauth")}
+            >
+              {t("setup.settings.mcp.tabConnectedApps")}
             </button>
             <button
               className={`mcp-tab ${activeTab === "activity" ? "mcp-tab--active" : ""}`}
               onClick={() => setActiveTab("activity")}
             >
-              Logs de Atividade
+              {t("setup.settings.mcp.tabActivity")}
             </button>
           </div>
 
@@ -251,6 +294,9 @@ export function McpSettingsCard({
 
             {activeTab === "tokens" && (
               <div className="mcp-tokens-tab">
+                <p className="settings-field-hint" style={{ marginBottom: "1rem" }}>
+                  {t("setup.settings.mcp.tokenAuthNotice")}
+                </p>
                 <form
                   className="inline-form mcp-token-form"
                   onSubmit={event => {
@@ -436,6 +482,229 @@ export function McpSettingsCard({
                         </td>
                       </tr>
                     ))
+                  )}
+                </CredentialTable>
+              </div>
+            )}
+
+            {activeTab === "oauth" && (
+              <div className="mcp-tokens-tab">
+                <p className="settings-field-hint" style={{ marginBottom: "1rem" }}>
+                  {t("setup.settings.mcp.connectedAppsDescription")}
+                </p>
+
+                <form
+                  className="inline-form mcp-token-form"
+                  onSubmit={event => {
+                    event.preventDefault();
+                    if (!oauthClientName.trim()) {
+                      return;
+                    }
+                    const uris = oauthRedirectUris
+                      .split(",")
+                      .map(u => u.trim())
+                      .filter(Boolean);
+                    onCreateOAuthClient?.(oauthClientName, uris, oauthScopes);
+                    setOauthClientName("");
+                    setOauthRedirectUris("");
+                    setOauthScopes(["read"]);
+                  }}
+                >
+                  <input
+                    value={oauthClientName}
+                    onChange={event => setOauthClientName(event.target.value)}
+                    placeholder={t("setup.settings.mcp.clientNamePlaceholder")}
+                    aria-label={t("setup.settings.mcp.clientName")}
+                  />
+                  <input
+                    value={oauthRedirectUris}
+                    onChange={event => setOauthRedirectUris(event.target.value)}
+                    placeholder={t("setup.settings.mcp.redirectUrisPlaceholder")}
+                    aria-label={t("setup.settings.mcp.redirectUris")}
+                  />
+                  <button
+                    className="settings-create-key-button"
+                    type="submit"
+                    disabled={creatingOAuthClient || !oauthClientName.trim()}
+                  >
+                    <Plus size={17} aria-hidden="true" />
+                    {t("setup.settings.mcp.createClient")}
+                  </button>
+                  <div className="mcp-token-scopes">
+                    <span className="mcp-token-scopes__label">
+                      {t("setup.settings.mcp.tokenScopes")}
+                    </span>
+                    <div
+                      className="settings-checkbox-group"
+                      role="group"
+                      aria-label={t("setup.settings.mcp.tokenScopes")}
+                    >
+                      {["read", "write", "admin"].map(scope => (
+                        <label key={scope} className="settings-checkbox-field">
+                          <input
+                            type="checkbox"
+                            checked={oauthScopes.includes(scope)}
+                            disabled={scope === "read"}
+                            onChange={event => {
+                              const next = event.target.checked
+                                ? [...oauthScopes, scope]
+                                : oauthScopes.filter(item => item !== scope);
+                              setOauthScopes(Array.from(new Set(["read", ...next])));
+                            }}
+                          />
+                          {scope}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  {oauthScopes.some(s => s === "write" || s === "admin") ? (
+                    <p className="settings-warning">
+                      {t("setup.settings.mcp.permissionWarning")}
+                    </p>
+                  ) : null}
+                </form>
+
+                {createdOAuthClient ? (
+                  <section className="secret-panel" role="status">
+                    <strong>{t("setup.settings.mcp.clientCreated")}</strong>
+                    <p>{t("setup.settings.mcp.clientCreatedHint")}</p>
+                    <dl>
+                      <div>
+                        <dt>{t("setup.settings.mcp.serverUrl")}</dt>
+                        <dd>
+                          <code>{mcpServerUrl}</code>
+                          <CopyButton
+                            value={mcpServerUrl}
+                            label={t("setup.settings.mcp.copyServerUrl")}
+                          />
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{t("setup.settings.mcp.clientId")}</dt>
+                        <dd>
+                          <code>{createdOAuthClient.client.clientId}</code>
+                          <CopyButton
+                            value={createdOAuthClient.client.clientId}
+                            label={t("setup.settings.mcp.copyClientId")}
+                          />
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{t("setup.settings.mcp.clientSecret")}</dt>
+                        <dd>
+                          <code>{createdOAuthClient.clientSecret}</code>
+                          <CopyButton
+                            value={createdOAuthClient.clientSecret}
+                            label={t("setup.settings.mcp.copyClientSecret")}
+                          />
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="mcp-connection-config">
+                      <div className="mcp-connection-config__header">
+                        <strong>{t("setup.settings.mcp.connectionConfig")}</strong>
+                        <CopyButton
+                          value={oauthConnectionConfig}
+                          label={t("setup.settings.mcp.copyOAuthJson")}
+                        />
+                      </div>
+                      <pre>{oauthConnectionConfig}</pre>
+                    </div>
+                    <button
+                      className="settings-secondary-button"
+                      type="button"
+                      onClick={onDismissCreatedOAuthClient}
+                    >
+                      <Check size={16} aria-hidden="true" />
+                      {t("setup.common.ok")}
+                    </button>
+                  </section>
+                ) : null}
+
+                <CredentialTable
+                  columns={[
+                    {
+                      key: "name",
+                      label: t("setup.settings.mcp.clientName"),
+                      className: "settings-table__col-name",
+                    },
+                    {
+                      key: "clientId",
+                      label: t("setup.settings.mcp.clientId"),
+                      className: "settings-table__col-key",
+                    },
+                    {
+                      key: "redirectUris",
+                      label: t("setup.settings.mcp.redirectUris"),
+                      className: "settings-table__col-status",
+                    },
+                    {
+                      key: "scopes",
+                      label: t("setup.settings.mcp.tokenScopes"),
+                      className: "settings-table__col-status",
+                    },
+                    {
+                      key: "status",
+                      label: t("setup.settings.s3.status"),
+                      className: "settings-table__col-status",
+                    },
+                    {
+                      key: "createdAt",
+                      label: t("setup.settings.s3.createdAt"),
+                      className: "settings-table__col-created",
+                    },
+                    {
+                      key: "actions",
+                      ariaLabel: t("setup.settings.s3.actions"),
+                      className: "settings-table__col-actions",
+                    },
+                  ]}
+                >
+                  {(!oauthClients || oauthClients.length === 0) ? (
+                    <tr className="settings-table__empty-row">
+                      <td colSpan={7}>
+                        <EmptyState title={t("setup.settings.mcp.noClients")} />
+                      </td>
+                    </tr>
+                  ) : (
+                    oauthClients.map(client => {
+                      const isActive = client.isActive ?? client.active ?? true;
+                      return (
+                        <tr key={client.id}>
+                          <td className="settings-table__name">{client.clientName}</td>
+                          <td>
+                            <code>{client.clientId}</code>
+                          </td>
+                          <td>
+                            {client.redirectUris && client.redirectUris.length > 0
+                              ? client.redirectUris.join(", ")
+                              : t("setup.common.unavailable")}
+                          </td>
+                          <td>
+                            {formatScopes(client.scopes, t("setup.common.unavailable"))}
+                          </td>
+                          <td>
+                            <StatusBadge
+                              active={isActive}
+                              activeLabel={t("setup.settings.s3.active")}
+                              revokedLabel={t("setup.settings.s3.revoked")}
+                            />
+                          </td>
+                          <td>{formatDate(client.createdAt, i18n.language)}</td>
+                          <td className="settings-table__actions">
+                            {isActive ? (
+                              <IconButton
+                                variant="danger"
+                                label={t("setup.settings.mcp.revokeClient")}
+                                icon={<Ban size={16} aria-hidden="true" />}
+                                disabled={revokingOAuthClient === client.id}
+                                onClick={() => onRevokeOAuthClient?.(client.id, client.clientName)}
+                              />
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </CredentialTable>
               </div>

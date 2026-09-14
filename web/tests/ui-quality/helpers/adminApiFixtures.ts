@@ -421,6 +421,10 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
       return json(route, []);
     }
 
+    if (path === "/api/admin/mcp/oauth-clients") {
+      return json(route, []);
+    }
+
     return json(route, { error: `Unhandled UI quality fixture route: ${path}` }, 404);
   });
 }

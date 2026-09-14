@@ -2,15 +2,20 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   CreatedMcpAccessToken,
+  CreatedMcpOAuthClient,
   McpAccessTokenSummary,
   McpActivityRecord,
+  McpOAuthClientSummary,
   McpSettings,
   McpStatus,
+  createMcpOAuthClient,
   createMcpToken,
   getMcpSettings,
   getMcpStatus,
   listMcpActivity,
+  listMcpOAuthClients,
   listMcpTokens,
+  revokeMcpOAuthClient,
   revokeMcpToken,
   updateMcpSettings,
 } from "../api/mcpApi";
@@ -22,32 +27,40 @@ export function McpPage() {
   const [mcpSettings, setMcpSettings] = useState<McpSettings | null>(null);
   const [mcpStatus, setMcpStatus] = useState<McpStatus | null>(null);
   const [mcpTokens, setMcpTokens] = useState<McpAccessTokenSummary[]>([]);
+  const [mcpOAuthClients, setMcpOAuthClients] = useState<McpOAuthClientSummary[]>([]);
   const [mcpActivity, setMcpActivity] = useState<McpActivityRecord[]>([]);
   const [mcpTokenName, setMcpTokenName] = useState("default-mcp-client");
   const [mcpTokenScopes, setMcpTokenScopes] = useState<string[]>(["read"]);
   const [createdMcpToken, setCreatedMcpToken] =
     useState<CreatedMcpAccessToken | null>(null);
+  const [createdOAuthClient, setCreatedOAuthClient] =
+    useState<CreatedMcpOAuthClient | null>(null);
   const [loadingMcp, setLoadingMcp] = useState(true);
   const [savingMcp, setSavingMcp] = useState(false);
   const [creatingMcpToken, setCreatingMcpToken] = useState(false);
+  const [creatingOAuthClient, setCreatingOAuthClient] = useState(false);
   const [revokingMcpToken, setRevokingMcpToken] = useState<string | null>(null);
+  const [revokingOAuthClient, setRevokingOAuthClient] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState("");
   const [tokenToRevoke, setTokenToRevoke] = useState<{ id: string; name: string } | null>(null);
+  const [oauthClientToRevoke, setOauthClientToRevoke] = useState<{ id: string; name: string } | null>(null);
 
   const refreshMcp = useCallback(async () => {
     setLoadingMcp(true);
     setMcpError("");
     try {
-      const [settings, status, tokens, activity] = await Promise.all([
+      const [settings, status, tokens, activity, oauthClients] = await Promise.all([
         getMcpSettings(),
         getMcpStatus(),
         listMcpTokens(),
         listMcpActivity(),
+        listMcpOAuthClients(),
       ]);
       setMcpSettings(settings);
       setMcpStatus(status);
       setMcpTokens(tokens);
       setMcpActivity(activity);
+      setMcpOAuthClients(oauthClients);
     } catch (loadError) {
       setMcpError(
         loadError instanceof Error
@@ -134,6 +147,49 @@ export function McpPage() {
     }
   }
 
+  async function handleCreateOAuthClient(
+    name: string,
+    redirectUris: string[],
+    scopes: string[]
+  ) {
+    if (!name.trim()) {
+      return;
+    }
+    setCreatingOAuthClient(true);
+    setMcpError("");
+    try {
+      const created = await createMcpOAuthClient(name, redirectUris, scopes);
+      setCreatedOAuthClient(created);
+      setMcpOAuthClients(await listMcpOAuthClients());
+    } catch (createError) {
+      setMcpError(
+        createError instanceof Error
+          ? createError.message
+          : t("setup.settings.mcp.createClientFailed")
+      );
+    } finally {
+      setCreatingOAuthClient(false);
+    }
+  }
+
+  async function handleRevokeOAuthClient(id: string) {
+    setRevokingOAuthClient(id);
+    setMcpError("");
+    try {
+      await revokeMcpOAuthClient(id);
+      setOauthClientToRevoke(null);
+      setMcpOAuthClients(await listMcpOAuthClients());
+    } catch (revokeError) {
+      setMcpError(
+        revokeError instanceof Error
+          ? revokeError.message
+          : t("setup.settings.mcp.revokeClientFailed")
+      );
+    } finally {
+      setRevokingOAuthClient(null);
+    }
+  }
+
   return (
     <div className="settings-page">
       <header className="settings-page__header">
@@ -150,21 +206,28 @@ export function McpPage() {
           settings={mcpSettings}
           status={mcpStatus}
           tokens={mcpTokens}
+          oauthClients={mcpOAuthClients}
           activity={mcpActivity}
           tokenName={mcpTokenName}
           tokenScopes={mcpTokenScopes}
           onTokenScopesChange={setMcpTokenScopes}
           createdToken={createdMcpToken}
+          createdOAuthClient={createdOAuthClient}
           loading={loadingMcp}
           saving={savingMcp}
           creatingToken={creatingMcpToken}
+          creatingOAuthClient={creatingOAuthClient}
           revokingToken={revokingMcpToken}
+          revokingOAuthClient={revokingOAuthClient}
           error={mcpError}
           onTokenNameChange={setMcpTokenName}
           onUpdateSettings={handleUpdateMcpSettings}
           onCreateToken={handleCreateMcpToken}
           onDismissCreatedToken={() => setCreatedMcpToken(null)}
           onRevokeToken={(id, name) => setTokenToRevoke({ id, name })}
+          onCreateOAuthClient={handleCreateOAuthClient}
+          onDismissCreatedOAuthClient={() => setCreatedOAuthClient(null)}
+          onRevokeOAuthClient={(id, name) => setOauthClientToRevoke({ id, name })}
         />
       </div>
 
@@ -177,6 +240,18 @@ export function McpPage() {
           confirmLabel={t("setup.settings.mcp.revokeToken")}
           onCancel={() => setTokenToRevoke(null)}
           onConfirm={() => void handleRevokeMcpToken(tokenToRevoke.id)}
+        />
+      ) : null}
+
+      {oauthClientToRevoke ? (
+        <ConfirmDialog
+          title={t("setup.settings.mcp.confirmRevokeClientTitle")}
+          description={t("setup.settings.mcp.confirmRevokeClientDescription", {
+            name: oauthClientToRevoke.name,
+          })}
+          confirmLabel={t("setup.settings.mcp.revokeClient")}
+          onCancel={() => setOauthClientToRevoke(null)}
+          onConfirm={() => void handleRevokeOAuthClient(oauthClientToRevoke.id)}
         />
       ) : null}
     </div>

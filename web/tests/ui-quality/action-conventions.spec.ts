@@ -37,7 +37,7 @@ test.describe("Admin action conventions", () => {
     await page.getByTestId("confirm-dialog-close").click();
 
     await page.goto("/mcp");
-    await page.getByRole("button", { name: /tokens de acesso/i }).click();
+    await page.getByRole("button", { name: /tokens de acesso|access tokens/i }).click();
     await page.getByRole("button", { name: /revoke token|revogar token/i }).first().click();
     await expect(page.getByTestId("confirm-dialog")).toBeVisible();
     await expect(page.getByText(/revoke mcp token|revogar token mcp/i)).toBeVisible();
