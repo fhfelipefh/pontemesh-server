@@ -56,9 +56,14 @@ pub fn http_json_rpc_error(
     (status, Json(error(None, code, message))).into_response()
 }
 
-pub fn initialize_result() -> Value {
+pub fn initialize_result(requested_version: Option<&str>) -> Value {
+    let version = match requested_version {
+        Some("2024-11-05") | Some("2026-07-28") => requested_version.unwrap(),
+        Some(v) if v.starts_with("2024-") || v.starts_with("2025-") || v.starts_with("2026-") => v,
+        _ => "2024-11-05",
+    };
     json!({
-        "protocolVersion": "2025-11-25",
+        "protocolVersion": version,
         "capabilities": {
             "tools": {},
             "resources": {},
@@ -69,4 +74,26 @@ pub fn initialize_result() -> Value {
             "version": env!("CARGO_PKG_VERSION")
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_initialize_result_protocol_version() {
+        assert_eq!(initialize_result(None)["protocolVersion"], "2024-11-05");
+        assert_eq!(
+            initialize_result(Some("2024-11-05"))["protocolVersion"],
+            "2024-11-05"
+        );
+        assert_eq!(
+            initialize_result(Some("2026-07-28"))["protocolVersion"],
+            "2026-07-28"
+        );
+        assert_eq!(
+            initialize_result(Some("unsupported-date"))["protocolVersion"],
+            "2024-11-05"
+        );
+    }
 }

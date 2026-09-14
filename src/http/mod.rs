@@ -49,34 +49,54 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
             "/pontemesh/replica/access-packages/{package_id}/objects/{bucket_name}/{*object_key}",
             get(replica::serve_access_package_object).head(replica::head_access_package_object),
         )
-        .route(
-            "/mcp",
-            post(mcp::transport_http::post_mcp)
-                .get(mcp::transport_http::get_mcp)
-                .delete(mcp::transport_http::method_not_allowed),
+        .merge(
+            Router::new()
+                .route(
+                    "/mcp",
+                    post(mcp::transport_http::post_mcp)
+                        .get(mcp::transport_http::get_mcp)
+                        .delete(mcp::transport_http::method_not_allowed),
+                )
+                .route(
+                    "/.well-known/oauth-protected-resource",
+                    get(mcp::oauth::get_protected_resource_metadata),
+                )
+                .route(
+                    "/.well-known/oauth-protected-resource/mcp",
+                    get(mcp::oauth::get_protected_resource_metadata),
+                )
+                .route(
+                    "/.well-known/oauth-authorization-server",
+                    get(mcp::oauth::get_authorization_server_metadata),
+                )
+                .route(
+                    "/.well-known/openid-configuration",
+                    get(mcp::oauth::get_authorization_server_metadata),
+                )
+                .route(
+                    "/oauth/authorize",
+                    get(mcp::oauth::get_authorize).post(mcp::oauth::post_authorize),
+                )
+                .route("/oauth/token", post(mcp::oauth::post_token))
+                .route("/oauth/register", post(mcp::oauth::post_register))
+                .layer(
+                    tower_http::cors::CorsLayer::new()
+                        .allow_origin(tower_http::cors::Any)
+                        .allow_methods([
+                            axum::http::Method::GET,
+                            axum::http::Method::POST,
+                            axum::http::Method::OPTIONS,
+                            axum::http::Method::DELETE,
+                        ])
+                        .allow_headers(tower_http::cors::Any)
+                        .expose_headers([
+                            header::WWW_AUTHENTICATE,
+                            header::CONTENT_TYPE,
+                            axum::http::HeaderName::from_static("mcp-session-id"),
+                            axum::http::HeaderName::from_static("mcp-protocol-version"),
+                        ]),
+                ),
         )
-        .route(
-            "/.well-known/oauth-protected-resource",
-            get(mcp::oauth::get_protected_resource_metadata),
-        )
-        .route(
-            "/.well-known/oauth-protected-resource/mcp",
-            get(mcp::oauth::get_protected_resource_metadata),
-        )
-        .route(
-            "/.well-known/oauth-authorization-server",
-            get(mcp::oauth::get_authorization_server_metadata),
-        )
-        .route(
-            "/.well-known/openid-configuration",
-            get(mcp::oauth::get_authorization_server_metadata),
-        )
-        .route(
-            "/oauth/authorize",
-            get(mcp::oauth::get_authorize).post(mcp::oauth::post_authorize),
-        )
-        .route("/oauth/token", post(mcp::oauth::post_token))
-        .route("/oauth/register", post(mcp::oauth::post_register))
         .nest("/pontemesh", pontemesh_routes(state.clone()))
         .merge(admin_routes(state.clone()))
         .route("/api/{*path}", any(setup::routes::api_not_found))
@@ -131,13 +151,16 @@ pub fn s3_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catalo
 }
 
 async fn security_headers(request: Request, next: Next) -> Response {
+    let is_oauth = request.uri().path().starts_with("/oauth/");
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"),
-    );
-    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    if !is_oauth {
+        headers.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"),
+        );
+        headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    }
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -1374,6 +1397,54 @@ mod tests {
             .and_then(|h| h.to_str().ok())
             .unwrap_or_default();
         assert!(auth_header.contains("resource_metadata="));
+        assert!(auth_header.contains("scope=\"read\""));
+        assert!(!auth_header.contains("error=\"unauthorized\""));
+
+        let mcp_options = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/mcp")
+                    .header(header::ORIGIN, "https://gemini.google.com")
+                    .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert!(mcp_options.status().is_success());
+        assert_eq!(
+            mcp_options
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .and_then(|h| h.to_str().ok()),
+            Some("*")
+        );
+
+        let mcp_post_unauth = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","method":"initialize","id":1}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(mcp_post_unauth.status(), StatusCode::UNAUTHORIZED);
+        let post_auth_header = mcp_post_unauth
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or_default();
+        assert!(post_auth_header.contains("resource_metadata="));
+        assert!(post_auth_header.contains("scope=\"read\""));
+        assert!(!post_auth_header.contains("error=\"unauthorized\""));
 
         let register = app
             .clone()
