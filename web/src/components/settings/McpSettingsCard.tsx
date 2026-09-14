@@ -181,6 +181,8 @@ export function McpSettingsCard({
             <button
               className={`mcp-tab ${activeTab === "tokens" ? "mcp-tab--active" : ""}`}
               onClick={() => setActiveTab("tokens")}
+              aria-label={`${t("setup.settings.mcp.tabTokens")} Tokens de Acesso`}
+              data-testid="mcp-tab-tokens"
             >
               {t("setup.settings.mcp.tabTokens")}
             </button>

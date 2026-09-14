@@ -9,7 +9,7 @@ test.describe("Settings MCP layout quality", () => {
 
   test("token scope checkboxes should stay compact and aligned", async ({ page }) => {
     await page.goto("/mcp");
-    await page.getByRole("button", { name: /tokens de acesso/i }).click();
+    await page.getByRole("button", { name: /tokens de acesso|access tokens/i }).click();
 
     const scopeGroup = page.getByTestId("mcp-token-scope-group");
     await expect(scopeGroup).toBeVisible();

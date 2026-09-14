@@ -291,7 +291,9 @@ async fn handle_json_rpc(
                     anyhow::bail!("MCP token is not allowed to call tool {name}");
                 }
             }
-            Ok(Some(tools::call_tool(state, authorization, name, arguments).await?))
+            Ok(Some(
+                tools::call_tool(state, authorization, name, arguments).await?,
+            ))
         }
         "resources/list" => {
             if !settings.expose_resources {

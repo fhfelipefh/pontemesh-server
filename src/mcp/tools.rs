@@ -240,7 +240,12 @@ pub async fn call_tool(
         "pontemesh_create_bucket" => {
             let bucket = required_str(&arguments, "bucket")?;
             catalog::validate_bucket_name(bucket)?;
-            json!(state.catalog.create_bucket(bucket, authorization.user_id.as_deref()).await?)
+            json!(
+                state
+                    .catalog
+                    .create_bucket(bucket, authorization.user_id.as_deref())
+                    .await?
+            )
         }
         "pontemesh_delete_bucket" => {
             let bucket = required_str(&arguments, "bucket")?;
