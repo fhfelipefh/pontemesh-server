@@ -85,6 +85,7 @@
       "objects": "Objects",
       "replicas": "Replicas",
       "metrics": "Metrics",
+      "mcp": "MCP",
       "settings": "Settings",
       "collapseSidebar": "Collapse sidebar",
       "expandSidebar": "Expand sidebar",
@@ -423,6 +424,7 @@
       },
       "mcp": {
         "title": "MCP",
+        "description": "MCP server configuration, access control, and tokens.",
         "status": "MCP status",
         "enabled": "Enabled",
         "disabled": "Disabled",
