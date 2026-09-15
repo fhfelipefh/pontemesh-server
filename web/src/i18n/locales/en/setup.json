@@ -481,6 +481,7 @@
         "clientName": "Application name",
         "clientNamePlaceholder": "e.g., Gemini Assistant, My MCP Agent",
         "redirectUris": "Redirect URIs (optional, comma-separated)",
+        "redirectUrisCol": "Redirect URIs",
         "redirectUrisPlaceholder": "https://example.com/oauth/callback",
         "createClient": "Create connected app",
         "revokeClient": "Revoke application",

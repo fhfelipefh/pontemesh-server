@@ -191,7 +191,7 @@ export function McpPage() {
   }
 
   return (
-    <div className="settings-page">
+    <div className="settings-page mcp-page">
       <header className="settings-page__header">
         <div>
           <h1>{t("setup.settings.mcp.title")}</h1>

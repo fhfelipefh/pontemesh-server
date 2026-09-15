@@ -635,6 +635,10 @@
   gap: 28px;
 }
 
+.settings-page.mcp-page {
+  max-width: 100%;
+}
+
 .settings-page__header {
   display: flex;
   align-items: end;
@@ -1732,6 +1736,7 @@
   display: block;
   max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-all;
   color: var(--pm-deep-navy);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.86rem;
@@ -1775,11 +1780,40 @@
   width: 64px;
 }
 
+.settings-table__col-oauth-name {
+  width: 16%;
+}
+
+.settings-table__col-oauth-client-id {
+  width: 25%;
+}
+
+.settings-table__col-oauth-uris {
+  width: 27%;
+}
+
+.settings-table__col-oauth-scopes {
+  width: 11%;
+}
+
+.settings-table__col-oauth-status {
+  width: 9%;
+}
+
+.settings-table__col-oauth-created {
+  width: 12%;
+}
+
+.settings-table__col-oauth-actions {
+  width: 60px;
+}
+
 .settings-table th,
 .settings-table td {
   padding: 14px 16px;
   text-align: left;
   vertical-align: middle;
+  overflow-wrap: anywhere;
 }
 
 .settings-table th {
@@ -1834,6 +1868,42 @@
 .settings-status-badge[data-active="false"] {
   color: var(--pm-danger-deep);
   background: var(--pm-rose-soft);
+}
+
+.mcp-client-uris {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.mcp-client-uri {
+  display: inline-block;
+  max-width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--pm-deep-navy);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.mcp-scope-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mcp-scope-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--pm-deep-navy);
+  background: var(--pm-bg-elevated);
+  border: 1px solid var(--pm-border-subtle);
+  line-height: 1.3;
 }
 
 .settings-icon-button,
