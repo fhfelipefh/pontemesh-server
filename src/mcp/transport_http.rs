@@ -7,7 +7,7 @@ use axum::{
     Json,
     body::{Body, to_bytes},
     extract::State,
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde_json::{Value, json};
@@ -70,76 +70,6 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
         }
     }
 
-    let authorization = if settings.require_auth {
-        match auth::authorize_request(&state, &headers, &settings.auth_mode).await {
-            Ok(authorization) => authorization,
-            Err(error) => {
-                let _ = state
-                    .catalog
-                    .record_mcp_activity(
-                        None,
-                        "auth",
-                        None,
-                        "failed",
-                        json!({ "requestId": request_id }),
-                    )
-                    .await;
-                warn!(request_id = %request_id, "mcp_auth_failed");
-                let base_url = crate::mcp::oauth::resolve_base_url(&state, &headers);
-                let www_auth = format!(
-                    "Bearer realm=\"mcp\", resource_metadata=\"{base_url}/.well-known/oauth-protected-resource/mcp\", scope=\"read\""
-                );
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    [
-                        (header::WWW_AUTHENTICATE, www_auth),
-                        (header::CONTENT_TYPE, "application/json".to_string()),
-                    ],
-                    Json(protocol::error(None, -32000, error.to_string())),
-                )
-                    .into_response();
-            }
-        }
-    } else {
-        return protocol::http_json_rpc_error(
-            StatusCode::FORBIDDEN,
-            -32001,
-            "MCP authentication must remain enabled",
-        );
-    };
-
-    match state
-        .catalog
-        .count_recent_mcp_activity(&authorization.id, MCP_RATE_LIMIT_WINDOW_SECONDS)
-        .await
-    {
-        Ok(count) if count >= MCP_RATE_LIMIT_MAX_REQUESTS => {
-            let _ = state
-                .catalog
-                .record_mcp_activity(
-                    Some(&authorization.id),
-                    "rate_limit",
-                    None,
-                    "rejected",
-                    json!({ "requestId": request_id }),
-                )
-                .await;
-            return protocol::http_json_rpc_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                -32002,
-                "MCP rate limit exceeded",
-            );
-        }
-        Ok(_) => {}
-        Err(error) => {
-            return protocol::http_json_rpc_error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                -32603,
-                error.to_string(),
-            );
-        }
-    }
-
     let bytes = match to_bytes(body, MCP_MAX_JSON_RPC_BYTES).await {
         Ok(body) => body,
         Err(error) => {
@@ -164,16 +94,118 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
         return Json(protocol::error(request.id, -32600, "jsonrpc must be 2.0")).into_response();
     }
 
+    let has_auth_header = headers.contains_key(header::AUTHORIZATION);
+    let is_handshake_method = matches!(
+        request.method.as_str(),
+        "initialize" | "notifications/initialized" | "ping"
+    );
+
+    let authorization = if settings.require_auth {
+        if !has_auth_header && is_handshake_method {
+            None
+        } else {
+            match auth::authorize_request(&state, &headers, &settings.auth_mode).await {
+                Ok(authorization) => Some(authorization),
+                Err(error) => {
+                    let _ = state
+                        .catalog
+                        .record_mcp_activity(
+                            None,
+                            "auth",
+                            None,
+                            "failed",
+                            json!({ "requestId": request_id }),
+                        )
+                        .await;
+                    warn!(request_id = %request_id, "mcp_auth_failed");
+                    let base_url = crate::mcp::oauth::resolve_base_url(&state, &headers);
+                    let www_auth = format!(
+                        "Bearer realm=\"mcp\", resource_metadata=\"{base_url}/.well-known/oauth-protected-resource/mcp\", scope=\"read\""
+                    );
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        [
+                            (header::WWW_AUTHENTICATE, www_auth),
+                            (header::CONTENT_TYPE, "application/json".to_string()),
+                        ],
+                        Json(protocol::error(request.id, -32000, error.to_string())),
+                    )
+                        .into_response();
+                }
+            }
+        }
+    } else {
+        return protocol::http_json_rpc_error(
+            StatusCode::FORBIDDEN,
+            -32001,
+            "MCP authentication must remain enabled",
+        );
+    };
+
+    if let Some(auth) = &authorization {
+        match state
+            .catalog
+            .count_recent_mcp_activity(&auth.id, MCP_RATE_LIMIT_WINDOW_SECONDS)
+            .await
+        {
+            Ok(count) if count >= MCP_RATE_LIMIT_MAX_REQUESTS => {
+                let _ = state
+                    .catalog
+                    .record_mcp_activity(
+                        Some(&auth.id),
+                        "rate_limit",
+                        None,
+                        "rejected",
+                        json!({ "requestId": request_id }),
+                    )
+                    .await;
+                return protocol::http_json_rpc_error(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    -32002,
+                    "MCP rate limit exceeded",
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                return protocol::http_json_rpc_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    -32603,
+                    error.to_string(),
+                );
+            }
+        }
+    }
+
+    let header_protocol_version = headers
+        .get("mcp-protocol-version")
+        .and_then(|v| v.to_str().ok());
+    let requested_version = request
+        .params
+        .as_ref()
+        .and_then(|p| p.get("protocolVersion"))
+        .and_then(Value::as_str)
+        .or(header_protocol_version);
+    let protocol_version = match requested_version {
+        Some("2024-11-05") | Some("2026-07-28") => requested_version.unwrap(),
+        Some(v) if v.starts_with("2024-") || v.starts_with("2025-") || v.starts_with("2026-") => v,
+        _ => "2024-11-05",
+    };
+    let session_id = headers
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
     let method = request.method.clone();
     let id = request.id.clone();
-    let result = handle_json_rpc(&state, &settings, &authorization, &request).await;
+    let result = handle_json_rpc(&state, &settings, authorization.as_ref(), &request).await;
     let duration_ms = started.elapsed().as_millis() as i64;
     match result {
         Ok(Some(value)) => {
             let _ = state
                 .catalog
                 .record_mcp_activity(
-                    Some(&authorization.id),
+                    authorization.as_ref().map(|a| a.id.as_str()),
                     &method,
                     activity_target(&request).as_deref(),
                     "success",
@@ -183,27 +215,41 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
             info!(
                 request_id = %request_id,
                 method = %method,
-                token_id = %authorization.id,
-                token_name = %authorization.name,
+                token_id = %authorization.as_ref().map(|a| a.id.to_string()).unwrap_or_else(|| "none".to_string()),
+                token_name = %authorization.as_ref().map(|a| a.name.as_str()).unwrap_or("unauthenticated"),
                 duration_ms,
                 status = "success",
                 "mcp_request_completed"
             );
-            Json(protocol::success(id, value)).into_response()
+            (
+                StatusCode::OK,
+                mcp_response_headers(protocol_version, &session_id, true),
+                Json(protocol::success(id, value)),
+            )
+                .into_response()
         }
-        Ok(None) => StatusCode::ACCEPTED.into_response(),
+        Ok(None) => (
+            StatusCode::ACCEPTED,
+            mcp_response_headers(protocol_version, &session_id, false),
+        )
+            .into_response(),
         Err(error) => {
             let _ = state
                 .catalog
                 .record_mcp_activity(
-                    Some(&authorization.id),
+                    authorization.as_ref().map(|a| a.id.as_str()),
                     &method,
                     activity_target(&request).as_deref(),
                     "error",
                     json!({ "requestId": request_id, "durationMs": duration_ms, "error": error.to_string() }),
                 )
                 .await;
-            Json(protocol::error(id, -32603, error.to_string())).into_response()
+            (
+                StatusCode::OK,
+                mcp_response_headers(protocol_version, &session_id, true),
+                Json(protocol::error(id, -32603, error.to_string())),
+            )
+                .into_response()
         }
     }
 }
@@ -270,7 +316,7 @@ pub async fn method_not_allowed() -> Response {
 async fn handle_json_rpc(
     state: &AppState,
     settings: &crate::catalog::McpSettings,
-    authorization: &McpTokenAuthorization,
+    authorization: Option<&McpTokenAuthorization>,
     request: &protocol::JsonRpcRequest,
 ) -> anyhow::Result<Option<Value>> {
     match request.method.as_str() {
@@ -285,12 +331,14 @@ async fn handle_json_rpc(
         "notifications/initialized" => Ok(None),
         "ping" => Ok(Some(json!({}))),
         "tools/list" => {
+            let authorization = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.read_tools_enabled {
                 anyhow::bail!("MCP read tools are disabled");
             }
             Ok(Some(tools::list_tools(settings, &authorization.scopes)))
         }
         "tools/call" => {
+            let authorization = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.read_tools_enabled {
                 anyhow::bail!("MCP read tools are disabled");
             }
@@ -313,6 +361,7 @@ async fn handle_json_rpc(
             ))
         }
         "resources/list" => {
+            let authorization = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.expose_resources {
                 anyhow::bail!("MCP resources are disabled");
             }
@@ -322,6 +371,7 @@ async fn handle_json_rpc(
             )))
         }
         "resources/read" => {
+            let authorization = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.expose_resources {
                 anyhow::bail!("MCP resources are disabled");
             }
@@ -335,12 +385,14 @@ async fn handle_json_rpc(
             ))
         }
         "prompts/list" => {
+            let _ = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.expose_prompts {
                 anyhow::bail!("MCP prompts are disabled");
             }
             Ok(Some(prompts::list_prompts()))
         }
         "prompts/get" => {
+            let _ = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.expose_prompts {
                 anyhow::bail!("MCP prompts are disabled");
             }
@@ -362,4 +414,25 @@ fn activity_target(request: &protocol::JsonRpcRequest) -> Option<String> {
         .or_else(|| params.get("uri"))
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn mcp_response_headers(
+    protocol_version: &str,
+    session_id: &str,
+    include_content_type: bool,
+) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    if include_content_type {
+        map.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+    }
+    if let Ok(val) = HeaderValue::from_str(protocol_version) {
+        map.insert(HeaderName::from_static("mcp-protocol-version"), val);
+    }
+    if let Ok(val) = HeaderValue::from_str(session_id) {
+        map.insert(HeaderName::from_static("mcp-session-id"), val);
+    }
+    map
 }
