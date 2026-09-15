@@ -368,7 +368,9 @@ pub async fn get_mcp(
         .into_response()
 }
 
-pub async fn delete_mcp(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub async fn delete_mcp(State(state): State<AppState>, headers: HeaderMap, body: Body) -> Response {
+    let _ = to_bytes(body, 64 * 1024).await;
+
     let settings = match state.catalog.get_mcp_settings().await {
         Ok(settings) => settings,
         Err(error) => {
@@ -393,6 +395,7 @@ pub async fn delete_mcp(State(state): State<AppState>, headers: HeaderMap) -> Re
         .unwrap_or("");
 
     let mut map = HeaderMap::new();
+    map.insert(header::CONTENT_LENGTH, HeaderValue::from_static("0"));
     if let Ok(val) = HeaderValue::from_str(protocol_version) {
         map.insert(HeaderName::from_static("mcp-protocol-version"), val);
     }
