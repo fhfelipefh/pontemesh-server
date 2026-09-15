@@ -55,7 +55,7 @@ pub fn web_router(paths: PontemeshHome, setup: setup::SetupState, catalog: Catal
                     "/mcp",
                     post(mcp::transport_http::post_mcp)
                         .get(mcp::transport_http::get_mcp)
-                        .delete(mcp::transport_http::method_not_allowed),
+                        .delete(mcp::transport_http::delete_mcp),
                 )
                 .route(
                     "/.well-known/oauth-protected-resource",
@@ -1062,6 +1062,69 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(unauth_notif.status(), StatusCode::ACCEPTED);
+
+        let unauth_delete = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::DELETE)
+                    .uri("/mcp")
+                    .header("mcp-session-id", "test-session")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauth_delete.status(), StatusCode::OK);
+
+        let sse_get = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/mcp")
+                    .header(header::ACCEPT, "text/event-stream")
+                    .header("mcp-session-id", "test-session")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(sse_get.status(), StatusCode::OK);
+        assert_eq!(
+            sse_get
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("text/event-stream")
+        );
+
+        let unauth_get = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/mcp")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauth_get.status(), StatusCode::UNAUTHORIZED);
+
+        let unauth_head = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::HEAD)
+                    .uri("/mcp")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauth_head.status(), StatusCode::UNAUTHORIZED);
+        assert!(unauth_head.headers().contains_key(header::WWW_AUTHENTICATE));
 
         let invalid_token = app
             .clone()

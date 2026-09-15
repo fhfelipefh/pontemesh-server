@@ -198,7 +198,14 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
 
     let method = request.method.clone();
     let id = request.id.clone();
-    let result = handle_json_rpc(&state, &settings, authorization.as_ref(), &request).await;
+    let result = handle_json_rpc(
+        &state,
+        &settings,
+        authorization.as_ref(),
+        &request,
+        protocol_version,
+    )
+    .await;
     let duration_ms = started.elapsed().as_millis() as i64;
     match result {
         Ok(Some(value)) => {
@@ -254,7 +261,11 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
     }
 }
 
-pub async fn get_mcp(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub async fn get_mcp(
+    State(state): State<AppState>,
+    method: axum::http::Method,
+    headers: HeaderMap,
+) -> Response {
     let settings = match state.catalog.get_mcp_settings().await {
         Ok(settings) => settings,
         Err(error) => {
@@ -268,6 +279,58 @@ pub async fn get_mcp(State(state): State<AppState>, headers: HeaderMap) -> Respo
     if !settings.enabled || settings.endpoint_path != config::DEFAULT_ENDPOINT_PATH {
         return StatusCode::NOT_FOUND.into_response();
     }
+
+    let is_sse = method != axum::http::Method::HEAD
+        && headers
+            .get(header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .map(|accept| accept.contains("text/event-stream"))
+            .unwrap_or(false);
+
+    if is_sse {
+        let protocol_version = headers
+            .get("mcp-protocol-version")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("2024-11-05");
+        let session_id = headers
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        let mut map = HeaderMap::new();
+        map.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream"),
+        );
+        map.insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, no-transform"),
+        );
+        map.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+        map.insert(
+            HeaderName::from_static("x-accel-buffering"),
+            HeaderValue::from_static("no"),
+        );
+        if let Ok(val) = HeaderValue::from_str(protocol_version) {
+            map.insert(HeaderName::from_static("mcp-protocol-version"), val);
+        }
+        if let Ok(val) = HeaderValue::from_str(&session_id) {
+            map.insert(HeaderName::from_static("mcp-session-id"), val);
+        }
+
+        let stream = async_stream::stream! {
+            yield Ok::<_, std::io::Error>(axum::body::Bytes::from(": keepalive\n\n"));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+            loop {
+                interval.tick().await;
+                yield Ok::<_, std::io::Error>(axum::body::Bytes::from(": keepalive\n\n"));
+            }
+        };
+
+        return (StatusCode::OK, map, Body::from_stream(stream)).into_response();
+    }
+
     let base_url = crate::mcp::oauth::resolve_base_url(&state, &headers);
     let www_auth = format!(
         "Bearer realm=\"mcp\", resource_metadata=\"{base_url}/.well-known/oauth-protected-resource/mcp\", scope=\"read\""
@@ -305,12 +368,41 @@ pub async fn get_mcp(State(state): State<AppState>, headers: HeaderMap) -> Respo
         .into_response()
 }
 
-pub async fn method_not_allowed() -> Response {
-    protocol::http_json_rpc_error(
-        StatusCode::METHOD_NOT_ALLOWED,
-        -32601,
-        "MCP Streamable HTTP currently accepts JSON-RPC messages with POST",
-    )
+pub async fn delete_mcp(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let settings = match state.catalog.get_mcp_settings().await {
+        Ok(settings) => settings,
+        Err(error) => {
+            return protocol::http_json_rpc_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                -32603,
+                error.to_string(),
+            );
+        }
+    };
+    if !settings.enabled || settings.endpoint_path != config::DEFAULT_ENDPOINT_PATH {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let protocol_version = headers
+        .get("mcp-protocol-version")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("2024-11-05");
+    let session_id = headers
+        .get("mcp-session-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let mut map = HeaderMap::new();
+    if let Ok(val) = HeaderValue::from_str(protocol_version) {
+        map.insert(HeaderName::from_static("mcp-protocol-version"), val);
+    }
+    if !session_id.is_empty() {
+        if let Ok(val) = HeaderValue::from_str(session_id) {
+            map.insert(HeaderName::from_static("mcp-session-id"), val);
+        }
+    }
+
+    (StatusCode::OK, map, Body::empty()).into_response()
 }
 
 async fn handle_json_rpc(
@@ -318,6 +410,7 @@ async fn handle_json_rpc(
     settings: &crate::catalog::McpSettings,
     authorization: Option<&McpTokenAuthorization>,
     request: &protocol::JsonRpcRequest,
+    negotiated_version: &str,
 ) -> anyhow::Result<Option<Value>> {
     match request.method.as_str() {
         "initialize" => {
@@ -325,8 +418,9 @@ async fn handle_json_rpc(
                 .params
                 .as_ref()
                 .and_then(|p| p.get("protocolVersion"))
-                .and_then(Value::as_str);
-            Ok(Some(protocol::initialize_result(requested_version)))
+                .and_then(Value::as_str)
+                .unwrap_or(negotiated_version);
+            Ok(Some(protocol::initialize_result(Some(requested_version))))
         }
         "notifications/initialized" => Ok(None),
         "ping" => Ok(Some(json!({}))),
@@ -435,8 +529,10 @@ fn mcp_response_headers(
     if let Ok(val) = HeaderValue::from_str(protocol_version) {
         map.insert(HeaderName::from_static("mcp-protocol-version"), val);
     }
-    if let Ok(val) = HeaderValue::from_str(session_id) {
-        map.insert(HeaderName::from_static("mcp-session-id"), val);
+    if !session_id.is_empty() {
+        if let Ok(val) = HeaderValue::from_str(session_id) {
+            map.insert(HeaderName::from_static("mcp-session-id"), val);
+        }
     }
     map
 }
