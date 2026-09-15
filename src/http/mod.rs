@@ -994,7 +994,7 @@ mod tests {
             .expect("router response");
         assert_eq!(enable.status(), StatusCode::OK);
 
-        let no_token = app
+        let unauth_init = app
             .clone()
             .oneshot(
                 Request::builder()
@@ -1008,7 +1008,60 @@ mod tests {
             )
             .await
             .expect("router response");
-        assert_eq!(no_token.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(unauth_init.status(), StatusCode::OK);
+        assert_eq!(
+            unauth_init
+                .headers()
+                .get("mcp-protocol-version")
+                .and_then(|v| v.to_str().ok()),
+            Some("2024-11-05")
+        );
+        assert!(unauth_init.headers().contains_key("mcp-session-id"));
+        let init_body = json_body(unauth_init).await;
+        assert_eq!(init_body["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(
+            init_body["result"]["serverInfo"]["name"],
+            "pontemesh-server"
+        );
+
+        let unauth_tools = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauth_tools.status(), StatusCode::UNAUTHORIZED);
+        let www_auth = unauth_tools
+            .headers()
+            .get(header::WWW_AUTHENTICATE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(www_auth.contains("Bearer realm=\"mcp\""));
+        assert!(www_auth.contains("resource_metadata="));
+
+        let unauth_notif = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/mcp")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauth_notif.status(), StatusCode::ACCEPTED);
 
         let invalid_token = app
             .clone()
@@ -1019,7 +1072,7 @@ mod tests {
                     .header(header::AUTHORIZATION, "Bearer invalid")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
-                        r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#,
+                        r#"{"jsonrpc":"2.0","id":3,"method":"initialize"}"#,
                     ))
                     .expect("valid request"),
             )
