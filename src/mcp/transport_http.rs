@@ -331,14 +331,16 @@ async fn handle_json_rpc(
         "notifications/initialized" => Ok(None),
         "ping" => Ok(Some(json!({}))),
         "tools/list" => {
-            let authorization = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
+            let authorization =
+                authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.read_tools_enabled {
                 anyhow::bail!("MCP read tools are disabled");
             }
             Ok(Some(tools::list_tools(settings, &authorization.scopes)))
         }
         "tools/call" => {
-            let authorization = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
+            let authorization =
+                authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.read_tools_enabled {
                 anyhow::bail!("MCP read tools are disabled");
             }
@@ -361,7 +363,8 @@ async fn handle_json_rpc(
             ))
         }
         "resources/list" => {
-            let authorization = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
+            let authorization =
+                authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.expose_resources {
                 anyhow::bail!("MCP resources are disabled");
             }
@@ -371,7 +374,8 @@ async fn handle_json_rpc(
             )))
         }
         "resources/read" => {
-            let authorization = authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
+            let authorization =
+                authorization.ok_or_else(|| anyhow::anyhow!("MCP bearer token required"))?;
             if !settings.expose_resources {
                 anyhow::bail!("MCP resources are disabled");
             }
