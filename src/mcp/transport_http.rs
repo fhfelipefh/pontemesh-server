@@ -198,7 +198,14 @@ pub async fn post_mcp(State(state): State<AppState>, headers: HeaderMap, body: B
 
     let method = request.method.clone();
     let id = request.id.clone();
-    let result = handle_json_rpc(&state, &settings, authorization.as_ref(), &request, protocol_version).await;
+    let result = handle_json_rpc(
+        &state,
+        &settings,
+        authorization.as_ref(),
+        &request,
+        protocol_version,
+    )
+    .await;
     let duration_ms = started.elapsed().as_millis() as i64;
     match result {
         Ok(Some(value)) => {
@@ -397,7 +404,6 @@ pub async fn delete_mcp(State(state): State<AppState>, headers: HeaderMap) -> Re
 
     (StatusCode::OK, map, Body::empty()).into_response()
 }
-
 
 async fn handle_json_rpc(
     state: &AppState,
