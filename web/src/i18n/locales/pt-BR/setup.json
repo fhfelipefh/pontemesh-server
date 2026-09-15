@@ -481,6 +481,7 @@
         "clientName": "Nome da aplicação",
         "clientNamePlaceholder": "Ex: Assistente Gemini, Meu Agente MCP",
         "redirectUris": "URIs de redirecionamento (opcional, separadas por vírgula)",
+        "redirectUrisCol": "URIs de redirecionamento",
         "redirectUrisPlaceholder": "https://exemplo.com/oauth/callback",
         "createClient": "Criar aplicação conectada",
         "revokeClient": "Revogar aplicação",

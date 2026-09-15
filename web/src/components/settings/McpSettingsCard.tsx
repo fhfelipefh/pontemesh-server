@@ -723,41 +723,42 @@ export function McpSettingsCard({
                 </div>
 
                 <CredentialTable
+                  minWidth={1180}
                   columns={[
                     {
                       key: "name",
                       label: t("setup.settings.mcp.clientName"),
-                      className: "settings-table__col-name",
+                      className: "settings-table__col-oauth-name",
                     },
                     {
                       key: "clientId",
                       label: t("setup.settings.mcp.clientId"),
-                      className: "settings-table__col-key",
+                      className: "settings-table__col-oauth-client-id",
                     },
                     {
                       key: "redirectUris",
-                      label: t("setup.settings.mcp.redirectUris"),
-                      className: "settings-table__col-status",
+                      label: t("setup.settings.mcp.redirectUrisCol"),
+                      className: "settings-table__col-oauth-uris",
                     },
                     {
                       key: "scopes",
                       label: t("setup.settings.mcp.tokenScopes"),
-                      className: "settings-table__col-status",
+                      className: "settings-table__col-oauth-scopes",
                     },
                     {
                       key: "status",
                       label: t("setup.settings.s3.status"),
-                      className: "settings-table__col-status",
+                      className: "settings-table__col-oauth-status",
                     },
                     {
                       key: "createdAt",
                       label: t("setup.settings.s3.createdAt"),
-                      className: "settings-table__col-created",
+                      className: "settings-table__col-oauth-created",
                     },
                     {
                       key: "actions",
                       ariaLabel: t("setup.settings.s3.actions"),
-                      className: "settings-table__col-actions",
+                      className: "settings-table__col-oauth-actions",
                     },
                   ]}
                 >
@@ -780,15 +781,43 @@ export function McpSettingsCard({
                         <tr key={client.id}>
                           <td className="settings-table__name">{client.clientName}</td>
                           <td>
-                            <code>{client.clientId}</code>
+                            <div className="settings-access-key">
+                              <code>{client.clientId}</code>
+                              <CopyButton
+                                value={client.clientId}
+                                label={t("setup.settings.mcp.copyClientId")}
+                              />
+                            </div>
                           </td>
                           <td>
-                            {client.redirectUris && client.redirectUris.length > 0
-                              ? client.redirectUris.join(", ")
-                              : t("setup.common.unavailable")}
+                            {client.redirectUris && client.redirectUris.length > 0 ? (
+                              <div className="mcp-client-uris">
+                                {client.redirectUris.map(uri => (
+                                  <span key={uri} className="mcp-client-uri" title={uri}>
+                                    {uri}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="settings-table__muted">
+                                {t("setup.common.unavailable")}
+                              </span>
+                            )}
                           </td>
                           <td>
-                            {formatScopes(client.scopes, t("setup.common.unavailable"))}
+                            {client.scopes && client.scopes.length > 0 ? (
+                              <div className="mcp-scope-badges">
+                                {client.scopes.map(scope => (
+                                  <span key={scope} className="mcp-scope-badge">
+                                    {scope}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="settings-table__muted">
+                                {t("setup.common.unavailable")}
+                              </span>
+                            )}
                           </td>
                           <td>
                             <StatusBadge
