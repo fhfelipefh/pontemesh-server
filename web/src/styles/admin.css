@@ -1781,7 +1781,7 @@
 }
 
 .settings-table__col-oauth-name {
-  width: 16%;
+  width: 15%;
 }
 
 .settings-table__col-oauth-client-id {
@@ -1789,15 +1789,15 @@
 }
 
 .settings-table__col-oauth-uris {
-  width: 27%;
+  width: 26%;
 }
 
 .settings-table__col-oauth-scopes {
-  width: 11%;
+  width: 14%;
 }
 
 .settings-table__col-oauth-status {
-  width: 9%;
+  width: 8%;
 }
 
 .settings-table__col-oauth-created {
@@ -1805,7 +1805,7 @@
 }
 
 .settings-table__col-oauth-actions {
-  width: 60px;
+  width: 56px;
 }
 
 .settings-table th,
@@ -1873,18 +1873,24 @@
 .mcp-client-uris {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
 }
 
 .mcp-client-uri {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   max-width: 100%;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.82rem;
+  font-size: 0.80rem;
   color: var(--pm-deep-navy);
-  overflow-wrap: anywhere;
-  word-break: break-all;
+  background: var(--pm-bg-elevated);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--pm-border-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mcp-scope-badges {

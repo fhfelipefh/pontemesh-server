@@ -25,7 +25,7 @@ export function CredentialTable({ columns, children, minWidth = 900 }: Credentia
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column.key} aria-label={column.ariaLabel}>
+              <th key={column.key} aria-label={column.ariaLabel} className={column.className}>
                 {column.label}
               </th>
             ))}
