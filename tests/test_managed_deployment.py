@@ -32,6 +32,15 @@ class ManagedDeploymentTests(unittest.TestCase):
         self.assertIn("systemctl status pontemesh-server", page)
         self.assertIn("journalctl -u pontemesh-server", page)
 
+    def test_nginx_reverse_proxy_configuration(self):
+        config = (ROOT / "deploy/nginx/pontemesh-server.conf").read_text()
+
+        self.assertIn("proxy_pass http://127.0.0.1:8080;", config)
+        self.assertIn("proxy_http_version 1.1;", config)
+        self.assertIn("proxy_request_buffering on;", config)
+        self.assertIn("proxy_buffering off;", config)
+        self.assertIn("proxy_set_header X-Forwarded-Proto https;", config)
+
 
 if __name__ == "__main__":
     unittest.main()
