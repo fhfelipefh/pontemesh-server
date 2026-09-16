@@ -95,6 +95,7 @@
       "loading": "Carregando...",
       "unavailable": "Indisponível",
       "notApplicable": "N/A",
+      "never": "Nunca fez login",
       "yes": "Sim",
       "no": "Não",
       "ok": "OK",
