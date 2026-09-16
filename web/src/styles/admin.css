@@ -1043,7 +1043,8 @@
 
 .instance-settings-form > div:last-child,
 .storage-capacity-form__actions,
-.operational-webhook-form__actions {
+.operational-webhook-form__actions,
+.oidc-settings-form__actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1054,7 +1055,8 @@
 
 .instance-settings-form > div:last-child .button,
 .storage-capacity-form__actions .button,
-.operational-webhook-form__actions .button {
+.operational-webhook-form__actions .button,
+.oidc-settings-form__actions .button {
   width: auto;
   min-width: 118px;
 }
@@ -1615,6 +1617,7 @@
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .settings-file-button {

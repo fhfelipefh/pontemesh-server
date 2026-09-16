@@ -108,7 +108,7 @@ export function OidcSettingsCard({ settings, onSettingsUpdated }: OidcSettingsCa
 
         {error ? <p className="error-message">{error}</p> : null}
 
-        <div className="settings-actions-row">
+        <div className="oidc-settings-form__actions">
           <Button
             type="submit"
             disabled={!hasChanges || saving}
