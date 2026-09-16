@@ -944,6 +944,30 @@ impl Catalog {
         }))
     }
 
+    pub async fn find_active_user_by_id(
+        &self,
+        user_id: &str,
+    ) -> anyhow::Result<Option<UserRecord>> {
+        let row = query(
+            r#"
+            SELECT id::text, username, password_hash, role
+            FROM users
+            WHERE id = $1::uuid AND is_active = TRUE
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load user by id")?;
+
+        Ok(row.map(|row| UserRecord {
+            id: row.get("id"),
+            username: row.get("username"),
+            password_hash: row.get("password_hash"),
+            role: row.get("role"),
+        }))
+    }
+
     pub async fn list_active_users(&self) -> anyhow::Result<Vec<AdminUserSummary>> {
         let rows = query(
             "SELECT id::text, username, role, created_at, last_login_at FROM users WHERE is_active = TRUE ORDER BY created_at ASC",

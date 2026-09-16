@@ -202,15 +202,30 @@ fn tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+async fn is_admin_caller(
+    state: &AppState,
+    authorization: &catalog::McpTokenAuthorization,
+) -> bool {
+    if authorization.scopes.iter().any(|s| s == "admin") {
+        return true;
+    }
+    if let Some(user_id) = authorization.user_id.as_deref() {
+        if let Ok(Some(user)) = state.catalog.find_active_user_by_id(user_id).await {
+            return user.role == "admin";
+        }
+    }
+    false
+}
+
 async fn verify_bucket_access(
     state: &AppState,
     authorization: &catalog::McpTokenAuthorization,
     bucket_name: &str,
 ) -> anyhow::Result<()> {
+    if is_admin_caller(state, authorization).await {
+        return Ok(());
+    }
     if let Some(user_id) = authorization.user_id.as_deref() {
-        if authorization.scopes.iter().any(|s| s == "admin") {
-            return Ok(());
-        }
         let bucket = state
             .catalog
             .get_bucket(bucket_name)
@@ -308,10 +323,15 @@ pub async fn call_tool(
         "pontemesh_list_buckets" => {
             let (page, page_size) = page_args(&arguments);
             let query = arguments.get("query").and_then(Value::as_str);
+            let owner_filter = if is_admin_caller(state, authorization).await {
+                None
+            } else {
+                authorization.user_id.as_deref()
+            };
             json!(
                 state
                     .catalog
-                    .list_buckets_page(query, page, page_size, authorization.user_id.as_deref())
+                    .list_buckets_page(query, page, page_size, owner_filter)
                     .await?
             )
         }
