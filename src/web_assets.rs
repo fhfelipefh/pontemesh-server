@@ -75,10 +75,7 @@ fn file_response(path: &str, bytes: &'static [u8]) -> Response {
             "no-cache, no-store, must-revalidate, max-age=0",
         );
     } else if path.starts_with("assets/") {
-        builder = builder.header(
-            header::CACHE_CONTROL,
-            "public, max-age=31536000, immutable",
-        );
+        builder = builder.header(header::CACHE_CONTROL, "public, max-age=31536000, immutable");
     }
 
     builder
