@@ -723,7 +723,7 @@ export function McpSettingsCard({
                 </div>
 
                 <CredentialTable
-                  minWidth={1180}
+                  minWidth={1240}
                   columns={[
                     {
                       key: "name",

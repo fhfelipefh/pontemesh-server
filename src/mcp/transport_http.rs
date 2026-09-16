@@ -319,8 +319,11 @@ pub async fn get_mcp(
             map.insert(HeaderName::from_static("mcp-session-id"), val);
         }
 
+        let base_url = crate::mcp::oauth::resolve_base_url(&state, &headers);
+        let initial_event = format!("event: endpoint\ndata: {base_url}/mcp\n\n: keepalive\n\n");
+
         let stream = async_stream::stream! {
-            yield Ok::<_, std::io::Error>(axum::body::Bytes::from(": keepalive\n\n"));
+            yield Ok::<_, std::io::Error>(axum::body::Bytes::from(initial_event));
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
             loop {
                 interval.tick().await;

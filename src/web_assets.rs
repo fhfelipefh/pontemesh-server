@@ -65,9 +65,23 @@ fn file_response(path: &str, bytes: &'static [u8]) -> Response {
         .essence_str()
         .to_owned();
 
-    Response::builder()
+    let mut builder = Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_TYPE, content_type);
+
+    if path == "index.html" || path.is_empty() {
+        builder = builder.header(
+            header::CACHE_CONTROL,
+            "no-cache, no-store, must-revalidate, max-age=0",
+        );
+    } else if path.starts_with("assets/") {
+        builder = builder.header(
+            header::CACHE_CONTROL,
+            "public, max-age=31536000, immutable",
+        );
+    }
+
+    builder
         .body(Body::from(bytes))
         .expect("valid embedded asset response")
 }
