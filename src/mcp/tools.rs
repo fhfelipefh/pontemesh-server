@@ -202,10 +202,7 @@ fn tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
-async fn is_admin_caller(
-    state: &AppState,
-    authorization: &catalog::McpTokenAuthorization,
-) -> bool {
+async fn is_admin_caller(state: &AppState, authorization: &catalog::McpTokenAuthorization) -> bool {
     if authorization.scopes.iter().any(|s| s == "admin") {
         return true;
     }
