@@ -6011,7 +6011,7 @@ mod tests {
         signed_headers: &str,
         payload_hash: &str,
     ) -> String {
-        let canonical_query = request.uri().query().unwrap_or("");
+        let canonical_query = crate::s3_auth::canonical_query(request.uri().query().unwrap_or(""));
         let mut canonical_headers = String::new();
         for header_name in signed_headers.split(';') {
             let value = request

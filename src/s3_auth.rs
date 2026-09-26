@@ -388,6 +388,31 @@ mod tests {
         assert_eq!(unknown.code(), invalid.code());
         assert_eq!(unknown.message(), invalid.message());
     }
+
+    #[test]
+    fn canonical_query_handles_valueless_parameters() {
+        assert_eq!(canonical_query(""), "");
+        assert_eq!(canonical_query("uploads"), "uploads=");
+        assert_eq!(canonical_query("uploads="), "uploads=");
+        assert_eq!(canonical_query("foo=bar"), "foo=bar");
+        assert_eq!(
+            canonical_query("uploads&prefix=&delimiter=%2F"),
+            "delimiter=%2F&prefix=&uploads="
+        );
+        assert_eq!(
+            canonical_query("uploads&partNumber=1&uploadId=abc"),
+            "partNumber=1&uploadId=abc&uploads="
+        );
+    }
+
+    #[test]
+    fn canonical_presigned_query_filters_signature_and_formats_valueless_parameters() {
+        assert_eq!(canonical_presigned_query(""), "");
+        assert_eq!(
+            canonical_presigned_query("uploads&X-Amz-Signature=abc&prefix="),
+            "prefix=&uploads="
+        );
+    }
 }
 
 fn canonical_request_with_query(
@@ -422,24 +447,41 @@ fn canonical_request_with_query(
     ))
 }
 
-fn canonical_query(raw: &str) -> String {
+pub(crate) fn canonical_query(raw: &str) -> String {
     if raw.is_empty() {
         return String::new();
     }
-    let mut pairs: Vec<&str> = raw.split('&').collect();
+    let mut pairs: Vec<String> = raw
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            if pair.contains('=') {
+                pair.to_owned()
+            } else {
+                format!("{pair}=")
+            }
+        })
+        .collect();
     pairs.sort_unstable();
     pairs.join("&")
 }
 
-fn canonical_presigned_query(raw: &str) -> String {
+pub(crate) fn canonical_presigned_query(raw: &str) -> String {
     if raw.is_empty() {
         return String::new();
     }
-    let mut pairs: Vec<&str> = raw
+    let mut pairs: Vec<String> = raw
         .split('&')
-        .filter(|pair| {
-            let key = pair.split_once('=').map_or(*pair, |(key, _)| key);
-            key != "X-Amz-Signature"
+        .filter(|pair| !pair.is_empty())
+        .filter_map(|pair| {
+            let key = pair.split_once('=').map_or(pair, |(key, _)| key);
+            if key == "X-Amz-Signature" {
+                None
+            } else if pair.contains('=') {
+                Some(pair.to_owned())
+            } else {
+                Some(format!("{pair}="))
+            }
         })
         .collect();
     pairs.sort_unstable();
