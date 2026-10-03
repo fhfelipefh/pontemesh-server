@@ -139,19 +139,31 @@ pontemesh_get_instance_status
 pontemesh_get_storage_summary
 pontemesh_list_buckets
 pontemesh_get_bucket
+pontemesh_get_bucket_policy
+pontemesh_check_software_update
 pontemesh_list_objects
 pontemesh_get_object_metadata
 pontemesh_get_health
 pontemesh_get_recent_audit_events
 pontemesh_export_configuration
 pontemesh_get_ai_connection_guide
+pontemesh_speed_test
 ```
+
+`pontemesh_get_bucket_policy` consulta a política híbrida, limites S3 e o esquema
+de versionamento (`releaseVersioningScheme`) de um bucket.
+
+`pontemesh_check_software_update` permite verificar se há uma versão mais recente
+de um jogo ou executável em um bucket com versionamento ativo (`SEMVER`,
+`BUILD_NUMBER`, `CHANNEL`, `TAG`), comparando opcionalmente com `current_version`
+e filtrando por `channel`, sem realizar listagens pesadas de objetos.
 
 `pontemesh_export_configuration` retorna configurações operacionais sem segredos:
 settings MCP e políticas de buckets.
 
-`pontemesh_get_ai_connection_guide` retorna endpoints, método HTTP e orientação de
-autenticação para clientes de IA sem incluir tokens existentes.
+`pontemesh_get_ai_connection_guide` retorna endpoints, método HTTP, esquema de
+releases suportado e orientação de autenticação para clientes de IA sem incluir
+tokens existentes.
 
 ## Ferramentas de escrita
 
@@ -183,6 +195,19 @@ pontemesh_create_application_credential
 pontemesh_create_s3_access_key
 ```
 
+`pontemesh_update_bucket_policy` atualiza a política híbrida e pode definir o
+`releaseVersioningScheme` (`DISABLED`, `SEMVER`, `BUILD_NUMBER`, `CHANNEL`, `TAG`).
+Uma vez que um esquema ativo é habilitado em um bucket, ele torna-se estritamente
+imutável para preservar a compatibilidade de launchers distribuídos.
+
+`pontemesh_create_application_credential` suporta predefinições de escopo via
+`preset` (`launcher`, `downloader`, `full`) ou lista personalizada de `scopes`. A
+predefinição `launcher` concede estritamente o menor privilégio necessário para
+launchers de jogos verificarem atualizações (`pontemesh:update:check`) e obterem
+pacotes de acesso para download (`pontemesh:access-package:create`,
+`pontemesh:manifest:read`, `pontemesh:sources:read`, `pontemesh:availability:read`),
+sem permissão de escrita ou listagem global de objetos.
+
 Essas ferramentas usam os mesmos validadores do catálogo e não podem contornar as
 regras normais do Origin. Importação de configuração não cria buckets e não importa
 tokens, access keys ou segredos.
@@ -199,9 +224,23 @@ pontemesh://instance/health
 pontemesh://storage/summary
 pontemesh://buckets
 pontemesh://buckets/{bucket}
+pontemesh://buckets/{bucket}/policy
 pontemesh://buckets/{bucket}/objects
 pontemesh://audit/recent
 ```
+
+O recurso `pontemesh://buckets/{bucket}/policy` expõe diretamente a política híbrida,
+configurações S3 e o esquema de versionamento configurado para o bucket.
+
+## Prompts
+
+O servidor expõe prompts guiados para clientes MCP:
+
+* `diagnose_instance`: diagnostica a integridade e eventos recentes sem solicitar segredos.
+* `summarize_storage`: resume uso de armazenamento e pontos de atenção.
+* `analyze_bucket_growth`: analisa distribuição e crescimento de buckets.
+* `review_recent_errors`: revisa falhas e erros auditados recentemente.
+* `check_software_releases`: instrui a verificação de esquemas de versão e atualizações de software.
 
 ## Limites
 

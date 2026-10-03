@@ -63,6 +63,12 @@ pub async fn read_resource(
                 })
                 .await?
         ),
+        _ if uri.starts_with("pontemesh://buckets/") && uri.ends_with("/policy") => {
+            let bucket = uri
+                .trim_start_matches("pontemesh://buckets/")
+                .trim_end_matches("/policy");
+            json!(state.catalog.get_bucket_policy(bucket).await?)
+        }
         _ if uri.starts_with("pontemesh://buckets/") && uri.ends_with("/objects") => {
             let bucket = uri
                 .trim_start_matches("pontemesh://buckets/")

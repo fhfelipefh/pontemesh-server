@@ -98,6 +98,27 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             permission: ToolPermission::Read,
         },
         ToolDefinition {
+            name: "pontemesh_get_bucket_policy",
+            description: "Consulta a politica hibrida, esquema de versionamento e configuracoes S3-compatible de um bucket.",
+            schema: json!({"type":"object","properties":{"bucket":{"type":"string"}},"required":["bucket"]}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_check_software_update",
+            description: "Consulta se ha atualizacao mais recente para um software/jogo em um bucket com versionamento ativo.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "bucket": {"type": "string"},
+                    "software_id": {"type": "string"},
+                    "current_version": {"type": "string"},
+                    "channel": {"type": "string"}
+                },
+                "required": ["bucket", "software_id"]
+            }),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
             name: "pontemesh_list_objects",
             description: "Lista objetos de um bucket com paginacao.",
             schema: json!({"type":"object","properties":{"bucket":{"type":"string"},"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":100},"cursor":{"type":"string"}},"required":["bucket"]}),
@@ -165,8 +186,31 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "pontemesh_update_bucket_policy",
-            description: "Atualiza politica hibrida e S3-compatible de um bucket existente.",
-            schema: json!({"type":"object","properties":{"bucket":{"type":"string"},"policy":{"type":"object"}},"required":["bucket","policy"]}),
+            description: "Atualiza politica hibrida, esquema de versionamento e S3-compatible de um bucket existente. O esquema de versionamento e imutavel uma vez ativado.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "bucket": {"type": "string"},
+                    "policy": {
+                        "type": "object",
+                        "properties": {
+                            "accessPackageTtlSeconds": {"type": "integer"},
+                            "fragmentSizeBytes": {"type": "integer"},
+                            "allowReplicaEdge": {"type": "boolean"},
+                            "allowPeerSharing": {"type": "boolean"},
+                            "sourceSelectionStrategy": {"type": "string"},
+                            "fragmentPriorityStrategy": {"type": "string"},
+                            "failureThreshold": {"type": "integer"},
+                            "fallbackMode": {"type": "string"},
+                            "releaseVersioningScheme": {
+                                "type": "string",
+                                "enum": ["DISABLED", "SEMVER", "BUILD_NUMBER", "CHANNEL", "TAG"]
+                            }
+                        }
+                    }
+                },
+                "required": ["bucket", "policy"]
+            }),
             permission: ToolPermission::Admin,
         },
         ToolDefinition {
@@ -183,8 +227,22 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "pontemesh_create_application_credential",
-            description: "Cria credencial de aplicacao para SDKs. O token e exibido somente nesta resposta.",
-            schema: json!({"type":"object","properties":{"name":{"type":"string"},"scopes":{"type":"array","items":{"type":"string"}}},"required":["name"]}),
+            description: "Cria credencial de aplicacao para SDKs ou launchers. O token e exibido somente nesta resposta.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "preset": {
+                        "type": "string",
+                        "enum": ["launcher", "downloader", "full"]
+                    },
+                    "scopes": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    }
+                },
+                "required": ["name"]
+            }),
             permission: ToolPermission::Admin,
         },
         ToolDefinition {
@@ -337,6 +395,54 @@ pub async fn call_tool(
             verify_bucket_access(state, authorization, bucket).await?;
             json!(state.catalog.get_bucket(bucket).await?)
         }
+        "pontemesh_get_bucket_policy" => {
+            let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
+            json!(state.catalog.get_bucket_policy(bucket).await?)
+        }
+        "pontemesh_check_software_update" => {
+            let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
+            let software_id = required_str(&arguments, "software_id")?;
+            let current_version = arguments.get("current_version").and_then(Value::as_str);
+            let channel = arguments.get("channel").and_then(Value::as_str);
+
+            let policy = state.catalog.get_bucket_policy(bucket).await?;
+            let scheme = policy.release_versioning_scheme.trim().to_ascii_uppercase();
+            if scheme == "DISABLED" {
+                bail!("release versioning scheme is disabled for bucket: {bucket}");
+            }
+
+            let latest_release = state
+                .catalog
+                .find_latest_software_release(bucket, software_id, &scheme, channel)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("no release found for software: {software_id}"))?;
+
+            let (has_update, current) = match current_version {
+                Some(current) if !current.trim().is_empty() => {
+                    let is_newer = crate::catalog::release::is_newer(
+                        &latest_release.version,
+                        current.trim(),
+                        &scheme,
+                    )?;
+                    (is_newer, Some(current.trim().to_owned()))
+                }
+                _ => (true, None),
+            };
+
+            json!({
+                "bucket": bucket,
+                "softwareId": software_id,
+                "versioningScheme": scheme,
+                "currentVersion": current,
+                "latestVersion": latest_release.version,
+                "hasUpdate": has_update,
+                "targetObjectKey": latest_release.object_key,
+                "sizeBytes": latest_release.size_bytes,
+                "manifestId": latest_release.manifest_id
+            })
+        }
         "pontemesh_list_objects" => {
             let bucket = required_str(&arguments, "bucket")?;
             verify_bucket_access(state, authorization, bucket).await?;
@@ -401,6 +507,12 @@ pub async fn call_tool(
                     "writeToolsEnabled": mcp_settings.write_tools_enabled,
                     "adminToolsEnabled": mcp_settings.admin_tools_enabled
                 },
+                "releases": {
+                    "supportedSchemes": ["DISABLED", "SEMVER", "BUILD_NUMBER", "CHANNEL", "TAG"],
+                    "immutability": "Once activated on a bucket, release_versioning_scheme cannot be modified or disabled.",
+                    "checkUpdateEndpoint": "/api/v1/updates/:bucket/:software_id",
+                    "applicationPresets": ["launcher", "downloader", "full"]
+                },
                 "security": {
                     "existingSecretsAreNotReturned": true,
                     "newSecretsAreReturnedOnce": true,
@@ -431,11 +543,27 @@ pub async fn call_tool(
         }
         "pontemesh_update_bucket_policy" => {
             let bucket = required_str(&arguments, "bucket")?;
+            verify_bucket_access(state, authorization, bucket).await?;
             let policy_value = arguments
                 .get("policy")
                 .cloned()
                 .ok_or_else(|| anyhow::anyhow!("policy is required"))?;
-            let policy: BucketPolicyUpdate = serde_json::from_value(policy_value)?;
+            let current = state.catalog.get_bucket_policy(bucket).await?;
+            let policy = if let Ok(update) =
+                serde_json::from_value::<BucketPolicyUpdate>(policy_value.clone())
+            {
+                update
+            } else {
+                let mut current_json = serde_json::to_value(&current)?;
+                if let (Value::Object(target), Value::Object(source)) =
+                    (&mut current_json, policy_value)
+                {
+                    for (k, v) in source {
+                        target.insert(k, v);
+                    }
+                }
+                serde_json::from_value::<BucketPolicyUpdate>(current_json)?
+            };
             json!(state.catalog.update_bucket_policy(bucket, policy).await?)
         }
         "pontemesh_import_configuration" => {
@@ -524,8 +652,12 @@ pub async fn call_tool(
         }
         "pontemesh_create_application_credential" => {
             let name = required_str(&arguments, "name")?;
-            let scopes = optional_string_array(&arguments, "scopes")?
-                .unwrap_or_else(default_application_scopes);
+            let preset = arguments.get("preset").and_then(Value::as_str);
+            let raw_scopes = optional_string_array(&arguments, "scopes")?;
+            let scopes = crate::admin::resolve_application_scopes(
+                raw_scopes,
+                Some(preset.unwrap_or("full")),
+            )?;
             let created = state
                 .catalog
                 .create_application_credential(name, scopes, authorization.user_id.as_deref())
@@ -738,16 +870,4 @@ fn optional_string_array(arguments: &Value, name: &str) -> anyhow::Result<Option
         bail!("{name} must include at least one value");
     }
     Ok(Some(values))
-}
-
-fn default_application_scopes() -> Vec<String> {
-    vec![
-        "origin:objects:read".to_owned(),
-        "origin:objects:write".to_owned(),
-        "pontemesh:access-package:create".to_owned(),
-        "pontemesh:manifest:read".to_owned(),
-        "pontemesh:sources:read".to_owned(),
-        "pontemesh:availability:read".to_owned(),
-        "pontemesh:policies:read".to_owned(),
-    ]
 }
