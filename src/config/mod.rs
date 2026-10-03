@@ -324,6 +324,20 @@ fn default_temp_file_max_age() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalStorageSection {
     pub path: PathBuf,
+    #[serde(default)]
+    pub extra_paths: Vec<PathBuf>,
+    #[serde(default)]
+    pub allocation_strategy: Option<String>,
+}
+
+impl LocalStorageSection {
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            extra_paths: Vec::new(),
+            allocation_strategy: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -638,6 +652,86 @@ pub fn configured_storage_dir(paths: &PontemeshHome) -> anyhow::Result<PathBuf> 
     }
 
     Ok(paths.storage_dir())
+}
+
+pub fn configured_storage_drives(paths: &PontemeshHome) -> anyhow::Result<Vec<PathBuf>> {
+    if paths.config_file().exists() {
+        let config = load_instance_config(paths)?;
+        let mut drives = vec![config.storage.local.path];
+        for extra in config.storage.local.extra_paths {
+            if !drives.contains(&extra) {
+                drives.push(extra);
+            }
+        }
+        return Ok(drives);
+    }
+    Ok(vec![configured_storage_dir(paths)?])
+}
+
+pub fn add_storage_drive(
+    paths: &PontemeshHome,
+    new_drive: PathBuf,
+) -> anyhow::Result<InstanceConfig> {
+    if !new_drive.is_absolute() {
+        bail!(
+            "storage drive path must be absolute: {}",
+            new_drive.display()
+        );
+    }
+    let mut config = load_instance_config(paths)?;
+    if config.storage.local.path == new_drive
+        || config.storage.local.extra_paths.contains(&new_drive)
+    {
+        bail!(
+            "storage drive is already configured in pool: {}",
+            new_drive.display()
+        );
+    }
+    config.storage.local.extra_paths.push(new_drive);
+    write_instance_config(paths, &config)?;
+    Ok(config)
+}
+
+pub fn remove_storage_drive(
+    paths: &PontemeshHome,
+    drive_to_remove: &Path,
+) -> anyhow::Result<InstanceConfig> {
+    let mut config = load_instance_config(paths)?;
+    if config.storage.local.path == drive_to_remove {
+        bail!(
+            "cannot remove primary storage drive from pool; drain it or reconfigure primary path first"
+        );
+    }
+    let initial_len = config.storage.local.extra_paths.len();
+    config
+        .storage
+        .local
+        .extra_paths
+        .retain(|p| p != drive_to_remove);
+    if config.storage.local.extra_paths.len() == initial_len {
+        bail!(
+            "storage drive not found in extra drives pool: {}",
+            drive_to_remove.display()
+        );
+    }
+    write_instance_config(paths, &config)?;
+    Ok(config)
+}
+
+pub fn update_storage_allocation_strategy(
+    paths: &PontemeshHome,
+    strategy: &str,
+) -> anyhow::Result<InstanceConfig> {
+    let strategy = match strategy.trim().to_uppercase().as_str() {
+        "MOST_AVAILABLE_FREE_SPACE" | "ROUND_ROBIN" => strategy.trim().to_uppercase(),
+        _ => bail!(
+            "unsupported allocation strategy: {strategy}; valid options are MOST_AVAILABLE_FREE_SPACE, ROUND_ROBIN"
+        ),
+    };
+    let mut config = load_instance_config(paths)?;
+    config.storage.local.allocation_strategy = Some(strategy);
+    write_instance_config(paths, &config)?;
+    Ok(config)
 }
 
 pub fn load_replica_runtime_config(paths: &PontemeshHome) -> anyhow::Result<ReplicaRuntimeConfig> {

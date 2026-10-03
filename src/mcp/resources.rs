@@ -49,6 +49,9 @@ pub async fn read_resource(
             let storage_path = config::configured_storage_dir(&state.paths)?;
             json!(storage::status(&storage_path))
         }
+        "pontemesh://storage/drives" => {
+            json!(storage::pool_status(&state.paths)?)
+        }
         "pontemesh://buckets" => json!(state.catalog.list_buckets_page(None, 1, 100, None).await?),
         "pontemesh://audit/recent" => json!(
             state
@@ -127,6 +130,11 @@ fn resource_definitions() -> Vec<ResourceDefinition> {
         ResourceDefinition {
             uri: "pontemesh://storage/summary",
             name: "Storage summary",
+            permission: ToolPermission::Read,
+        },
+        ResourceDefinition {
+            uri: "pontemesh://storage/drives",
+            name: "Storage drives pool status",
             permission: ToolPermission::Read,
         },
         ResourceDefinition {

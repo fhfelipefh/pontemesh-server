@@ -381,6 +381,27 @@
         "loadFailed": "Failed to load capacity settings.",
         "saveFailed": "Failed to save capacity settings."
       },
+      "storagePool": {
+        "title": "Storage Pool & Drive Management (Hot-swap)",
+        "description": "Add multiple local drives to the storage pool at runtime without restarting the server, and perform safe hot-drain migration before removing or replacing drives.",
+        "primary": "Primary",
+        "auxiliary": "Auxiliary",
+        "path": "Drive path",
+        "status": "Status",
+        "usage": "Usage",
+        "available": "Available",
+        "strategy": "Allocation strategy",
+        "strategyMostFree": "Most available free space (default)",
+        "strategyRoundRobin": "Round-robin (alternating distribution)",
+        "addDrive": "Add drive",
+        "drivePathPlaceholder": "/mnt/storage2 or D:\\storage2",
+        "drainDrive": "Drain & remove",
+        "draining": "Draining objects...",
+        "drainSuccess": "Drive drained successfully: {{migrated}} objects migrated ({{bytes}}).",
+        "confirmDrainTitle": "Drain and remove drive?",
+        "confirmDrainText": "All objects stored on this drive will be verified with SHA-256 hashes and migrated to an available pool drive before removal.",
+        "emptyPool": "Only the primary drive is currently configured."
+      },
       "update": {
         "title": "Server update",
         "available": "A new Ponte Mesh Server version is available: {{version}}.",

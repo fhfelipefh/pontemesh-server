@@ -2488,7 +2488,7 @@ dependencies = [
 
 [[package]]
 name = "pontemesh-server"
-version = "0.10.10"
+version = "0.11.0"
 dependencies = [
  "aes-gcm",
  "anyhow",

@@ -289,7 +289,7 @@ pub(crate) async fn complete_setup(
             s3_url: public_s3_url,
         },
         storage: StorageSection {
-            local: LocalStorageSection { path: storage_path },
+            local: LocalStorageSection::new(storage_path),
             guards: Default::default(),
         },
         replica,

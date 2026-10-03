@@ -36,8 +36,13 @@ import {
 } from "../api/configurationApi";
 import {
   DiskGuardSettings,
+  StoragePoolStatus,
+  addStorageDrive,
+  drainStorageDrive,
   getDiskGuardSettings,
+  getStoragePoolStatus,
   updateDiskGuardSettings,
+  updateStorageAllocationStrategy,
 } from "../api/storageApi";
 import {
   OperationalWebhookSettings,
@@ -48,6 +53,7 @@ import { OidcSettings, getOidcSettings } from "../api/oidcApi";
 import { OidcSettingsCard } from "../components/settings/OidcSettingsCard";
 import { Button } from "../components/Button";
 import { ConfirmDialog } from "../components/AdminListControls";
+import { formatBytes } from "../utils/adminFormat";
 
 import { OperationalWebhookCard } from "../components/settings/OperationalWebhookCard";
 import { S3CredentialsCard } from "../components/settings/S3CredentialsCard";
@@ -55,6 +61,7 @@ import { ServerUpdateCard } from "../components/settings/ServerUpdateCard";
 import { SettingsSection } from "../components/settings/SettingsSection";
 import { SpeedTestCard } from "../components/settings/SpeedTestCard";
 import { StorageCapacityCard } from "../components/settings/StorageCapacityCard";
+import { StoragePoolCard } from "../components/settings/StoragePoolCard";
 import { ConfigurationBackupCard } from "../components/settings/ConfigurationBackupCard";
 import { ApplicationCredentialsCard } from "../components/settings/ApplicationCredentialsCard";
 const S3_KEYS_PAGE_SIZE = 10;
@@ -109,6 +116,10 @@ export function SettingsPage({ role }: { role?: string }) {
   const [savingDiskGuard, setSavingDiskGuard] = useState(false);
   const [diskGuardError, setDiskGuardError] = useState("");
   const [diskGuardSaved, setDiskGuardSaved] = useState(false);
+  const [storagePool, setStoragePool] = useState<StoragePoolStatus | null>(null);
+  const [loadingStoragePool, setLoadingStoragePool] = useState(true);
+  const [storagePoolError, setStoragePoolError] = useState("");
+  const [storagePoolActionMessage, setStoragePoolActionMessage] = useState<string | null>(null);
   const [operationalWebhook, setOperationalWebhook] =
     useState<OperationalWebhookSettings | null>(null);
   const [loadingOperationalWebhook, setLoadingOperationalWebhook] =
@@ -170,6 +181,19 @@ export function SettingsPage({ role }: { role?: string }) {
         )
       )
       .finally(() => setLoadingDiskGuard(false));
+  }, [t]);
+
+  useEffect(() => {
+    getStoragePoolStatus()
+      .then(setStoragePool)
+      .catch(loadError =>
+        setStoragePoolError(
+          loadError instanceof Error
+            ? loadError.message
+            : t("setup.settings.storagePool.loadFailed")
+        )
+      )
+      .finally(() => setLoadingStoragePool(false));
   }, [t]);
 
   useEffect(() => {
@@ -263,6 +287,46 @@ export function SettingsPage({ role }: { role?: string }) {
       );
     } finally {
       setSavingDiskGuard(false);
+    }
+  }
+
+  async function handleAddStorageDrive(path: string) {
+    try {
+      setStoragePoolError("");
+      setStoragePoolActionMessage(null);
+      const updated = await addStorageDrive(path);
+      setStoragePool(updated);
+    } catch (err) {
+      setStoragePoolError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleDrainStorageDrive(path: string) {
+    try {
+      setStoragePoolError("");
+      setStoragePoolActionMessage(null);
+      const result = await drainStorageDrive(path);
+      const refreshed = await getStoragePoolStatus();
+      setStoragePool(refreshed);
+      setStoragePoolActionMessage(
+        t("setup.settings.storagePool.drainSuccess", {
+          migrated: result.objectsMigrated,
+          bytes: formatBytes(result.bytesMigrated),
+        })
+      );
+    } catch (err) {
+      setStoragePoolError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleStorageStrategyChange(strategy: string) {
+    try {
+      setStoragePoolError("");
+      setStoragePoolActionMessage(null);
+      const updated = await updateStorageAllocationStrategy(strategy);
+      setStoragePool(updated);
+    } catch (err) {
+      setStoragePoolError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -544,7 +608,17 @@ export function SettingsPage({ role }: { role?: string }) {
           }
           onSave={() => void handleSaveDiskGuard()}
         />
-                <OperationalWebhookCard
+        <StoragePoolCard
+          pool={storagePool}
+          loading={loadingStoragePool}
+          error={storagePoolError}
+          actionMessage={storagePoolActionMessage}
+          isAdmin={isAdmin}
+          onAddDrive={handleAddStorageDrive}
+          onDrainDrive={handleDrainStorageDrive}
+          onStrategyChange={handleStorageStrategyChange}
+        />
+        <OperationalWebhookCard
           settings={operationalWebhook}
           loading={loadingOperationalWebhook}
           saving={savingOperationalWebhook}

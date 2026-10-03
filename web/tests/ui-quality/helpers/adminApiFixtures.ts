@@ -168,6 +168,27 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
       lastLoginAt: now
     }
   ];
+  let storagePool = {
+    allocationStrategy: "MOST_AVAILABLE_FREE_SPACE",
+    drives: [
+      {
+        path: "/var/lib/pontemesh/storage",
+        isPrimary: true,
+        exists: true,
+        writable: true,
+        totalBytes: 10_737_418_240,
+        availableBytes: 8_589_934_592,
+        usedBytes: 2_147_483_648,
+        usedPercent: 20,
+        level: "OK",
+        warnings: []
+      }
+    ],
+    totalBytes: 10_737_418_240,
+    availableBytes: 8_589_934_592,
+    usedBytes: 2_147_483_648,
+    usedPercent: 20
+  };
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -227,6 +248,54 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
         diskGuardSettings = { ...diskGuardSettings, ...request.postDataJSON() };
       }
       return json(route, diskGuardSettings);
+    }
+
+    if (path === "/api/admin/storage/drives") {
+      if (request.method() === "POST") {
+        const body = request.postDataJSON() as { path: string };
+        storagePool = {
+          ...storagePool,
+          drives: [
+            ...storagePool.drives,
+            {
+              path: body.path,
+              isPrimary: false,
+              exists: true,
+              writable: true,
+              totalBytes: 10_737_418_240,
+              availableBytes: 8_589_934_592,
+              usedBytes: 2_147_483_648,
+              usedPercent: 20,
+              level: "OK",
+              warnings: []
+            }
+          ]
+        };
+        return json(route, storagePool, 201);
+      }
+      return json(route, storagePool);
+    }
+
+    if (path === "/api/admin/storage/drives/allocation") {
+      if (request.method() === "PUT") {
+        const body = request.postDataJSON() as { strategy: string };
+        storagePool = { ...storagePool, allocationStrategy: body.strategy };
+      }
+      return json(route, storagePool);
+    }
+
+    if (path === "/api/admin/storage/drives/drain") {
+      const body = request.postDataJSON() as { path: string };
+      storagePool = {
+        ...storagePool,
+        drives: storagePool.drives.filter(d => d.path !== body.path)
+      };
+      return json(route, {
+        sourcePath: body.path,
+        targetPath: storagePool.drives[0]?.path ?? "",
+        objectsMigrated: 2,
+        bytesMigrated: 4096
+      });
     }
 
     if (path === "/api/admin/operational-webhook") {

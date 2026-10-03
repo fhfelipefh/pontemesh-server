@@ -381,6 +381,27 @@
         "loadFailed": "Falha ao carregar a configuração de capacidade.",
         "saveFailed": "Falha ao salvar a configuração de capacidade."
       },
+      "storagePool": {
+        "title": "Pool de armazenamento e discos (Hot-swap)",
+        "description": "Adicione múltiplos discos locais ao pool sem reiniciar o servidor e realize drenagem segura antes de remover ou substituir discos físicos.",
+        "primary": "Principal",
+        "auxiliary": "Adicional",
+        "path": "Caminho do disco",
+        "status": "Estado",
+        "usage": "Uso",
+        "available": "Disponível",
+        "strategy": "Estratégia de alocação",
+        "strategyMostFree": "Maior espaço livre (padrão)",
+        "strategyRoundRobin": "Round-robin (distribuição alternada)",
+        "addDrive": "Adicionar disco",
+        "drivePathPlaceholder": "/mnt/storage2 ou D:\\storage2",
+        "drainDrive": "Drenar e remover",
+        "draining": "Drenando objetos...",
+        "drainSuccess": "Disco drenado com sucesso: {{migrated}} objetos migrados ({{bytes}}).",
+        "confirmDrainTitle": "Drenar e remover disco?",
+        "confirmDrainText": "Todos os objetos gravados neste disco serão migrados com validação de hash SHA-256 para outro disco disponível no pool antes de sua remoção.",
+        "emptyPool": "Apenas o disco principal está em uso."
+      },
       "update": {
         "title": "Atualização do servidor",
         "available": "Nova versão do Ponte Mesh Server disponível: {{version}}.",

@@ -275,9 +275,20 @@ GET /api/admin/replicas
 POST /api/admin/replicas
 POST /api/admin/replicas/{replicaId}/revoke
 POST /api/admin/buckets/{bucket}/object-revocations/{objectKey}
+GET /api/admin/storage/drives
+POST /api/admin/storage/drives
+PUT /api/admin/storage/drives/allocation
+POST /api/admin/storage/drives/drain
 ```
 
 Essas rotas exigem sessão administrativa do painel.
+
+`GET /api/admin/storage/drives` lista os discos locais do pool, níveis de saúde e
+capacidade. `POST /api/admin/storage/drives` adiciona novos discos a quente sem
+reiniciar o servidor. `PUT /api/admin/storage/drives/allocation` altera a estratégia
+entre maior espaço livre e round-robin. `POST /api/admin/storage/drives/drain` migra
+objetos de forma transacional com verificação de hash SHA-256 e desconecta o disco
+do pool com segurança.
 
 `GET /api/admin/operational-webhook` retorna a URL, o cron de cinco campos, o
 estado habilitado e uma prévia do objeto JSON enviado. `PUT` valida e persiste a
