@@ -261,6 +261,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             get(admin::origin_traffic_metrics),
         )
         .route(
+            "/api/admin/metrics/offload",
+            get(admin::egress_offload_metrics),
+        )
+        .route(
             "/api/admin/metrics/replica-traffic",
             get(admin::replica_traffic_metrics),
         )
@@ -806,13 +810,50 @@ mod tests {
         assert_json_object_keys(
             &origin_metrics_body,
             &[
+                "estimatedCostSavedUsd",
                 "fallbackEvents",
                 "fullObjectRequests",
                 "integrityFailures",
+                "offloadRatioPercent",
                 "originOffloadBytes",
+                "peerBytesServed",
+                "peerOffloadRatioPercent",
                 "rangeRequests",
+                "replicaBytesServed",
+                "replicaOffloadRatioPercent",
+                "totalBytesDemanded",
                 "totalBytesServed",
                 "totalRequests",
+            ],
+        );
+
+        let offload_metrics = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/offload")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(offload_metrics.status(), StatusCode::OK);
+        let offload_metrics_body = json_body(offload_metrics).await;
+        assert_json_object_keys(
+            &offload_metrics_body,
+            &[
+                "estimatedCostSavedUsd",
+                "fallbackEvents",
+                "integrityFailures",
+                "offloadRatioPercent",
+                "originBytesServed",
+                "originOffloadBytes",
+                "peerBytesServed",
+                "peerOffloadRatioPercent",
+                "replicaBytesServed",
+                "replicaOffloadRatioPercent",
+                "totalBytesDemanded",
             ],
         );
 
@@ -1194,6 +1235,7 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         assert!(tool_names.contains(&"pontemesh_get_health"));
+        assert!(tool_names.contains(&"pontemesh_get_offload_metrics"));
         assert!(!tool_names.contains(&"pontemesh_create_bucket"));
 
         let health = mcp_call(
@@ -1209,6 +1251,21 @@ mod tests {
         assert_eq!(
             health["result"]["structuredContent"]["databaseConnected"],
             true
+        );
+
+        let offload_call = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_get_offload_metrics",
+                "arguments": { "period": "24h" }
+            }),
+        )
+        .await;
+        assert_eq!(
+            offload_call["result"]["structuredContent"]["totalBytesDemanded"],
+            0
         );
 
         let blocked_write = mcp_call(
@@ -1232,6 +1289,13 @@ mod tests {
                 .iter()
                 .any(|resource| resource["uri"] == "pontemesh://instance/health")
         );
+        assert!(
+            resources["result"]["resources"]
+                .as_array()
+                .expect("resources")
+                .iter()
+                .any(|resource| resource["uri"] == "pontemesh://metrics/offload")
+        );
 
         let storage_resource = mcp_call(
             app.clone(),
@@ -1245,6 +1309,18 @@ mod tests {
             .expect("resource text");
         assert!(!storage_text.to_ascii_lowercase().contains("secret"));
 
+        let offload_resource = mcp_call(
+            app.clone(),
+            secret,
+            "resources/read",
+            serde_json::json!({ "uri": "pontemesh://metrics/offload" }),
+        )
+        .await;
+        assert_eq!(
+            offload_resource["result"]["contents"][0]["uri"],
+            "pontemesh://metrics/offload"
+        );
+
         let prompts = mcp_call(app.clone(), secret, "prompts/list", serde_json::json!({})).await;
         assert!(
             prompts["result"]["prompts"]
@@ -1252,6 +1328,13 @@ mod tests {
                 .expect("prompts")
                 .iter()
                 .any(|prompt| prompt["name"] == "diagnose_instance")
+        );
+        assert!(
+            prompts["result"]["prompts"]
+                .as_array()
+                .expect("prompts")
+                .iter()
+                .any(|prompt| prompt["name"] == "analyze_egress_offload")
         );
 
         let activity = app
@@ -4611,6 +4694,24 @@ mod tests {
         assert_eq!(metrics_body["totalRequests"], 2);
         assert_eq!(metrics_body["rangeRequests"], 2);
         assert_eq!(metrics_body["totalBytesServed"], 10);
+
+        let offload = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/offload")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(offload.status(), StatusCode::OK);
+        let offload_body: serde_json::Value =
+            serde_json::from_str(&response_text(offload).await).expect("offload JSON");
+        assert_eq!(offload_body["originBytesServed"], 10);
+        assert_eq!(offload_body["totalBytesDemanded"], 10);
+        assert_eq!(offload_body["offloadRatioPercent"], 0.0);
 
         let metrics_1h = app
             .clone()

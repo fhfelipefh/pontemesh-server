@@ -1057,6 +1057,17 @@ pub async fn origin_traffic_metrics(
     }
 }
 
+pub async fn egress_offload_metrics(
+    State(state): State<AppState>,
+    Query(query): Query<MetricsQuery>,
+) -> Response {
+    let (since, until) = resolve_metrics_time_window(&query);
+    match state.catalog.egress_offload_summary(since, until).await {
+        Ok(summary) => Json(summary).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
 pub async fn replica_traffic_metrics(
     State(state): State<AppState>,
     Query(query): Query<MetricsQuery>,

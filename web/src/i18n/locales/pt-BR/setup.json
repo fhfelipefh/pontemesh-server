@@ -297,6 +297,11 @@
     "metrics": {
       "title": "Tráfego do Origin",
       "overview": "Métricas operacionais",
+      "offloadRatio": "Taxa de Offload do Origin",
+      "totalBytesDemanded": "Demanda total de tráfego",
+      "estimatedCostSavedUsd": "Economia estimada de egress (USD)",
+      "peerOffloadRatio": "Fração servida por peers (P2P)",
+      "replicaOffloadRatio": "Fração servida por réplicas",
       "totalRequests": "Total de requisições",
       "fullObjectRequests": "Requisições de objeto completo",
       "rangeRequests": "Requisições por intervalo",

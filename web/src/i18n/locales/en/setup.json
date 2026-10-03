@@ -297,6 +297,11 @@
     "metrics": {
       "title": "Origin traffic",
       "overview": "Operational metrics",
+      "offloadRatio": "Origin Offload Ratio",
+      "totalBytesDemanded": "Total Traffic Demanded",
+      "estimatedCostSavedUsd": "Estimated Egress Savings (USD)",
+      "peerOffloadRatio": "Served by Peers (P2P)",
+      "replicaOffloadRatio": "Served by Replicas",
       "totalRequests": "Total requests",
       "fullObjectRequests": "Full object requests",
       "rangeRequests": "Range requests",

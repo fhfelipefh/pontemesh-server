@@ -316,7 +316,32 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
         totalRequests: 24,
         fullObjectRequests: 18,
         rangeRequests: 6,
-        totalBytesServed: 4096
+        totalBytesServed: 4096,
+        originOffloadBytes: 12288,
+        peerBytesServed: 8192,
+        replicaBytesServed: 4096,
+        totalBytesDemanded: 16384,
+        offloadRatioPercent: 75.0,
+        peerOffloadRatioPercent: 50.0,
+        replicaOffloadRatioPercent: 25.0,
+        estimatedCostSavedUsd: 0.000983
+      });
+    }
+
+    if (path === "/api/admin/metrics/offload") {
+      return json(route, {
+        totalRequests: 24,
+        fullObjectRequests: 18,
+        rangeRequests: 6,
+        originBytesServed: 4096,
+        peerBytesServed: 8192,
+        replicaBytesServed: 4096,
+        originOffloadBytes: 12288,
+        totalBytesDemanded: 16384,
+        offloadRatioPercent: 75.0,
+        peerOffloadRatioPercent: 50.0,
+        replicaOffloadRatioPercent: 25.0,
+        estimatedCostSavedUsd: 0.000983
       });
     }
 

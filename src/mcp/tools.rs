@@ -155,6 +155,20 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             permission: ToolPermission::Read,
         },
         ToolDefinition {
+            name: "pontemesh_get_offload_metrics",
+            description: "Consulta metricas consolidadas de economia de banda (offload de egress), detalhando bytes servidos por Origin, Replicas e Peers, porcentagem de offload e estimativa de economia.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "string",
+                        "enum": ["1h", "24h", "7d", "30d", "all"]
+                    }
+                }
+            }),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
             name: "pontemesh_create_bucket",
             description: "Cria um bucket usando o servico real.",
             schema: json!({"type":"object","properties":{"bucket":{"type":"string"}},"required":["bucket"]}),
@@ -519,6 +533,17 @@ pub async fn call_tool(
                     "dataPlane": "Object transfer remains on S3-compatible and Ponte Mesh endpoints; MCP is administrative."
                 }
             })
+        }
+        "pontemesh_get_offload_metrics" => {
+            let period = arguments.get("period").and_then(Value::as_str);
+            let (since, until) = match period {
+                Some("1h") => (Some(chrono::Utc::now() - chrono::Duration::hours(1)), None),
+                Some("24h") => (Some(chrono::Utc::now() - chrono::Duration::hours(24)), None),
+                Some("7d") => (Some(chrono::Utc::now() - chrono::Duration::days(7)), None),
+                Some("30d") => (Some(chrono::Utc::now() - chrono::Duration::days(30)), None),
+                _ => (None, None),
+            };
+            json!(state.catalog.egress_offload_summary(since, until).await?)
         }
         "pontemesh_export_configuration" => {
             let mcp_settings = state.catalog.get_mcp_settings().await?;

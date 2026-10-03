@@ -17,6 +17,7 @@ import {
 import {
   getBucketTrafficMetrics,
   getDashboardSummary,
+  getEgressOffloadMetrics,
   getObjectTrafficMetrics,
   getOriginTrafficMetrics,
   getReplicaDetailMetrics,
@@ -356,6 +357,34 @@ describe("admin API clients", () => {
       headers: { accept: "application/json" }
     });
     expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/metrics/origin-traffic?period=30d", {
+      headers: { accept: "application/json" }
+    });
+  });
+
+  it("fetches egress offload metrics from the protected admin endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        totalRequests: 24,
+        fullObjectRequests: 18,
+        rangeRequests: 6,
+        originBytesServed: 4096,
+        peerBytesServed: 8192,
+        replicaBytesServed: 4096,
+        originOffloadBytes: 12288,
+        totalBytesDemanded: 16384,
+        offloadRatioPercent: 75.0,
+        peerOffloadRatioPercent: 50.0,
+        replicaOffloadRatioPercent: 25.0,
+        estimatedCostSavedUsd: 0.000983
+      })
+    );
+
+    const metrics = await getEgressOffloadMetrics("7d");
+
+    expect(metrics.offloadRatioPercent).toBe(75.0);
+    expect(metrics.originOffloadBytes).toBe(12288);
+    expect(metrics.totalBytesDemanded).toBe(16384);
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/metrics/offload?period=7d", {
       headers: { accept: "application/json" }
     });
   });

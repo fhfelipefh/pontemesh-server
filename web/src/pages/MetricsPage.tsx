@@ -1,9 +1,11 @@
 import { ReactNode, useEffect, useState } from "react";
-import { Activity, DownloadCloud, Gauge, SplitSquareHorizontal } from "lucide-react";
+import { Activity, DollarSign, DownloadCloud, Gauge, Percent, SplitSquareHorizontal, TrendingDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   BucketTrafficMetric,
+  EgressOffloadSummary,
   getBucketTrafficMetrics,
+  getEgressOffloadMetrics,
   getOriginTrafficMetrics,
   getReplicaTrafficMetrics,
   OriginTrafficMetrics,
@@ -27,18 +29,21 @@ export function MetricsPage() {
   const [metrics, setMetrics] = useState<OriginTrafficMetrics | null>(null);
   const [replicaMetrics, setReplicaMetrics] = useState<ReplicaTrafficMetrics | null>(null);
   const [bucketMetrics, setBucketMetrics] = useState<BucketTrafficMetric[]>([]);
+  const [offload, setOffload] = useState<EgressOffloadSummary | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     Promise.all([
       getOriginTrafficMetrics(period),
       getReplicaTrafficMetrics(period),
-      getBucketTrafficMetrics(period)
+      getBucketTrafficMetrics(period),
+      getEgressOffloadMetrics(period)
     ])
-      .then(([origin, replicas, buckets]) => {
+      .then(([origin, replicas, buckets, offloadSummary]) => {
         setMetrics(origin);
         setReplicaMetrics(replicas);
         setBucketMetrics(buckets);
+        setOffload(offloadSummary);
       })
       .catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : t("setup.metrics.loadFailed"));
@@ -83,16 +88,21 @@ export function MetricsPage() {
           ))}
         </div>
       </section>
+      <Metric icon={<Percent size={20} />} label={t("setup.metrics.offloadRatio")} value={`${(offload?.offloadRatioPercent ?? 0).toFixed(1)}%`} />
+      <Metric icon={<Percent size={20} />} label={t("setup.metrics.peerOffloadRatio")} value={`${(offload?.peerOffloadRatioPercent ?? 0).toFixed(1)}%`} />
+      <Metric icon={<Percent size={20} />} label={t("setup.metrics.replicaOffloadRatio")} value={`${(offload?.replicaOffloadRatioPercent ?? 0).toFixed(1)}%`} />
+      <Metric icon={<TrendingDown size={20} />} label={t("setup.metrics.totalBytesDemanded")} value={formatBytes(offload?.totalBytesDemanded ?? (metrics.totalBytesServed + totals.originOffloadBytes))} />
+      <Metric icon={<DollarSign size={20} />} label={t("setup.metrics.estimatedCostSavedUsd")} value={`$${(offload?.estimatedCostSavedUsd ?? 0).toFixed(2)}`} />
+      <Metric icon={<Gauge size={20} />} label={t("setup.metrics.originOffloadBytes")} value={formatBytes(totals.originOffloadBytes)} />
+      <Metric icon={<DownloadCloud size={20} />} label={t("setup.metrics.peerBytesServed")} value={formatBytes(totals.peerBytesServed)} />
+      <Metric icon={<Gauge size={20} />} label={t("setup.metrics.totalBytesServed")} value={formatBytes(metrics.totalBytesServed)} />
       <Metric icon={<Activity size={20} />} label={t("setup.metrics.totalRequests")} value={String(metrics.totalRequests)} />
       <Metric icon={<DownloadCloud size={20} />} label={t("setup.metrics.fullObjectRequests")} value={String(metrics.fullObjectRequests)} />
       <Metric icon={<SplitSquareHorizontal size={20} />} label={t("setup.metrics.rangeRequests")} value={String(metrics.rangeRequests)} />
-      <Metric icon={<Gauge size={20} />} label={t("setup.metrics.totalBytesServed")} value={formatBytes(metrics.totalBytesServed)} />
       <Metric icon={<Activity size={20} />} label={t("setup.metrics.activeReplicas")} value={String(replicaMetrics.activeReplicas)} />
       <Metric icon={<DownloadCloud size={20} />} label={t("setup.metrics.replicaBytesSynced")} value={formatBytes(replicaMetrics.totalBytesSynced)} />
       <Metric icon={<SplitSquareHorizontal size={20} />} label={t("setup.metrics.replicaFragmentsSynced")} value={String(replicaMetrics.totalFragmentsSynced)} />
       <Metric icon={<Gauge size={20} />} label={t("setup.metrics.replicaFailures")} value={String(replicaMetrics.syncFailures + replicaMetrics.authFailures)} />
-      <Metric icon={<DownloadCloud size={20} />} label={t("setup.metrics.peerBytesServed")} value={formatBytes(totals.peerBytesServed)} />
-      <Metric icon={<Gauge size={20} />} label={t("setup.metrics.originOffloadBytes")} value={formatBytes(totals.originOffloadBytes)} />
       <Metric icon={<SplitSquareHorizontal size={20} />} label={t("setup.metrics.fallbackEvents")} value={String(totals.fallbackEvents)} />
       <Metric icon={<Activity size={20} />} label={t("setup.metrics.integrityFailures")} value={String(totals.integrityFailures)} />
     </div>
