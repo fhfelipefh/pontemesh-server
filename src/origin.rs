@@ -1017,6 +1017,7 @@ async fn put_bucket_versioning(
         s3_lifecycle_rules: current.s3_lifecycle_rules,
         s3_resource_policy: current.s3_resource_policy,
         s3_event_notifications: current.s3_event_notifications,
+        release_versioning_scheme: current.release_versioning_scheme,
     };
     match state
         .catalog
@@ -4498,6 +4499,7 @@ mod tests {
             s3_lifecycle_rules: serde_json::json!([]),
             s3_resource_policy: serde_json::json!({"Version":"2012-10-17","Statement":[]}),
             s3_event_notifications: serde_json::json!({"EventBridgeEnabled":false,"Rules":[]}),
+            release_versioning_scheme: "DISABLED".to_owned(),
             updated_at: "2026-06-29T12:00:00Z".to_owned(),
         }
     }

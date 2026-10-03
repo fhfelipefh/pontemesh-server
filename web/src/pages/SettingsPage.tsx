@@ -84,7 +84,7 @@ export function SettingsPage({ role }: { role?: string }) {
     useState<CreatedApplicationCredential | null>(null);
   const [applicationName, setApplicationName] = useState("default-sdk");
   const [applicationPreset, setApplicationPreset] = useState<
-    "downloader" | "full"
+    "launcher" | "downloader" | "full"
   >("downloader");
   const [loadingApplications, setLoadingApplications] = useState(true);
   const [creatingApplication, setCreatingApplication] = useState(false);

@@ -11,6 +11,13 @@ use sqlx::{PgPool, PgPoolOptions, PgRow, Postgres};
 use sqlx_core::{query::query, query_scalar::query_scalar, row::Row, transaction::Transaction};
 use std::{net::IpAddr, path::Path};
 
+pub mod release;
+pub use release::SoftwareRelease;
+
+fn default_release_versioning_scheme() -> String {
+    "DISABLED".to_owned()
+}
+
 #[derive(Debug, Clone)]
 pub struct Catalog {
     pool: PgPool,
@@ -149,6 +156,7 @@ pub struct BucketPolicy {
     pub s3_lifecycle_rules: serde_json::Value,
     pub s3_resource_policy: serde_json::Value,
     pub s3_event_notifications: serde_json::Value,
+    pub release_versioning_scheme: String,
     pub updated_at: String,
 }
 
@@ -178,6 +186,8 @@ pub struct BucketPolicyUpdate {
     pub s3_lifecycle_rules: serde_json::Value,
     pub s3_resource_policy: serde_json::Value,
     pub s3_event_notifications: serde_json::Value,
+    #[serde(default = "default_release_versioning_scheme")]
+    pub release_versioning_scheme: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -191,6 +201,7 @@ pub struct BucketPolicyDefaults {
     pub fragment_priority_strategy: String,
     pub failure_threshold: i64,
     pub fallback_mode: String,
+    pub release_versioning_scheme: String,
     pub updated_at: String,
 }
 
@@ -205,6 +216,8 @@ pub struct BucketPolicyDefaultsUpdate {
     pub fragment_priority_strategy: String,
     pub failure_threshold: i64,
     pub fallback_mode: String,
+    #[serde(default = "default_release_versioning_scheme")]
+    pub release_versioning_scheme: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1345,12 +1358,12 @@ impl Catalog {
                 bucket_id, access_package_ttl_seconds, fragment_size_bytes,
                 allow_replica_edge, allow_peer_sharing,
                 source_selection_strategy, fragment_priority_strategy,
-                failure_threshold, fallback_mode
+                failure_threshold, fallback_mode, release_versioning_scheme
             )
             SELECT $1::uuid, access_package_ttl_seconds, fragment_size_bytes,
                 allow_replica_edge, allow_peer_sharing,
                 source_selection_strategy, fragment_priority_strategy,
-                failure_threshold, fallback_mode
+                failure_threshold, fallback_mode, release_versioning_scheme
             FROM bucket_policy_defaults
             WHERE singleton = TRUE
             ON CONFLICT (bucket_id) DO NOTHING
@@ -1438,6 +1451,7 @@ impl Catalog {
                 p.s3_lifecycle_rules,
                 p.s3_resource_policy,
                 p.s3_event_notifications,
+                p.release_versioning_scheme,
                 p.updated_at
             FROM bucket_policies p
             JOIN buckets b ON b.id = p.bucket_id
@@ -1461,7 +1475,7 @@ impl Catalog {
             SELECT access_package_ttl_seconds, fragment_size_bytes,
                 allow_replica_edge, allow_peer_sharing,
                 source_selection_strategy, fragment_priority_strategy,
-                failure_threshold, fallback_mode, updated_at
+                failure_threshold, fallback_mode, release_versioning_scheme, updated_at
             FROM bucket_policy_defaults
             WHERE singleton = TRUE
             "#,
@@ -1488,12 +1502,13 @@ impl Catalog {
                 fragment_priority_strategy = $6,
                 failure_threshold = $7,
                 fallback_mode = $8,
+                release_versioning_scheme = $9,
                 updated_at = now()
             WHERE singleton = TRUE
             RETURNING access_package_ttl_seconds, fragment_size_bytes,
                 allow_replica_edge, allow_peer_sharing,
                 source_selection_strategy, fragment_priority_strategy,
-                failure_threshold, fallback_mode, updated_at
+                failure_threshold, fallback_mode, release_versioning_scheme, updated_at
             "#,
         )
         .bind(update.access_package_ttl_seconds)
@@ -1504,6 +1519,7 @@ impl Catalog {
         .bind(&update.fragment_priority_strategy)
         .bind(update.failure_threshold)
         .bind(&update.fallback_mode)
+        .bind(update.release_versioning_scheme.trim().to_ascii_uppercase())
         .fetch_one(&self.pool)
         .await
         .context("failed to update bucket policy defaults")?;
@@ -1606,6 +1622,7 @@ impl Catalog {
                 p.s3_lifecycle_rules,
                 p.s3_resource_policy,
                 p.s3_event_notifications,
+                p.release_versioning_scheme,
                 p.updated_at
             FROM bucket_policies p
             JOIN buckets b ON b.id = p.bucket_id
@@ -1632,6 +1649,24 @@ impl Catalog {
             .await
             .context("failed to begin bucket policy transaction")?;
         let bucket_id = bucket_id_in_tx(&mut tx, bucket_name).await?;
+
+        let current_scheme: Option<String> = query_scalar(
+            "SELECT release_versioning_scheme FROM bucket_policies WHERE bucket_id = $1::uuid",
+        )
+        .bind(&bucket_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let target_scheme = update.release_versioning_scheme.trim().to_ascii_uppercase();
+        if let Some(existing) = current_scheme {
+            let existing_upper = existing.trim().to_ascii_uppercase();
+            if existing_upper != "DISABLED" && existing_upper != target_scheme {
+                bail!(
+                    "release versioning scheme is immutable once configured for this bucket; cannot change from {existing_upper} to {target_scheme}"
+                );
+            }
+        }
+
         let row = query(
             r#"
             INSERT INTO bucket_policies (
@@ -1645,10 +1680,11 @@ impl Catalog {
                 s3_multipart_abort_days, s3_default_encryption_algorithm,
                 s3_default_encryption_key_id, s3_object_lock_enabled,
                 s3_object_lock_default_mode, s3_object_lock_default_retain_days,
-                s3_lifecycle_rules, s3_resource_policy, s3_event_notifications, updated_at
+                s3_lifecycle_rules, s3_resource_policy, s3_event_notifications,
+                release_versioning_scheme, updated_at
             )
             VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                $17, $18, $19, $20, $21, $22, $23, $24, now())
+                $17, $18, $19, $20, $21, $22, $23, $24, $25, now())
             ON CONFLICT (bucket_id) DO UPDATE SET
                 access_package_ttl_seconds = EXCLUDED.access_package_ttl_seconds,
                 fragment_size_bytes = EXCLUDED.fragment_size_bytes,
@@ -1673,6 +1709,7 @@ impl Catalog {
                 s3_lifecycle_rules = EXCLUDED.s3_lifecycle_rules,
                 s3_resource_policy = EXCLUDED.s3_resource_policy,
                 s3_event_notifications = EXCLUDED.s3_event_notifications,
+                release_versioning_scheme = EXCLUDED.release_versioning_scheme,
                 updated_at = now()
             RETURNING access_package_ttl_seconds, fragment_size_bytes,
                 allow_replica_edge, allow_peer_sharing,
@@ -1684,7 +1721,8 @@ impl Catalog {
                 s3_multipart_abort_days, s3_default_encryption_algorithm,
                 s3_default_encryption_key_id, s3_object_lock_enabled,
                 s3_object_lock_default_mode, s3_object_lock_default_retain_days,
-                s3_lifecycle_rules, s3_resource_policy, s3_event_notifications, updated_at
+                s3_lifecycle_rules, s3_resource_policy, s3_event_notifications,
+                release_versioning_scheme, updated_at
             "#,
         )
         .bind(bucket_id)
@@ -1711,6 +1749,7 @@ impl Catalog {
         .bind(&update.s3_lifecycle_rules)
         .bind(&update.s3_resource_policy)
         .bind(&update.s3_event_notifications)
+        .bind(&target_scheme)
         .fetch_one(&mut *tx)
         .await
         .context("failed to update bucket policy")?;
@@ -1743,6 +1782,7 @@ impl Catalog {
             s3_lifecycle_rules: row.get("s3_lifecycle_rules"),
             s3_resource_policy: row.get("s3_resource_policy"),
             s3_event_notifications: row.get("s3_event_notifications"),
+            release_versioning_scheme: row.get("release_versioning_scheme"),
             updated_at: format_datetime(row.get("updated_at")),
         })
     }
@@ -1900,6 +1940,96 @@ impl Catalog {
             total_items: total,
             total_pages,
         })
+    }
+
+    pub async fn find_latest_software_release(
+        &self,
+        bucket_name: &str,
+        software_id: &str,
+        scheme: &str,
+        target_channel: Option<&str>,
+    ) -> anyhow::Result<Option<SoftwareRelease>> {
+        validate_bucket_name(bucket_name)?;
+        let software_id = software_id.trim();
+        if software_id.is_empty() {
+            bail!("software ID cannot be empty");
+        }
+        let scheme = scheme.trim().to_ascii_uppercase();
+        if scheme == "DISABLED" {
+            bail!("release versioning scheme is disabled for bucket: {bucket_name}");
+        }
+
+        let bucket_id: Option<String> =
+            query_scalar("SELECT id::text FROM buckets WHERE name = $1 AND deleted_at IS NULL")
+                .bind(bucket_name)
+                .fetch_optional(&self.pool)
+                .await
+                .context("failed to load bucket")?;
+
+        let bucket_id =
+            bucket_id.ok_or_else(|| anyhow::anyhow!("bucket not found: {bucket_name}"))?;
+
+        let rows = query(
+            r#"
+            SELECT o.object_key, v.size_bytes, m.id::text AS manifest_id
+            FROM objects o
+            JOIN object_versions v ON v.id = o.current_version_id
+            LEFT JOIN object_manifests m ON m.object_version_id = v.id
+            WHERE o.bucket_id = $1::uuid
+              AND o.deleted_at IS NULL
+              AND o.state = 'AVAILABLE'
+              AND NOT v.is_delete_marker
+              AND (o.object_key LIKE $2 || '/%' OR o.object_key LIKE $2 || '-%' OR o.object_key = $2)
+            ORDER BY v.created_at DESC
+            "#,
+        )
+        .bind(&bucket_id)
+        .bind(software_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list software candidate objects")?;
+
+        let mut releases: Vec<SoftwareRelease> = Vec::new();
+        for row in rows {
+            let object_key: String = row.get("object_key");
+            let size_bytes: i64 = row.get("size_bytes");
+            let manifest_id: Option<String> = row.get("manifest_id");
+            if let Some(version) = release::extract_version_from_key(&object_key, software_id) {
+                if let Some(chan) = target_channel {
+                    if version.to_ascii_lowercase() != chan.trim().to_ascii_lowercase() {
+                        continue;
+                    }
+                }
+                releases.push(SoftwareRelease {
+                    version,
+                    object_key,
+                    size_bytes,
+                    manifest_id,
+                });
+            }
+        }
+
+        if releases.is_empty() {
+            return Ok(None);
+        }
+
+        let mut best: Option<SoftwareRelease> = None;
+        for rel in releases {
+            let is_better = match &best {
+                None => true,
+                Some(current_best) => {
+                    match release::is_newer(&rel.version, &current_best.version, &scheme) {
+                        Ok(newer) => newer,
+                        Err(_) => false,
+                    }
+                }
+            };
+            if is_better {
+                best = Some(rel);
+            }
+        }
+
+        Ok(best)
     }
 
     pub async fn insert_object(&self, object: NewObject) -> anyhow::Result<ObjectSummary> {
@@ -6120,6 +6250,9 @@ fn bucket_policy_from_row(row: PgRow) -> BucketPolicy {
         s3_lifecycle_rules: row.get("s3_lifecycle_rules"),
         s3_resource_policy: row.get("s3_resource_policy"),
         s3_event_notifications: row.get("s3_event_notifications"),
+        release_versioning_scheme: row
+            .try_get("release_versioning_scheme")
+            .unwrap_or_else(|_| "DISABLED".to_owned()),
         updated_at: format_datetime(row.get("updated_at")),
     }
 }
@@ -6134,6 +6267,9 @@ fn bucket_policy_defaults_from_row(row: PgRow) -> BucketPolicyDefaults {
         fragment_priority_strategy: row.get("fragment_priority_strategy"),
         failure_threshold: row.get("failure_threshold"),
         fallback_mode: row.get("fallback_mode"),
+        release_versioning_scheme: row
+            .try_get("release_versioning_scheme")
+            .unwrap_or_else(|_| "DISABLED".to_owned()),
         updated_at: format_datetime(row.get("updated_at")),
     }
 }
@@ -6372,6 +6508,11 @@ fn validate_bucket_policy(update: &BucketPolicyUpdate) -> anyhow::Result<()> {
     }
     validate_lifecycle_rules(&update.s3_lifecycle_rules)?;
     validate_s3_resource_policy(&update.s3_resource_policy)?;
+    validate_policy_enum(
+        "releaseVersioningScheme",
+        &update.release_versioning_scheme.to_ascii_uppercase(),
+        &["DISABLED", "SEMVER", "BUILD_NUMBER", "CHANNEL", "TAG"],
+    )?;
     Ok(())
 }
 
@@ -6383,6 +6524,11 @@ fn validate_bucket_policy_defaults(update: &BucketPolicyDefaultsUpdate) -> anyho
         &update.fragment_priority_strategy,
         update.failure_threshold,
         &update.fallback_mode,
+    )?;
+    validate_policy_enum(
+        "releaseVersioningScheme",
+        &update.release_versioning_scheme.to_ascii_uppercase(),
+        &["DISABLED", "SEMVER", "BUILD_NUMBER", "CHANNEL", "TAG"],
     )
 }
 
@@ -7199,7 +7345,7 @@ fn validate_mcp_scopes(scopes: &[String]) -> anyhow::Result<Vec<String>> {
 }
 
 fn validate_application_scopes(scopes: &[String]) -> anyhow::Result<Vec<String>> {
-    const ALLOWED: [&str; 7] = [
+    const ALLOWED: [&str; 8] = [
         "origin:objects:read",
         "origin:objects:write",
         "pontemesh:access-package:create",
@@ -7207,6 +7353,7 @@ fn validate_application_scopes(scopes: &[String]) -> anyhow::Result<Vec<String>>
         "pontemesh:sources:read",
         "pontemesh:availability:read",
         "pontemesh:policies:read",
+        "pontemesh:update:check",
     ];
 
     let mut normalized = Vec::new();

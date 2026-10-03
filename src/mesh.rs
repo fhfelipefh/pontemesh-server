@@ -15,7 +15,7 @@ use anyhow::bail;
 use axum::{
     Extension, Json,
     body::Body,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -349,6 +349,115 @@ pub async fn get_object_policy(
         }
         Err(error) => bad_request(error),
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateCheckQuery {
+    pub current: Option<String>,
+    pub channel: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckResponse {
+    pub bucket: String,
+    pub software_id: String,
+    pub versioning_scheme: String,
+    pub current_version: Option<String>,
+    pub latest_version: String,
+    pub has_update: bool,
+    pub target_object_key: String,
+    pub size_bytes: i64,
+    pub manifest_id: Option<String>,
+    pub mandatory: bool,
+}
+
+pub async fn check_software_update(
+    State(state): State<AppState>,
+    Extension(application): Extension<ApplicationIdentity>,
+    Path((bucket_name, software_id)): Path<(String, String)>,
+    Query(query): Query<UpdateCheckQuery>,
+) -> Response {
+    if !has_scope(&application, "pontemesh:update:check")
+        && !has_scope(&application, "origin:objects:read")
+    {
+        return forbidden("missing scope: pontemesh:update:check");
+    }
+
+    let policy = match state.catalog.get_bucket_policy(&bucket_name).await {
+        Ok(policy) => policy,
+        Err(error) => return bad_request(error),
+    };
+
+    let scheme = policy.release_versioning_scheme.trim().to_ascii_uppercase();
+    if scheme == "DISABLED" {
+        return bad_request(anyhow::anyhow!(
+            "release versioning is disabled for bucket: {bucket_name}"
+        ));
+    }
+
+    let latest_release = match state
+        .catalog
+        .find_latest_software_release(
+            &bucket_name,
+            &software_id,
+            &scheme,
+            query.channel.as_deref(),
+        )
+        .await
+    {
+        Ok(Some(release)) => release,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": format!("no release found for software: {software_id}")
+                })),
+            )
+                .into_response();
+        }
+        Err(error) => return bad_request(error),
+    };
+
+    let (has_update, current_version) = match &query.current {
+        Some(current) if !current.trim().is_empty() => {
+            match crate::catalog::release::is_newer(
+                &latest_release.version,
+                current.trim(),
+                &scheme,
+            ) {
+                Ok(newer) => (newer, Some(current.trim().to_owned())),
+                Err(error) => return bad_request(error),
+            }
+        }
+        _ => (true, None),
+    };
+
+    record_mesh_audit(
+        &state,
+        "software_update_checked",
+        &application.name,
+        "success",
+        &format!(
+            "bucket={bucket_name}; software={software_id}; latest={}; has_update={has_update}",
+            latest_release.version
+        ),
+    )
+    .await;
+
+    Json(UpdateCheckResponse {
+        bucket: bucket_name,
+        software_id,
+        versioning_scheme: scheme,
+        current_version,
+        latest_version: latest_release.version,
+        has_update,
+        target_object_key: latest_release.object_key,
+        size_bytes: latest_release.size_bytes,
+        manifest_id: latest_release.manifest_id,
+        mandatory: false,
+    })
+    .into_response()
 }
 
 pub async fn revalidate_access_package(

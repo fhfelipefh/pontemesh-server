@@ -138,6 +138,7 @@ pub struct UpdateBucketPolicyRequest {
     s3_lifecycle_rules: Option<serde_json::Value>,
     s3_resource_policy: Option<serde_json::Value>,
     s3_event_notifications: Option<serde_json::Value>,
+    pub release_versioning_scheme: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -859,6 +860,7 @@ pub async fn import_configuration(
             s3_lifecycle_rules: policy.s3_lifecycle_rules,
             s3_resource_policy: policy.s3_resource_policy,
             s3_event_notifications: policy.s3_event_notifications,
+            release_versioning_scheme: policy.release_versioning_scheme,
         };
         if let Err(error) = state
             .catalog
@@ -1382,6 +1384,9 @@ pub async fn update_bucket_policy(
         s3_event_notifications: payload
             .s3_event_notifications
             .unwrap_or(current.s3_event_notifications),
+        release_versioning_scheme: payload
+            .release_versioning_scheme
+            .unwrap_or(current.release_versioning_scheme),
     };
     match state
         .catalog
@@ -2521,6 +2526,7 @@ fn default_application_scopes() -> Vec<String> {
         "pontemesh:sources:read".to_owned(),
         "pontemesh:availability:read".to_owned(),
         "pontemesh:policies:read".to_owned(),
+        "pontemesh:update:check".to_owned(),
     ]
 }
 
@@ -2531,6 +2537,16 @@ fn downloader_application_scopes() -> Vec<String> {
         .collect()
 }
 
+fn launcher_application_scopes() -> Vec<String> {
+    vec![
+        "pontemesh:update:check".to_owned(),
+        "pontemesh:access-package:create".to_owned(),
+        "pontemesh:manifest:read".to_owned(),
+        "pontemesh:sources:read".to_owned(),
+        "pontemesh:availability:read".to_owned(),
+    ]
+}
+
 fn resolve_application_scopes(
     scopes: Option<Vec<String>>,
     preset: Option<&str>,
@@ -2539,6 +2555,7 @@ fn resolve_application_scopes(
         return Ok(scopes);
     }
     match preset.unwrap_or("downloader") {
+        "launcher" => Ok(launcher_application_scopes()),
         "downloader" => Ok(downloader_application_scopes()),
         "full" => Ok(default_application_scopes()),
         value => anyhow::bail!("unsupported application credential preset: {value}"),
@@ -2679,6 +2696,30 @@ mod tests {
                 .any(|scope| scope == "pontemesh:access-package:create")
         );
         assert!(!scopes.iter().any(|scope| scope == "origin:objects:write"));
+    }
+
+    #[test]
+    fn launcher_preset_has_minimal_update_and_download_scopes() {
+        let scopes = resolve_application_scopes(None, Some("launcher")).expect("scopes");
+
+        assert!(scopes.iter().any(|scope| scope == "pontemesh:update:check"));
+        assert!(
+            scopes
+                .iter()
+                .any(|scope| scope == "pontemesh:access-package:create")
+        );
+        assert!(
+            scopes
+                .iter()
+                .any(|scope| scope == "pontemesh:manifest:read")
+        );
+        assert!(!scopes.iter().any(|scope| scope == "origin:objects:read"));
+        assert!(!scopes.iter().any(|scope| scope == "origin:objects:write"));
+        assert!(
+            !scopes
+                .iter()
+                .any(|scope| scope == "pontemesh:policies:read")
+        );
     }
 
     #[test]
