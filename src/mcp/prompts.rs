@@ -6,7 +6,8 @@ pub fn list_prompts() -> Value {
             prompt("diagnose_instance", "Analisa o estado geral da instancia Ponte Mesh."),
             prompt("summarize_storage", "Resume o uso de storage e pontos de atencao."),
             prompt("analyze_bucket_growth", "Analisa crescimento e distribuicao de buckets."),
-            prompt("review_recent_errors", "Revisa eventos recentes em busca de erros.")
+            prompt("review_recent_errors", "Revisa eventos recentes em busca de erros."),
+            prompt("check_software_releases", "Instrui a verificacao de versoes e politicas de software em buckets versionados.")
         ]
     })
 }
@@ -24,6 +25,9 @@ pub fn get_prompt(name: &str) -> anyhow::Result<Value> {
         }
         "review_recent_errors" => {
             "Use pontemesh://audit/recent para identificar falhas recentes, sem expor tokens ou credenciais."
+        }
+        "check_software_releases" => {
+            "Use pontemesh_get_bucket_policy para verificar o esquema de versionamento e pontemesh_check_software_update para checar novas versoes de jogos/softwares."
         }
         _ => anyhow::bail!("unknown MCP prompt: {name}"),
     };

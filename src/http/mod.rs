@@ -6687,4 +6687,284 @@ mod tests {
             .expect("router response");
         assert_eq!(update_check_no_auth.status(), StatusCode::UNAUTHORIZED);
     }
+
+    #[tokio::test]
+    async fn mcp_supports_software_release_versioning_and_launcher_credentials() {
+        let Some(ctx) = TestContext::new("mcp-software-releases").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let app = ctx.app.clone();
+        let s3_app = ctx.s3_app.clone();
+        let cookie = login_cookie(app.clone()).await;
+
+        let enable = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/mcp/settings")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"enabled":true,"endpointPath":"/mcp","bindHost":null,"requireAuth":true,"readToolsEnabled":true,"writeToolsEnabled":true,"adminToolsEnabled":true,"exposeResources":true,"exposePrompts":true,"allowLocalhostOnly":true}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(enable.status(), StatusCode::OK);
+
+        let create_token = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/mcp/tokens")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"name":"mcp-release-tester","scopes":["read","write","admin"]}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_token.status(), StatusCode::CREATED);
+        let created_token = json_body(create_token).await;
+        let secret = created_token["secret"].as_str().expect("MCP secret");
+
+        let guide = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_get_ai_connection_guide",
+                "arguments": {}
+            }),
+        )
+        .await;
+        assert_eq!(
+            guide["result"]["structuredContent"]["releases"]["immutability"],
+            "Once activated on a bucket, release_versioning_scheme cannot be modified or disabled."
+        );
+
+        let created_bucket = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_create_bucket",
+                "arguments": { "bucket": "mcp-games" }
+            }),
+        )
+        .await;
+        assert_eq!(
+            created_bucket["result"]["structuredContent"]["name"],
+            "mcp-games"
+        );
+
+        let policy_res = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_get_bucket_policy",
+                "arguments": { "bucket": "mcp-games" }
+            }),
+        )
+        .await;
+        assert_eq!(
+            policy_res["result"]["structuredContent"]["releaseVersioningScheme"],
+            "DISABLED"
+        );
+
+        let update_policy = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_update_bucket_policy",
+                "arguments": {
+                    "bucket": "mcp-games",
+                    "policy": {
+                        "releaseVersioningScheme": "SEMVER"
+                    }
+                }
+            }),
+        )
+        .await;
+        assert_eq!(
+            update_policy["result"]["structuredContent"]["releaseVersioningScheme"],
+            "SEMVER"
+        );
+
+        let fail_policy = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_update_bucket_policy",
+                "arguments": {
+                    "bucket": "mcp-games",
+                    "policy": {
+                        "releaseVersioningScheme": "BUILD_NUMBER"
+                    }
+                }
+            }),
+        )
+        .await;
+        assert_eq!(fail_policy["error"]["code"], -32603);
+
+        let policy_resource = mcp_call(
+            app.clone(),
+            secret,
+            "resources/read",
+            serde_json::json!({
+                "uri": "pontemesh://buckets/mcp-games/policy"
+            }),
+        )
+        .await;
+        let policy_text = policy_resource["result"]["contents"][0]["text"]
+            .as_str()
+            .expect("policy text");
+        let parsed_policy: serde_json::Value =
+            serde_json::from_str(policy_text).expect("valid json in policy resource");
+        assert_eq!(parsed_policy["releaseVersioningScheme"], "SEMVER");
+
+        let v1_bytes = b"game-v1.0.0-archive";
+        assert_status(
+            s3_app
+                .clone()
+                .oneshot(
+                    signed_s3_request(
+                        Request::builder()
+                            .method(Method::PUT)
+                            .uri("/mcp-games/mygame/releases/1.0.0/launcher.zip")
+                            .body(Body::from(v1_bytes.as_slice())),
+                        v1_bytes,
+                    )
+                    .expect("valid request"),
+                )
+                .await
+                .expect("router response"),
+            StatusCode::OK,
+        );
+
+        let v2_bytes = b"game-v1.1.0-archive";
+        assert_status(
+            s3_app
+                .clone()
+                .oneshot(
+                    signed_s3_request(
+                        Request::builder()
+                            .method(Method::PUT)
+                            .uri("/mcp-games/mygame/releases/1.1.0/launcher.zip")
+                            .body(Body::from(v2_bytes.as_slice())),
+                        v2_bytes,
+                    )
+                    .expect("valid request"),
+                )
+                .await
+                .expect("router response"),
+            StatusCode::OK,
+        );
+
+        let check_update_old = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_check_software_update",
+                "arguments": {
+                    "bucket": "mcp-games",
+                    "software_id": "mygame",
+                    "current_version": "1.0.0"
+                }
+            }),
+        )
+        .await;
+        assert_eq!(
+            check_update_old["result"]["structuredContent"]["hasUpdate"],
+            true
+        );
+        assert_eq!(
+            check_update_old["result"]["structuredContent"]["latestVersion"],
+            "1.1.0"
+        );
+        assert_eq!(
+            check_update_old["result"]["structuredContent"]["versioningScheme"],
+            "SEMVER"
+        );
+
+        let check_update_latest = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_check_software_update",
+                "arguments": {
+                    "bucket": "mcp-games",
+                    "software_id": "mygame",
+                    "current_version": "1.1.0"
+                }
+            }),
+        )
+        .await;
+        assert_eq!(
+            check_update_latest["result"]["structuredContent"]["hasUpdate"],
+            false
+        );
+
+        let create_launcher = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_create_application_credential",
+                "arguments": {
+                    "name": "mcp-game-launcher",
+                    "preset": "launcher"
+                }
+            }),
+        )
+        .await;
+        let scopes: Vec<String> = serde_json::from_value(
+            create_launcher["result"]["structuredContent"]["credential"]["scopes"].clone(),
+        )
+        .expect("scopes array");
+        assert_eq!(
+            scopes,
+            vec![
+                "pontemesh:update:check",
+                "pontemesh:access-package:create",
+                "pontemesh:manifest:read",
+                "pontemesh:sources:read",
+                "pontemesh:availability:read"
+            ]
+        );
+
+        let prompts = mcp_call(app.clone(), secret, "prompts/list", serde_json::json!({})).await;
+        assert!(
+            prompts["result"]["prompts"]
+                .as_array()
+                .expect("prompts array")
+                .iter()
+                .any(|p| p["name"] == "check_software_releases")
+        );
+
+        let prompt_desc = mcp_call(
+            app.clone(),
+            secret,
+            "prompts/get",
+            serde_json::json!({ "name": "check_software_releases" }),
+        )
+        .await;
+        assert!(
+            prompt_desc["result"]["description"]
+                .as_str()
+                .expect("description")
+                .contains("pontemesh_check_software_update")
+        );
+    }
 }

@@ -2547,7 +2547,7 @@ fn launcher_application_scopes() -> Vec<String> {
     ]
 }
 
-fn resolve_application_scopes(
+pub fn resolve_application_scopes(
     scopes: Option<Vec<String>>,
     preset: Option<&str>,
 ) -> anyhow::Result<Vec<String>> {
