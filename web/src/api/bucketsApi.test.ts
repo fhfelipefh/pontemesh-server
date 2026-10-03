@@ -25,7 +25,8 @@ const baseDefaults = {
   sourceSelectionStrategy: "ORIGIN_REPLICA_EDGE",
   fragmentPriorityStrategy: "MANIFEST_ORDER",
   failureThreshold: 3,
-  fallbackMode: "ORIGIN_RANGE"
+  fallbackMode: "ORIGIN_RANGE",
+  releaseVersioningScheme: "DISABLED"
 };
 
 describe("bucketsApi", () => {

@@ -390,6 +390,49 @@ Permite que SDKs reportem métricas operacionais, como:
 
 Essas métricas devem ser usadas para observabilidade e avaliação da redução de carga no Origin.
 
+### Consultar atualizações de software (Launchers e Games)
+
+```http
+GET /pontemesh/updates/{bucket_name}/{software_id}?current={version}
+```
+
+Permite que launchers de jogos e aplicações cliente verifiquem de forma leve se existe uma versão mais recente de um executável ou pacote, sem a sobrecarga de listar todos os objetos do bucket.
+
+* **Autenticação**: Bearer token de aplicação (`Authorization: Bearer <token>`).
+* **Escopo obrigatório**: `pontemesh:update:check` (incluído por padrão na predefinição de credencial `launcher`).
+* **Política do bucket**: O bucket deve estar configurado com `release_versioning_scheme` ativo (`SEMVER`, `BUILD_NUMBER`, `CHANNEL` ou `TAG`).
+* **Imutabilidade**: O esquema de versionamento do bucket é imutável após ser definido (diferente de `DISABLED`), impedindo que alterações acidentais de esquema quebrem parsers de clientes já distribuídos.
+
+#### Parâmetros de consulta
+
+* `current`: Versão atualmente instalada no cliente (obrigatório).
+
+#### Resposta quando há atualização disponível (200 OK)
+
+```json
+{
+  "softwareId": "meu-jogo",
+  "currentVersion": "1.0.0",
+  "latestVersion": "1.1.0",
+  "hasUpdate": true,
+  "latestKey": "meu-jogo/releases/1.1.0/game.zip",
+  "versioningScheme": "SEMVER"
+}
+```
+
+#### Resposta quando o cliente já possui a versão mais recente (200 OK)
+
+```json
+{
+  "softwareId": "meu-jogo",
+  "currentVersion": "1.1.0",
+  "latestVersion": "1.1.0",
+  "hasUpdate": false,
+  "latestKey": "meu-jogo/releases/1.1.0/game.zip",
+  "versioningScheme": "SEMVER"
+}
+```
+
 ## API de Replica/Edge
 
 A API de Replica/Edge deve permitir que réplicas autorizadas se registrem, sincronizem conteúdos e anunciem disponibilidade.

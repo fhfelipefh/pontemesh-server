@@ -404,6 +404,10 @@ fn pontemesh_routes(state: AppState) -> Router<AppState> {
             "/objects/{bucket_name}/policies/{*object_key}",
             get(mesh::get_object_policy),
         )
+        .route(
+            "/updates/{bucket_name}/{software_id}",
+            get(mesh::check_software_update),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_application_credential,
@@ -6465,5 +6469,222 @@ mod tests {
             .unwrap();
         assert_eq!(admin_not_mod.status(), StatusCode::NOT_MODIFIED);
         assert_eq!(header_value(&admin_not_mod, "ETag"), etag);
+    }
+
+    #[tokio::test]
+    async fn software_release_versioning_and_launcher_flow() {
+        let Some(ctx) = TestContext::new("software-releases").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let s3_app = ctx.s3_app.clone();
+        let app = ctx.app.clone();
+
+        assert_status(
+            s3_app
+                .clone()
+                .oneshot(
+                    signed_s3_request(
+                        Request::builder()
+                            .method(Method::PUT)
+                            .uri("/games")
+                            .body(Body::empty()),
+                        b"",
+                    )
+                    .expect("valid request"),
+                )
+                .await
+                .expect("router response"),
+            StatusCode::OK,
+        );
+
+        let v1_bytes = b"game-v1.0.0-archive";
+        assert_status(
+            s3_app
+                .clone()
+                .oneshot(
+                    signed_s3_request(
+                        Request::builder()
+                            .method(Method::PUT)
+                            .uri("/games/mygame/releases/1.0.0/launcher.zip")
+                            .body(Body::from(v1_bytes.as_slice())),
+                        v1_bytes,
+                    )
+                    .expect("valid request"),
+                )
+                .await
+                .expect("router response"),
+            StatusCode::OK,
+        );
+
+        let v2_bytes = b"game-v1.1.0-archive";
+        assert_status(
+            s3_app
+                .clone()
+                .oneshot(
+                    signed_s3_request(
+                        Request::builder()
+                            .method(Method::PUT)
+                            .uri("/games/mygame/releases/1.1.0/launcher.zip")
+                            .body(Body::from(v2_bytes.as_slice())),
+                        v2_bytes,
+                    )
+                    .expect("valid request"),
+                )
+                .await
+                .expect("router response"),
+            StatusCode::OK,
+        );
+
+        let admin_cookie = login_cookie(app.clone()).await;
+
+        let policy_update = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/buckets/games/policy")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":true,"allowPeerSharing":false,"sourceSelectionStrategy":"ORIGIN_REPLICA_EDGE","fragmentPriorityStrategy":"MANIFEST_ORDER","failureThreshold":3,"fallbackMode":"ORIGIN_RANGE","releaseVersioningScheme":"SEMVER"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(policy_update.status(), StatusCode::OK);
+
+        let illegal_policy_update = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/buckets/games/policy")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"accessPackageTtlSeconds":120,"fragmentSizeBytes":1024,"allowReplicaEdge":true,"allowPeerSharing":false,"sourceSelectionStrategy":"ORIGIN_REPLICA_EDGE","fragmentPriorityStrategy":"MANIFEST_ORDER","failureThreshold":3,"fallbackMode":"ORIGIN_RANGE","releaseVersioningScheme":"BUILD_NUMBER"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(illegal_policy_update.status(), StatusCode::BAD_REQUEST);
+
+        let create_cred_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/application-credentials")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"name":"game-launcher","preset":"launcher"}"#,
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(create_cred_res.status(), StatusCode::CREATED);
+        let cred_body = response_text(create_cred_res).await;
+        let cred_json: serde_json::Value =
+            serde_json::from_str(&cred_body).expect("credential JSON");
+        let launcher_token = cred_json["token"]
+            .as_str()
+            .expect("token in response")
+            .to_owned();
+
+        let update_check_update_available = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/pontemesh/updates/games/mygame?current=1.0.0")
+                    .header(header::AUTHORIZATION, format!("Bearer {launcher_token}"))
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(update_check_update_available.status(), StatusCode::OK);
+        let update_body = response_text(update_check_update_available).await;
+        let update_json: serde_json::Value =
+            serde_json::from_str(&update_body).expect("update JSON");
+        assert_eq!(update_json["softwareId"], "mygame");
+        assert_eq!(update_json["currentVersion"], "1.0.0");
+        assert_eq!(update_json["latestVersion"], "1.1.0");
+        assert_eq!(update_json["hasUpdate"], true);
+        assert_eq!(
+            update_json["latestKey"],
+            "mygame/releases/1.1.0/launcher.zip"
+        );
+        assert_eq!(update_json["versioningScheme"], "SEMVER");
+
+        let update_check_already_latest = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/pontemesh/updates/games/mygame?current=1.1.0")
+                    .header(header::AUTHORIZATION, format!("Bearer {launcher_token}"))
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(update_check_already_latest.status(), StatusCode::OK);
+        let no_update_body = response_text(update_check_already_latest).await;
+        let no_update_json: serde_json::Value =
+            serde_json::from_str(&no_update_body).expect("update JSON");
+        assert_eq!(no_update_json["softwareId"], "mygame");
+        assert_eq!(no_update_json["currentVersion"], "1.1.0");
+        assert_eq!(no_update_json["latestVersion"], "1.1.0");
+        assert_eq!(no_update_json["hasUpdate"], false);
+
+        let update_check_invalid_semver = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/pontemesh/updates/games/mygame?current=not-a-valid-semver")
+                    .header(header::AUTHORIZATION, format!("Bearer {launcher_token}"))
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(
+            update_check_invalid_semver.status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        let update_check_missing_game = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/pontemesh/updates/games/nonexistent?current=1.0.0")
+                    .header(header::AUTHORIZATION, format!("Bearer {launcher_token}"))
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(update_check_missing_game.status(), StatusCode::NOT_FOUND);
+
+        let update_check_no_auth = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/pontemesh/updates/games/mygame?current=1.0.0")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(update_check_no_auth.status(), StatusCode::UNAUTHORIZED);
     }
 }

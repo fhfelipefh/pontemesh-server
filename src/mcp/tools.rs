@@ -506,6 +506,7 @@ pub async fn call_tool(
                             s3_lifecycle_rules: policy.s3_lifecycle_rules,
                             s3_resource_policy: policy.s3_resource_policy,
                             s3_event_notifications: policy.s3_event_notifications,
+                            release_versioning_scheme: policy.release_versioning_scheme,
                         },
                     )
                     .await?;

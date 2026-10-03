@@ -628,6 +628,19 @@ function HybridPolicyFields({ policy, onChange, idPrefix }: HybridPolicyFieldsPr
             <option value="DISABLED">{t("setup.buckets.fallbackDisabled")}</option>
           </select>
         </FormField>
+        <FormField label={t("setup.buckets.releaseVersioningScheme")} htmlFor={`${idPrefix}-release-scheme`}>
+          <select
+            id={`${idPrefix}-release-scheme`}
+            value={policy.releaseVersioningScheme || "DISABLED"}
+            onChange={(event) => onChange({ ...policy, releaseVersioningScheme: event.target.value })}
+          >
+            <option value="DISABLED">{t("setup.buckets.schemeDisabled")}</option>
+            <option value="SEMVER">{t("setup.buckets.schemeSemVer")}</option>
+            <option value="BUILD_NUMBER">{t("setup.buckets.schemeBuildNumber")}</option>
+            <option value="CHANNEL">{t("setup.buckets.schemeChannel")}</option>
+            <option value="TAG">{t("setup.buckets.schemeTag")}</option>
+          </select>
+        </FormField>
       </FormGrid>
       <CheckboxGrid columns={2}>
         <CheckboxField label={t("setup.buckets.allowReplicaEdge")}>
@@ -712,6 +725,7 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
         fragmentPriorityStrategy: nextPolicy.fragmentPriorityStrategy,
         failureThreshold: nextPolicy.failureThreshold,
         fallbackMode: nextPolicy.fallbackMode,
+        releaseVersioningScheme: nextPolicy.releaseVersioningScheme,
         s3ListDefaultMaxKeys: nextPolicy.s3ListDefaultMaxKeys,
         s3ListMaxKeysLimit: nextPolicy.s3ListMaxKeysLimit,
         s3ListAllowDelimiter: nextPolicy.s3ListAllowDelimiter,
@@ -841,6 +855,20 @@ function BucketDrawer({ bucket, onClose, onChanged, refreshNonce, externalError,
                   <option value="ORIGIN_RANGE">{t("setup.buckets.fallbackRange")}</option>
                   <option value="ORIGIN_FULL_OBJECT">{t("setup.buckets.fallbackFull")}</option>
                   <option value="DISABLED">{t("setup.buckets.fallbackDisabled")}</option>
+                </select>
+                </FormField>
+                <FormField label={t("setup.buckets.releaseVersioningScheme")} htmlFor="bucket-policy-release-versioning-scheme">
+                <select
+                  id="bucket-policy-release-versioning-scheme"
+                  value={policy.releaseVersioningScheme || "DISABLED"}
+                  disabled={Boolean(policy.releaseVersioningScheme && policy.releaseVersioningScheme !== "DISABLED")}
+                  onChange={(event) => setPolicy({ ...policy, releaseVersioningScheme: event.target.value })}
+                >
+                  <option value="DISABLED">{t("setup.buckets.schemeDisabled")}</option>
+                  <option value="SEMVER">{t("setup.buckets.schemeSemVer")}</option>
+                  <option value="BUILD_NUMBER">{t("setup.buckets.schemeBuildNumber")}</option>
+                  <option value="CHANNEL">{t("setup.buckets.schemeChannel")}</option>
+                  <option value="TAG">{t("setup.buckets.schemeTag")}</option>
                 </select>
                 </FormField>
                 <FormField label={t("setup.buckets.s3ListDefaultMaxKeys")} htmlFor="bucket-policy-s3-default-max-keys">

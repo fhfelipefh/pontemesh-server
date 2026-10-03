@@ -19,6 +19,7 @@ export type BucketPolicy = {
   fragmentPriorityStrategy: "MANIFEST_ORDER" | "INITIAL_FIRST" | "RAREST_FIRST" | string;
   failureThreshold: number;
   fallbackMode: "ORIGIN_RANGE" | "ORIGIN_FULL_OBJECT" | "DISABLED" | string;
+  releaseVersioningScheme: "DISABLED" | "SEMVER" | "BUILD_NUMBER" | "CHANNEL" | "TAG" | string;
   s3ListDefaultMaxKeys: number;
   s3ListMaxKeysLimit: number;
   s3ListAllowDelimiter: boolean;
@@ -46,6 +47,7 @@ export type UpdateBucketPolicyInput = {
   fragmentPriorityStrategy: string;
   failureThreshold: number;
   fallbackMode: string;
+  releaseVersioningScheme?: "DISABLED" | "SEMVER" | "BUILD_NUMBER" | "CHANNEL" | "TAG" | string;
   s3ListDefaultMaxKeys: number;
   s3ListMaxKeysLimit: number;
   s3ListAllowDelimiter: boolean;
@@ -73,6 +75,7 @@ export type BucketPolicyDefaultsInput = Pick<
   | "fragmentPriorityStrategy"
   | "failureThreshold"
   | "fallbackMode"
+  | "releaseVersioningScheme"
 >;
 
 export type BucketPolicyDefaults = BucketPolicyDefaultsInput & {

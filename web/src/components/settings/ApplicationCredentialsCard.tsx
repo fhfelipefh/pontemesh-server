@@ -15,13 +15,13 @@ export type ApplicationCredentialsCardProps = {
   applications: ApplicationCredentialSummary[];
   createdApplication: CreatedApplicationCredential | null;
   applicationName: string;
-  applicationPreset: "downloader" | "full";
+  applicationPreset: "launcher" | "downloader" | "full";
   loading: boolean;
   creating: boolean;
   revoking: string | null;
   error: string;
   onApplicationNameChange: (value: string) => void;
-  onApplicationPresetChange: (value: "downloader" | "full") => void;
+  onApplicationPresetChange: (value: "launcher" | "downloader" | "full") => void;
   onCreateApplication: () => void;
   onDismissCreatedApplication: () => void;
   onRevokeApplication: (id: string, name: string) => void;
@@ -66,11 +66,14 @@ export function ApplicationCredentialsCard({
           value={applicationPreset}
           onChange={event =>
             onApplicationPresetChange(
-              event.target.value as "downloader" | "full"
+              event.target.value as "launcher" | "downloader" | "full"
             )
           }
           aria-label={t("setup.settings.applications.preset")}
         >
+          <option value="launcher">
+            {t("setup.settings.applications.launcherPreset")}
+          </option>
           <option value="downloader">
             {t("setup.settings.applications.downloaderPreset")}
           </option>
