@@ -646,6 +646,172 @@ pub async fn disk_guard_status(State(state): State<AppState>) -> Response {
     }
 }
 
+pub async fn storage_pool_status(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+) -> Response {
+    match storage::pool_status(&state.paths) {
+        Ok(pool) => {
+            audit::event(
+                "storage_pool_status_checked",
+                Some(&session.username),
+                "success",
+                "storage pool status requested",
+            );
+            Json(pool).into_response()
+        }
+        Err(error) => internal_error(error),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddStorageDriveRequest {
+    pub path: String,
+}
+
+pub async fn add_storage_drive(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(request): Json<AddStorageDriveRequest>,
+) -> Response {
+    let drive_path = PathBuf::from(request.path.trim());
+    if !drive_path.is_absolute() {
+        return bad_request(anyhow::anyhow!("drive path must be absolute"));
+    }
+    if let Err(error) = storage::ensure_writable(&drive_path) {
+        return bad_request(anyhow::anyhow!("drive path is not writable: {error}"));
+    }
+    match config::add_storage_drive(&state.paths, drive_path.clone()) {
+        Ok(_) => {
+            let detail = format!("path={}", drive_path.display());
+            audit::event(
+                "storage_drive_added",
+                Some(&session.username),
+                "success",
+                &detail,
+            );
+            record_admin_audit(
+                &state,
+                "storage_drive_added",
+                &session.username,
+                "success",
+                &detail,
+            )
+            .await;
+            match storage::pool_status(&state.paths) {
+                Ok(pool) => (StatusCode::CREATED, Json(pool)).into_response(),
+                Err(error) => internal_error(error),
+            }
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DrainStorageDriveRequest {
+    pub path: String,
+    pub target_path: Option<String>,
+    pub remove_from_config: Option<bool>,
+}
+
+pub async fn drain_storage_drive(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(request): Json<DrainStorageDriveRequest>,
+) -> Response {
+    let source_path = PathBuf::from(request.path.trim());
+    let target_path = request
+        .target_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(std::path::Path::new);
+    let remove_from_config = request.remove_from_config.unwrap_or(true);
+
+    match storage::drain_drive(
+        &state.paths,
+        &state.catalog,
+        &source_path,
+        target_path,
+        remove_from_config,
+    )
+    .await
+    {
+        Ok(result) => {
+            let detail = format!(
+                "source={}; target={}; objects={}; bytes={}",
+                result.source_path,
+                result.target_path,
+                result.objects_migrated,
+                result.bytes_migrated
+            );
+            audit::event(
+                "storage_drive_drained",
+                Some(&session.username),
+                "success",
+                &detail,
+            );
+            record_admin_audit(
+                &state,
+                "storage_drive_drained",
+                &session.username,
+                "success",
+                &detail,
+            )
+            .await;
+            Json(result).into_response()
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAllocationStrategyRequest {
+    pub strategy: String,
+}
+
+pub async fn update_storage_allocation(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    Json(request): Json<UpdateAllocationStrategyRequest>,
+) -> Response {
+    let strategy = request.strategy.trim();
+    if strategy != storage::STRATEGY_MOST_AVAILABLE_FREE_SPACE
+        && strategy != storage::STRATEGY_ROUND_ROBIN
+    {
+        return bad_request(anyhow::anyhow!(
+            "invalid allocation strategy: must be MOST_AVAILABLE_FREE_SPACE or ROUND_ROBIN"
+        ));
+    }
+    match config::update_storage_allocation_strategy(&state.paths, strategy) {
+        Ok(_) => {
+            let detail = format!("strategy={strategy}");
+            audit::event(
+                "storage_allocation_strategy_updated",
+                Some(&session.username),
+                "success",
+                &detail,
+            );
+            record_admin_audit(
+                &state,
+                "storage_allocation_strategy_updated",
+                &session.username,
+                "success",
+                &detail,
+            )
+            .await;
+            match storage::pool_status(&state.paths) {
+                Ok(pool) => Json(pool).into_response(),
+                Err(error) => internal_error(error),
+            }
+        }
+        Err(error) => bad_request(error),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAdminUserRequest {
@@ -2302,10 +2468,7 @@ async fn upload_object_inner(
     let mut requested_key: Option<String> = None;
     let mut uploaded_file: Option<UploadedObjectFile> = None;
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
-    let storage_path = config::configured_storage_dir(&state.paths)?;
-    if let Ok(guards) = config::load_instance_config(&state.paths).map(|c| c.storage.guards) {
-        crate::system::disk_guard::enforce(&storage_path, &guards)?;
-    }
+    let storage_path = storage::select_target_drive(&state.paths)?;
     let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
     fs::create_dir_all(&bucket_dir).with_context(|| {
         format!(

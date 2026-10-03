@@ -1,9 +1,9 @@
 use super::storage::filesystem_usage;
 use crate::config::StorageGuardsSection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DiskLevel {
     Ok,
@@ -12,7 +12,7 @@ pub enum DiskLevel {
     Blocked,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskGuardStatus {
     pub enabled: bool,

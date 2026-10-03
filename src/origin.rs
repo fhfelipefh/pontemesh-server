@@ -1619,13 +1619,9 @@ async fn put_object_inner(
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
     authorize_s3_action(&policy, principal, "s3:PutObject")?;
 
-    let storage_path = config::configured_storage_dir(&state.paths)?;
-    if let Ok(guards) = config::load_instance_config(&state.paths).map(|c| c.storage.guards) {
-        crate::system::disk_guard::enforce(&storage_path, &guards)?;
-    }
-
-    let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
-    let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/uploads");
+    let storage_path = crate::system::storage::select_target_drive(&state.paths)?;
+    let bucket_dir = bucket_storage_dir(storage_path.clone(), bucket_name);
+    let temp_dir = storage_path.join("tmp/uploads");
     fs::create_dir_all(&temp_dir).with_context(|| {
         format!(
             "failed to create temporary upload directory {}",
@@ -1806,9 +1802,9 @@ async fn complete_multipart_upload_inner(
     let selected_parts = resolve_completed_parts(&requested_parts, &stored_parts)?;
     let policy = state.catalog.get_bucket_policy(bucket_name).await?;
     authorize_s3_action(&policy, principal, "s3:PutObject")?;
-    let storage_path = config::configured_storage_dir(&state.paths)?;
-    let bucket_dir = bucket_storage_dir(storage_path, bucket_name);
-    let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/uploads");
+    let storage_path = crate::system::storage::select_target_drive(&state.paths)?;
+    let bucket_dir = bucket_storage_dir(storage_path.clone(), bucket_name);
+    let temp_dir = storage_path.join("tmp/uploads");
     fs::create_dir_all(&temp_dir).with_context(|| {
         format!(
             "failed to create temporary upload directory {}",
@@ -1911,9 +1907,9 @@ async fn copy_object_inner(
     }
     let policy = state.catalog.get_bucket_policy(destination_bucket).await?;
     authorize_s3_action(&policy, principal, "s3:PutObject")?;
-    let storage_path = config::configured_storage_dir(&state.paths)?;
-    let bucket_dir = bucket_storage_dir(storage_path, destination_bucket);
-    let temp_dir = config::configured_storage_dir(&state.paths)?.join("tmp/uploads");
+    let storage_path = crate::system::storage::select_target_drive(&state.paths)?;
+    let bucket_dir = bucket_storage_dir(storage_path.clone(), destination_bucket);
+    let temp_dir = storage_path.join("tmp/uploads");
     fs::create_dir_all(&temp_dir).with_context(|| {
         format!(
             "failed to create temporary upload directory {}",
@@ -3572,7 +3568,7 @@ fn empty_s3_ok() -> Response {
 }
 
 fn multipart_upload_dir(state: &AppState, upload_id: &str) -> anyhow::Result<PathBuf> {
-    Ok(config::configured_storage_dir(&state.paths)?
+    Ok(crate::system::storage::select_target_drive(&state.paths)?
         .join("multipart")
         .join(upload_id))
 }

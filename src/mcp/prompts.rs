@@ -8,7 +8,8 @@ pub fn list_prompts() -> Value {
             prompt("analyze_bucket_growth", "Analisa crescimento e distribuicao de buckets."),
             prompt("review_recent_errors", "Revisa eventos recentes em busca de erros."),
             prompt("check_software_releases", "Instrui a verificacao de versoes e politicas de software em buckets versionados."),
-            prompt("analyze_egress_offload", "Analisa as metricas de economia de banda e offload de egress.")
+            prompt("analyze_egress_offload", "Analisa as metricas de economia de banda e offload de egress."),
+            prompt("manage_storage_drives", "Orienta a expansao do pool de discos e substituicao a quente com drenagem de objetos.")
         ]
     })
 }
@@ -32,6 +33,9 @@ pub fn get_prompt(name: &str) -> anyhow::Result<Value> {
         }
         "analyze_egress_offload" => {
             "Use pontemesh://metrics/offload e pontemesh_get_offload_metrics para analisar a porcentagem de dados transferidos por Peers e Replicas, calculando a economia de banda em relacao ao Origin."
+        }
+        "manage_storage_drives" => {
+            "Use pontemesh://storage/drives e pontemesh_list_storage_drives para inspecionar os discos do pool, pontemesh_add_storage_drive para adicionar novos discos sem reiniciar o servidor e pontemesh_drain_storage_drive para migrar dados de um disco antes da remocao."
         }
         _ => anyhow::bail!("unknown MCP prompt: {name}"),
     };

@@ -383,6 +383,16 @@ O Client delega ao SDK:
 
 Essas responsabilidades pertencem ao Origin e ao SDK.
 
+## Gerenciamento de Armazenamento e Troca de Discos a Quente
+
+O Origin armazena o conteúdo físico dos objetos no sistema de arquivos local e desacopla os caminhos físicos através do campo `storage_path` persistido no catálogo PostgreSQL.
+
+### Suporte a múltiplos discos e expansão dinâmica
+
+1. **Ponto de montagem único ou expansão por SO**: O servidor suporta nativamente volumes expandidos dinamicamente via LVM, ZFS ou RAID por hardware. O monitoramento do `DiskGuard` e as consultas do sistema de arquivos detectam imediatamente a expansão de espaço sem necessidade de reinicialização.
+2. **Pool de múltiplos discos (JBOD)**: Conforme detalhado em `docs/decisions/0005-multi-drive-storage-pools-and-hot-drain.md`, o servidor suporta múltiplos pontos de montagem, alocando novos uploads para o disco com maior espaço livre disponível e isolando falhas por unidade.
+3. **Dreno e substituição a quente (*Hot-Drain*)**: Para troca preventiva de discos com falhas ou upgrade de hardware, unidades podem ser marcadas em estado `DRAINING`, provocando a migração em segundo plano dos objetos para os discos saudáveis com validação de hash SHA-256 e atualização atômica de `storage_path` no catálogo, liberando a unidade com segurança sem parada de serviço.
+
 ## Síntese
 
 No papel de Origin, o `pontemesh-server` é o centro de controle do Ponte Mesh.

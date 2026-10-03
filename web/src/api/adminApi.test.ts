@@ -25,7 +25,15 @@ import {
 } from "./dashboardApi";
 import { HttpError } from "./http";
 import { createReplicaCredential, listReplicas, revokeReplica } from "./replicasApi";
-import { getDiskGuardSettings, getStorageStatus, updateDiskGuardSettings } from "./storageApi";
+import {
+  addStorageDrive,
+  drainStorageDrive,
+  getDiskGuardSettings,
+  getStoragePoolStatus,
+  getStorageStatus,
+  updateDiskGuardSettings,
+  updateStorageAllocationStrategy
+} from "./storageApi";
 
 describe("admin API clients", () => {
   const s3AdvancedPolicy = {
@@ -477,6 +485,86 @@ describe("admin API clients", () => {
     });
     expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/application-credentials/app%2F1/revoke", {
       method: "POST"
+    });
+  });
+
+  it("manages storage pool drives and hot-drain via admin endpoints", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({
+        allocationStrategy: "MOST_AVAILABLE_FREE_SPACE",
+        drives: [
+          {
+            path: "/mnt/storage1",
+            isPrimary: true,
+            exists: true,
+            writable: true,
+            totalBytes: null,
+            availableBytes: null,
+            usedBytes: null,
+            usedPercent: null,
+            level: "OK",
+            warnings: []
+          }
+        ],
+        totalBytes: null,
+        availableBytes: null,
+        usedBytes: null,
+        usedPercent: null
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        allocationStrategy: "MOST_AVAILABLE_FREE_SPACE",
+        drives: [],
+        totalBytes: null,
+        availableBytes: null,
+        usedBytes: null,
+        usedPercent: null
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        sourcePath: "/mnt/storage2",
+        targetPath: "/mnt/storage1",
+        objectsMigrated: 1,
+        bytesMigrated: 1024
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        allocationStrategy: "ROUND_ROBIN",
+        drives: [],
+        totalBytes: null,
+        availableBytes: null,
+        usedBytes: null,
+        usedPercent: null
+      }));
+
+    const pool = await getStoragePoolStatus();
+    expect(pool.drives).toHaveLength(1);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/admin/storage/drives", {
+      headers: { accept: "application/json" }
+    });
+
+    await addStorageDrive("/mnt/storage2");
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/admin/storage/drives", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "/mnt/storage2" })
+    });
+
+    const drain = await drainStorageDrive("/mnt/storage2", "/mnt/storage1", true);
+    expect(drain.objectsMigrated).toBe(1);
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/admin/storage/drives/drain", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        path: "/mnt/storage2",
+        targetPath: "/mnt/storage1",
+        removeFromConfig: true
+      })
+    });
+
+    const updatedStrategy = await updateStorageAllocationStrategy("ROUND_ROBIN");
+    expect(updatedStrategy.allocationStrategy).toBe("ROUND_ROBIN");
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/admin/storage/drives/allocation", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ strategy: "ROUND_ROBIN" })
     });
   });
 });

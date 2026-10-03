@@ -271,6 +271,32 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             schema: json!({"type":"object","properties":{"mode":{"type":"string","enum":["download","upload"]},"size_bytes":{"type":"integer"},"payload":{"type":"string"}},"required":["mode"]}),
             permission: ToolPermission::Read,
         },
+        ToolDefinition {
+            name: "pontemesh_list_storage_drives",
+            description: "Lista todos os discos de armazenamento configurados no pool, espaco livre, limites e status de saude.",
+            schema: json!({"type":"object","properties":{}}),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
+            name: "pontemesh_add_storage_drive",
+            description: "Adiciona um novo caminho de disco ao pool de armazenamento local em tempo de execucao.",
+            schema: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}),
+            permission: ToolPermission::Admin,
+        },
+        ToolDefinition {
+            name: "pontemesh_drain_storage_drive",
+            description: "Drena objetos de um disco de armazenamento para outro disco e opcionalmente remove o disco drenado do pool.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "sourcePath": {"type": "string"},
+                    "targetPath": {"type": "string"},
+                    "removeFromConfig": {"type": "boolean"}
+                },
+                "required": ["sourcePath"]
+            }),
+            permission: ToolPermission::Admin,
+        },
     ]
 }
 
@@ -719,6 +745,63 @@ pub async fn call_tool(
                 bail!("mode must be 'download' or 'upload'");
             }
         }
+        "pontemesh_list_storage_drives" => {
+            let status = storage::pool_status(&state.paths)?;
+            json!(status)
+        }
+        "pontemesh_add_storage_drive" => {
+            if !is_admin_caller(state, authorization).await {
+                bail!("admin permissions required to add storage drives");
+            }
+            let drive_path = required_str(&arguments, "path")?;
+            config::add_storage_drive(&state.paths, drive_path.into())?;
+            let status = storage::pool_status(&state.paths)?;
+            state
+                .catalog
+                .record_audit_event(
+                    "storage_drive_added",
+                    Some("mcp"),
+                    "success",
+                    &format!("path={drive_path}"),
+                )
+                .await?;
+            json!({
+                "message": "storage drive added successfully",
+                "pool": status
+            })
+        }
+        "pontemesh_drain_storage_drive" => {
+            if !is_admin_caller(state, authorization).await {
+                bail!("admin permissions required to drain storage drives");
+            }
+            let source_path = required_str(&arguments, "sourcePath")?;
+            let target_path = arguments.get("targetPath").and_then(Value::as_str);
+            let remove_from_config = arguments
+                .get("removeFromConfig")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let result = storage::drain_drive(
+                &state.paths,
+                &state.catalog,
+                std::path::Path::new(source_path),
+                target_path.map(std::path::Path::new),
+                remove_from_config,
+            )
+            .await?;
+            state
+                .catalog
+                .record_audit_event(
+                    "storage_drive_drained",
+                    Some("mcp"),
+                    "success",
+                    &format!(
+                        "source={source_path}, migrated={}, bytes={}",
+                        result.objects_migrated, result.bytes_migrated
+                    ),
+                )
+                .await?;
+            json!(result)
+        }
         _ => bail!("unknown MCP tool: {name}"),
     };
     Ok(
@@ -741,7 +824,7 @@ async fn put_small_object(
         );
     }
     let policy = state.catalog.get_bucket_policy(bucket).await?;
-    let storage_path = config::configured_storage_dir(&state.paths)?;
+    let storage_path = storage::select_target_drive(&state.paths)?;
     let bucket_dir = storage_path.join(bucket);
     tokio::fs::create_dir_all(&bucket_dir)
         .await

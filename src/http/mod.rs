@@ -222,6 +222,18 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             "/api/admin/storage/disk-guard",
             get(admin::disk_guard_status).put(admin::update_disk_guard),
         )
+        .route(
+            "/api/admin/storage/drives",
+            get(admin::storage_pool_status).post(admin::add_storage_drive),
+        )
+        .route(
+            "/api/admin/storage/drives/drain",
+            post(admin::drain_storage_drive),
+        )
+        .route(
+            "/api/admin/storage/drives/allocation",
+            put(admin::update_storage_allocation),
+        )
         .route("/api/admin/gc/status", get(admin::gc_status))
         .route("/api/admin/gc/dry-run", post(admin::gc_dry_run))
         .route("/api/admin/audit-events", get(admin::list_audit_events))
@@ -6274,9 +6286,7 @@ mod tests {
             },
             public_endpoints: crate::config::PublicEndpointsSection::default(),
             storage: StorageSection {
-                local: LocalStorageSection {
-                    path: paths.storage_dir(),
-                },
+                local: LocalStorageSection::new(paths.storage_dir()),
                 guards: Default::default(),
             },
             replica: (role == InstanceRole::ReplicaEdge).then(|| crate::config::ReplicaSection {
@@ -7066,6 +7076,322 @@ mod tests {
                 .as_str()
                 .expect("description")
                 .contains("pontemesh_check_software_update")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_storage_pool_multi_drive_and_hot_drain() {
+        let Some(ctx) = TestContext::new("storage-pool-test").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let paths = ctx.paths;
+        let app = ctx.app;
+        let admin_cookie = login_cookie(app.clone()).await;
+
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/storage/drives")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(res.status(), StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(res.into_body(), usize::MAX).await.expect("bytes"))
+                .expect("json");
+        assert_eq!(body["drives"].as_array().expect("drives array").len(), 1);
+        assert_eq!(body["allocationStrategy"], "MOST_AVAILABLE_FREE_SPACE");
+
+        let extra_dir = paths.root().join("extra_drive_pool_test");
+        std::fs::create_dir_all(&extra_dir).expect("create dir");
+
+        let add_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/storage/drives")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "path": extra_dir.display().to_string()
+                        })
+                        .to_string(),
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(add_res.status(), StatusCode::CREATED);
+
+        let res_after_add = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/storage/drives")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        let body_after_add: serde_json::Value = serde_json::from_slice(
+            &to_bytes(res_after_add.into_body(), usize::MAX)
+                .await
+                .expect("bytes"),
+        )
+        .expect("json");
+        assert_eq!(
+            body_after_add["drives"]
+                .as_array()
+                .expect("drives array")
+                .len(),
+            2
+        );
+
+        let update_strat_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/storage/drives/allocation")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "strategy": "ROUND_ROBIN"
+                        })
+                        .to_string(),
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(update_strat_res.status(), StatusCode::OK);
+        let strat_body: serde_json::Value = serde_json::from_slice(
+            &to_bytes(update_strat_res.into_body(), usize::MAX)
+                .await
+                .expect("bytes"),
+        )
+        .expect("json");
+        assert_eq!(strat_body["allocationStrategy"], "ROUND_ROBIN");
+
+        let drain_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/storage/drives/drain")
+                    .header(header::COOKIE, &admin_cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "path": extra_dir.display().to_string(),
+                            "removeFromConfig": true
+                        })
+                        .to_string(),
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(drain_res.status(), StatusCode::OK);
+        let drain_body: serde_json::Value = serde_json::from_slice(
+            &to_bytes(drain_res.into_body(), usize::MAX)
+                .await
+                .expect("bytes"),
+        )
+        .expect("json");
+        assert_eq!(drain_body["objectsMigrated"], 0);
+
+        let res_after_drain = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/storage/drives")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        let body_after_drain: serde_json::Value = serde_json::from_slice(
+            &to_bytes(res_after_drain.into_body(), usize::MAX)
+                .await
+                .expect("bytes"),
+        )
+        .expect("json");
+        assert_eq!(
+            body_after_drain["drives"]
+                .as_array()
+                .expect("drives array")
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_storage_pool_tools_and_resource() {
+        let Some(ctx) = TestContext::new("mcp-storage-pool-test").await else {
+            return;
+        };
+        let _guard = ctx.guard;
+        let paths = ctx.paths;
+        let app = ctx.app;
+        let cookie = login_cookie(app.clone()).await;
+
+        let settings_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/admin/mcp/settings")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "enabled": true,
+                            "endpointPath": "/api/mcp",
+                            "bindHost": "127.0.0.1",
+                            "requireAuth": true,
+                            "authMode": "token",
+                            "readToolsEnabled": true,
+                            "writeToolsEnabled": true,
+                            "adminToolsEnabled": true,
+                            "exposeResources": true,
+                            "exposePrompts": true,
+                            "allowLocalhostOnly": true
+                        })
+                        .to_string(),
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(settings_response.status(), StatusCode::OK);
+
+        let token_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/admin/mcp/tokens")
+                    .header(header::COOKIE, &cookie)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "name": "storage-pool-mcp-test",
+                            "scopes": ["read", "write", "admin"]
+                        })
+                        .to_string(),
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(token_response.status(), StatusCode::CREATED);
+        let token_body: serde_json::Value = serde_json::from_slice(
+            &to_bytes(token_response.into_body(), usize::MAX)
+                .await
+                .expect("bytes"),
+        )
+        .expect("json");
+        let secret = token_body["secretToken"].as_str().expect("secret token");
+
+        let tools = mcp_call(app.clone(), secret, "tools/list", serde_json::json!({})).await;
+        let tool_names: Vec<&str> = tools["result"]["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .filter_map(|t| t["name"].as_str())
+            .collect();
+        assert!(tool_names.contains(&"pontemesh_list_storage_drives"));
+        assert!(tool_names.contains(&"pontemesh_add_storage_drive"));
+        assert!(tool_names.contains(&"pontemesh_drain_storage_drive"));
+
+        let list_drives_call = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_list_storage_drives",
+                "arguments": {}
+            }),
+        )
+        .await;
+        assert_eq!(
+            list_drives_call["result"]["structuredContent"]["drives"]
+                .as_array()
+                .expect("drives array")
+                .len(),
+            1
+        );
+
+        let extra_dir = paths.root().join("mcp_extra_drive_test");
+        std::fs::create_dir_all(&extra_dir).expect("create dir");
+
+        let add_drive_call = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_add_storage_drive",
+                "arguments": {
+                    "path": extra_dir.display().to_string()
+                }
+            }),
+        )
+        .await;
+        assert_eq!(
+            add_drive_call["result"]["structuredContent"]["pool"]["drives"]
+                .as_array()
+                .expect("drives array")
+                .len(),
+            2
+        );
+
+        let resources =
+            mcp_call(app.clone(), secret, "resources/list", serde_json::json!({})).await;
+        assert!(
+            resources["result"]["resources"]
+                .as_array()
+                .expect("resources array")
+                .iter()
+                .any(|r| r["uri"] == "pontemesh://storage/drives")
+        );
+
+        let read_res = mcp_call(
+            app.clone(),
+            secret,
+            "resources/read",
+            serde_json::json!({
+                "uri": "pontemesh://storage/drives"
+            }),
+        )
+        .await;
+        assert!(
+            read_res["result"]["contents"][0]["text"]
+                .as_str()
+                .expect("resource text")
+                .contains("allocationStrategy")
+        );
+
+        let prompts = mcp_call(app.clone(), secret, "prompts/list", serde_json::json!({})).await;
+        assert!(
+            prompts["result"]["prompts"]
+                .as_array()
+                .expect("prompts array")
+                .iter()
+                .any(|p| p["name"] == "manage_storage_drives")
         );
     }
 }

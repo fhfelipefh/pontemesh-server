@@ -149,7 +149,10 @@ pontemesh_export_configuration
 pontemesh_get_ai_connection_guide
 pontemesh_speed_test
 pontemesh_get_offload_metrics
+pontemesh_list_storage_drives
 ```
+
+`pontemesh_list_storage_drives` lista todos os discos locais que compõem o pool de armazenamento, status de saúde DiskGuard, espaço livre, utilizado e estratégia de alocação ativa.
 
 `pontemesh_get_offload_metrics` consulta métricas consolidadas de desoneração de saída (egress offload), decompondo tráfego servido por Origin, réplicas e peers, taxa de offload percentual e economia financeira estimada em USD para um período opcional (`1h`, `24h`, `7d`, `30d`, `all`).
 
@@ -196,7 +199,13 @@ pontemesh_import_configuration
 pontemesh_list_credentials
 pontemesh_create_application_credential
 pontemesh_create_s3_access_key
+pontemesh_add_storage_drive
+pontemesh_drain_storage_drive
 ```
+
+`pontemesh_add_storage_drive` adiciona um novo caminho de disco local ao pool em tempo de execução sem reiniciar o servidor.
+
+`pontemesh_drain_storage_drive` migra com integridade criptográfica SHA-256 os objetos gravados em um disco para outro disco elegível do pool e remove o disco drenado da configuração.
 
 `pontemesh_update_bucket_policy` atualiza a política híbrida e pode definir o
 `releaseVersioningScheme` (`DISABLED`, `SEMVER`, `BUILD_NUMBER`, `CHANNEL`, `TAG`).
@@ -225,6 +234,7 @@ auditoria.
 pontemesh://instance/status
 pontemesh://instance/health
 pontemesh://storage/summary
+pontemesh://storage/drives
 pontemesh://buckets
 pontemesh://buckets/{bucket}
 pontemesh://buckets/{bucket}/policy
@@ -232,6 +242,8 @@ pontemesh://buckets/{bucket}/objects
 pontemesh://audit/recent
 pontemesh://metrics/offload
 ```
+
+O recurso `pontemesh://storage/drives` expõe a lista completa de discos configurados no pool, espaço livre/usado, níveis DiskGuard e estratégia de alocação ativa.
 
 O recurso `pontemesh://buckets/{bucket}/policy` expõe diretamente a política híbrida,
 configurações S3 e o esquema de versionamento configurado para o bucket.
@@ -249,6 +261,7 @@ O servidor expõe prompts guiados para clientes MCP:
 * `review_recent_errors`: revisa falhas e erros auditados recentemente.
 * `check_software_releases`: instrui a verificação de esquemas de versão e atualizações de software.
 * `analyze_egress_offload`: analisa a eficiência da distribuição híbrida, taxas de offload P2P/Réplica e estimativa de economia em custos de nuvem.
+* `manage_storage_drives`: orienta a inspeção de discos do pool, expansão de volume a quente sem reiniciar o servidor e drenagem segura com hash SHA-256 para troca de discos.
 
 ## Limites
 

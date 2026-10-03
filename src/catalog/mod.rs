@@ -129,6 +129,17 @@ pub struct ObjectTotals {
     pub total_object_bytes: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DrainedVersionRecord {
+    pub version_id: String,
+    pub bucket_name: String,
+    pub object_key: String,
+    pub sha256: String,
+    pub size_bytes: i64,
+    pub storage_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BucketPolicy {
@@ -2307,6 +2318,61 @@ impl Catalog {
                 value: row.get("tag_value"),
             })
             .collect())
+    }
+
+    pub async fn find_versions_by_storage_path_prefix(
+        &self,
+        prefix: &str,
+    ) -> anyhow::Result<Vec<DrainedVersionRecord>> {
+        let rows = query(
+            r#"
+            SELECT b.name as bucket_name, o.object_key, v.id::text as version_id,
+                   v.object_hash as sha256, v.size_bytes, v.storage_path
+            FROM object_versions v
+            JOIN objects o ON o.id = v.object_id
+            JOIN buckets b ON b.id = o.bucket_id
+            WHERE v.storage_path LIKE $1 || '%'
+              AND b.deleted_at IS NULL AND o.deleted_at IS NULL
+            ORDER BY v.created_at ASC
+            "#,
+        )
+        .bind(prefix)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to query object versions by storage path prefix")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| DrainedVersionRecord {
+                version_id: row.get("version_id"),
+                bucket_name: row.get("bucket_name"),
+                object_key: row.get("object_key"),
+                sha256: row.get("sha256"),
+                size_bytes: row.get("size_bytes"),
+                storage_path: row.get("storage_path"),
+            })
+            .collect())
+    }
+
+    pub async fn update_version_storage_path(
+        &self,
+        version_id: &str,
+        new_storage_path: &str,
+    ) -> anyhow::Result<()> {
+        query(
+            r#"
+            UPDATE object_versions
+            SET storage_path = $1
+            WHERE id = $2::uuid
+            "#,
+        )
+        .bind(new_storage_path)
+        .bind(version_id)
+        .execute(&self.pool)
+        .await
+        .context("failed to update object version storage path")?;
+
+        Ok(())
     }
 
     pub async fn replace_object_tags(
