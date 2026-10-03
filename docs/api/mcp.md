@@ -148,7 +148,10 @@ pontemesh_get_recent_audit_events
 pontemesh_export_configuration
 pontemesh_get_ai_connection_guide
 pontemesh_speed_test
+pontemesh_get_offload_metrics
 ```
+
+`pontemesh_get_offload_metrics` consulta métricas consolidadas de desoneração de saída (egress offload), decompondo tráfego servido por Origin, réplicas e peers, taxa de offload percentual e economia financeira estimada em USD para um período opcional (`1h`, `24h`, `7d`, `30d`, `all`).
 
 `pontemesh_get_bucket_policy` consulta a política híbrida, limites S3 e o esquema
 de versionamento (`releaseVersioningScheme`) de um bucket.
@@ -227,10 +230,14 @@ pontemesh://buckets/{bucket}
 pontemesh://buckets/{bucket}/policy
 pontemesh://buckets/{bucket}/objects
 pontemesh://audit/recent
+pontemesh://metrics/offload
 ```
 
 O recurso `pontemesh://buckets/{bucket}/policy` expõe diretamente a política híbrida,
 configurações S3 e o esquema de versionamento configurado para o bucket.
+
+O recurso `pontemesh://metrics/offload` expõe o resumo em tempo real da eficiência de
+desoneração de egress e economia estimada.
 
 ## Prompts
 
@@ -241,6 +248,7 @@ O servidor expõe prompts guiados para clientes MCP:
 * `analyze_bucket_growth`: analisa distribuição e crescimento de buckets.
 * `review_recent_errors`: revisa falhas e erros auditados recentemente.
 * `check_software_releases`: instrui a verificação de esquemas de versão e atualizações de software.
+* `analyze_egress_offload`: analisa a eficiência da distribuição híbrida, taxas de offload P2P/Réplica e estimativa de economia em custos de nuvem.
 
 ## Limites
 

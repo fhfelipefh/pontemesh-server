@@ -827,6 +827,29 @@ pub struct OriginTrafficSummary {
     pub fallback_events: i64,
     pub integrity_failures: i64,
     pub origin_offload_bytes: i64,
+    pub peer_bytes_served: i64,
+    pub replica_bytes_served: i64,
+    pub total_bytes_demanded: i64,
+    pub offload_ratio_percent: f64,
+    pub peer_offload_ratio_percent: f64,
+    pub replica_offload_ratio_percent: f64,
+    pub estimated_cost_saved_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EgressOffloadSummary {
+    pub total_bytes_demanded: i64,
+    pub origin_bytes_served: i64,
+    pub replica_bytes_served: i64,
+    pub peer_bytes_served: i64,
+    pub origin_offload_bytes: i64,
+    pub offload_ratio_percent: f64,
+    pub peer_offload_ratio_percent: f64,
+    pub replica_offload_ratio_percent: f64,
+    pub estimated_cost_saved_usd: f64,
+    pub fallback_events: i64,
+    pub integrity_failures: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -5708,7 +5731,19 @@ impl Catalog {
                     FROM fragment_transfer_events
                     WHERE ($1::timestamptz IS NULL OR created_at >= $1)
                       AND ($2::timestamptz IS NULL OR created_at <= $2)
-                ) AS origin_offload_bytes
+                ) AS origin_offload_bytes,
+                (
+                    SELECT COALESCE(SUM(CASE WHEN source_type = 'PEER' AND outcome = 'SUCCESS' AND event_type <> 'FRAGMENT_SYNCED' THEN bytes_transferred ELSE 0 END), 0)::bigint
+                    FROM fragment_transfer_events
+                    WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+                      AND ($2::timestamptz IS NULL OR created_at <= $2)
+                ) AS peer_bytes_served,
+                (
+                    SELECT COALESCE(SUM(CASE WHEN source_type = 'REPLICA_EDGE' AND outcome = 'SUCCESS' AND event_type <> 'FRAGMENT_SYNCED' THEN bytes_transferred ELSE 0 END), 0)::bigint
+                    FROM fragment_transfer_events
+                    WHERE ($1::timestamptz IS NULL OR created_at >= $1)
+                      AND ($2::timestamptz IS NULL OR created_at <= $2)
+                ) AS replica_bytes_served
             FROM origin_transfer_events
             WHERE ($1::timestamptz IS NULL OR served_at >= $1)
               AND ($2::timestamptz IS NULL OR served_at <= $2)
@@ -5720,14 +5755,65 @@ impl Catalog {
         .await
         .context("failed to summarize Origin traffic")?;
 
+        let total_bytes_served: i64 = row.get("total_bytes_served");
+        let origin_offload_bytes: i64 = row.get("origin_offload_bytes");
+        let peer_bytes_served: i64 = row.get("peer_bytes_served");
+        let replica_bytes_served: i64 = row.get("replica_bytes_served");
+        let total_bytes_demanded = total_bytes_served + origin_offload_bytes;
+        let offload_ratio_percent = if total_bytes_demanded > 0 {
+            (origin_offload_bytes as f64 / total_bytes_demanded as f64) * 100.0
+        } else {
+            0.0
+        };
+        let peer_offload_ratio_percent = if total_bytes_demanded > 0 {
+            (peer_bytes_served as f64 / total_bytes_demanded as f64) * 100.0
+        } else {
+            0.0
+        };
+        let replica_offload_ratio_percent = if total_bytes_demanded > 0 {
+            (replica_bytes_served as f64 / total_bytes_demanded as f64) * 100.0
+        } else {
+            0.0
+        };
+        let estimated_cost_saved_usd =
+            (origin_offload_bytes as f64 / (1024.0 * 1024.0 * 1024.0)) * 0.08;
+
         Ok(OriginTrafficSummary {
             total_requests: row.get("total_requests"),
             full_object_requests: row.get("full_object_requests"),
             range_requests: row.get("range_requests"),
-            total_bytes_served: row.get("total_bytes_served"),
+            total_bytes_served,
             fallback_events: row.get("fallback_events"),
             integrity_failures: row.get("integrity_failures"),
-            origin_offload_bytes: row.get("origin_offload_bytes"),
+            origin_offload_bytes,
+            peer_bytes_served,
+            replica_bytes_served,
+            total_bytes_demanded,
+            offload_ratio_percent: (offload_ratio_percent * 100.0).round() / 100.0,
+            peer_offload_ratio_percent: (peer_offload_ratio_percent * 100.0).round() / 100.0,
+            replica_offload_ratio_percent: (replica_offload_ratio_percent * 100.0).round() / 100.0,
+            estimated_cost_saved_usd: (estimated_cost_saved_usd * 100.0).round() / 100.0,
+        })
+    }
+
+    pub async fn egress_offload_summary(
+        &self,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> anyhow::Result<EgressOffloadSummary> {
+        let summary = self.origin_traffic_summary(since, until).await?;
+        Ok(EgressOffloadSummary {
+            total_bytes_demanded: summary.total_bytes_demanded,
+            origin_bytes_served: summary.total_bytes_served,
+            replica_bytes_served: summary.replica_bytes_served,
+            peer_bytes_served: summary.peer_bytes_served,
+            origin_offload_bytes: summary.origin_offload_bytes,
+            offload_ratio_percent: summary.offload_ratio_percent,
+            peer_offload_ratio_percent: summary.peer_offload_ratio_percent,
+            replica_offload_ratio_percent: summary.replica_offload_ratio_percent,
+            estimated_cost_saved_usd: summary.estimated_cost_saved_usd,
+            fallback_events: summary.fallback_events,
+            integrity_failures: summary.integrity_failures,
         })
     }
 

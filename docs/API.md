@@ -257,6 +257,7 @@ POST /api/admin/mcp/tokens
 DELETE /api/admin/mcp/tokens/{id}
 GET /api/admin/mcp/activity
 GET /api/admin/metrics/origin-traffic
+GET /api/admin/metrics/offload
 GET /api/admin/metrics/replica-traffic
 GET /api/admin/metrics/buckets
 GET /api/admin/metrics/objects

@@ -40,6 +40,39 @@ status HTTP e intervalo de bytes quando houver `Range`.
 
 Métricas de Replica/Edge e peers dependem dos contratos de reporte operacional.
 
+### Telemetria de Offload e Economia de Egress
+
+Para consolidar em tempo real a redução de carga e a economia de custo de saída de rede (egress), o Origin expõe o endpoint administrativo:
+
+```http
+GET /api/admin/metrics/offload?period={1h|24h|7d|30d|all}
+```
+
+Resposta:
+
+```json
+{
+  "totalBytesDemanded": 16384,
+  "originBytesServed": 4096,
+  "replicaBytesServed": 4096,
+  "peerBytesServed": 8192,
+  "originOffloadBytes": 12288,
+  "offloadRatioPercent": 75.0,
+  "peerOffloadRatioPercent": 50.0,
+  "replicaOffloadRatioPercent": 25.0,
+  "estimatedCostSavedUsd": 0.000983,
+  "fallbackEvents": 0,
+  "integrityFailures": 0
+}
+```
+
+Onde:
+* `totalBytesDemanded`: total de bytes de dados transferidos com sucesso somando Origin (`originBytesServed`), peers autorizados (`peerBytesServed`) e réplicas (`replicaBytesServed`).
+* `originOffloadBytes`: volume transferido por canais alternativos sem onerar o servidor central (`replicaBytesServed + peerBytesServed`).
+* `offloadRatioPercent`: taxa percentual de desoneração do Origin: `(originOffloadBytes / totalBytesDemanded) * 100.0`.
+* `peerOffloadRatioPercent` e `replicaOffloadRatioPercent`: decomposição percentual por tipo de fonte auxiliar.
+* `estimatedCostSavedUsd`: economia financeira estimada com base no benchmark padrão de egress em nuvem pública (US$ 0,08 por GB economizado de saída direta do servidor).
+
 ## Métrica principal do projeto
 
 A métrica principal do projeto é a redução de carga no Origin.

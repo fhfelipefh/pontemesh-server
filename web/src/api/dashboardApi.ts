@@ -65,6 +65,27 @@ export type OriginTrafficMetrics = {
   fallbackEvents: number;
   integrityFailures: number;
   originOffloadBytes: number;
+  peerBytesServed?: number;
+  replicaBytesServed?: number;
+  totalBytesDemanded?: number;
+  offloadRatioPercent?: number;
+  peerOffloadRatioPercent?: number;
+  replicaOffloadRatioPercent?: number;
+  estimatedCostSavedUsd?: number;
+};
+
+export type EgressOffloadSummary = {
+  totalBytesDemanded: number;
+  originBytesServed: number;
+  replicaBytesServed: number;
+  peerBytesServed: number;
+  originOffloadBytes: number;
+  offloadRatioPercent: number;
+  peerOffloadRatioPercent: number;
+  replicaOffloadRatioPercent: number;
+  estimatedCostSavedUsd: number;
+  fallbackEvents: number;
+  integrityFailures: number;
 };
 
 export type ReplicaTrafficMetrics = {
@@ -192,6 +213,16 @@ export async function getOriginTrafficMetrics(period?: string): Promise<OriginTr
   });
   await ensureOk(response);
   return response.json() as Promise<OriginTrafficMetrics>;
+}
+
+export async function getEgressOffloadMetrics(period?: string): Promise<EgressOffloadSummary> {
+  const response = await fetch(metricsUrl("/api/admin/metrics/offload", period), {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<EgressOffloadSummary>;
 }
 
 export async function getReplicaTrafficMetrics(period?: string): Promise<ReplicaTrafficMetrics> {
