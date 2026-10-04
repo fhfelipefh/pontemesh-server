@@ -65,6 +65,7 @@ export type OriginTrafficMetrics = {
   fallbackEvents: number;
   integrityFailures: number;
   originOffloadBytes: number;
+  versionCheckRequests?: number;
   peerBytesServed?: number;
   replicaBytesServed?: number;
   totalBytesDemanded?: number;
@@ -264,4 +265,21 @@ export async function getReplicaDetailMetrics(replicaId: string, period?: string
   });
   await ensureOk(response);
   return response.json() as Promise<ReplicaDetailMetric>;
+}
+
+export type VersionCheckMetrics = {
+  totalRequests: number;
+  updatesAvailable: number;
+  upToDate: number;
+  notFound: number;
+};
+
+export async function getVersionCheckMetrics(period?: string): Promise<VersionCheckMetrics> {
+  const response = await fetch(metricsUrl("/api/admin/metrics/version-checks", period), {
+    headers: {
+      accept: "application/json"
+    }
+  });
+  await ensureOk(response);
+  return response.json() as Promise<VersionCheckMetrics>;
 }

@@ -261,6 +261,7 @@ GET /api/admin/metrics/offload
 GET /api/admin/metrics/replica-traffic
 GET /api/admin/metrics/buckets
 GET /api/admin/metrics/objects
+GET /api/admin/metrics/version-checks
 GET /api/admin/metrics/replicas/{replicaId}
 GET /api/admin/buckets/{bucket}/policy
 PUT /api/admin/buckets/{bucket}/policy
@@ -289,6 +290,10 @@ reiniciar o servidor. `PUT /api/admin/storage/drives/allocation` altera a estrat
 entre maior espaço livre e round-robin. `POST /api/admin/storage/drives/drain` migra
 objetos de forma transacional com verificação de hash SHA-256 e desconecta o disco
 do pool com segurança.
+
+`GET /api/admin/metrics/version-checks` consolida métricas de requisições de consulta
+de novas versões recebidas pelo endpoint `/api/v1/updates/{bucket}/{software_id}` por período
+(`1h`, `24h`, `7d`, `30d`, `all`), e `GET /api/admin/metrics/origin-traffic` inclui o total em `versionCheckRequests`.
 
 `GET /api/admin/operational-webhook` retorna a URL, o cron de cinco campos, o
 estado habilitado e uma prévia do objeto JSON enviado. `PUT` valida e persiste a

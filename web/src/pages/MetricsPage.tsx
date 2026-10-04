@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
-import { Activity, DollarSign, DownloadCloud, Gauge, Percent, SplitSquareHorizontal, TrendingDown } from "lucide-react";
+import { Activity, DollarSign, DownloadCloud, Gauge, Percent, SplitSquareHorizontal, Tag, TrendingDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   BucketTrafficMetric,
@@ -99,6 +99,7 @@ export function MetricsPage() {
       <Metric icon={<Activity size={20} />} label={t("setup.metrics.totalRequests")} value={String(metrics.totalRequests)} />
       <Metric icon={<DownloadCloud size={20} />} label={t("setup.metrics.fullObjectRequests")} value={String(metrics.fullObjectRequests)} />
       <Metric icon={<SplitSquareHorizontal size={20} />} label={t("setup.metrics.rangeRequests")} value={String(metrics.rangeRequests)} />
+      <Metric icon={<Tag size={20} />} label={t("setup.metrics.versionCheckRequests")} value={String(metrics.versionCheckRequests ?? 0)} />
       <Metric icon={<Activity size={20} />} label={t("setup.metrics.activeReplicas")} value={String(replicaMetrics.activeReplicas)} />
       <Metric icon={<DownloadCloud size={20} />} label={t("setup.metrics.replicaBytesSynced")} value={formatBytes(replicaMetrics.totalBytesSynced)} />
       <Metric icon={<SplitSquareHorizontal size={20} />} label={t("setup.metrics.replicaFragmentsSynced")} value={String(replicaMetrics.totalFragmentsSynced)} />

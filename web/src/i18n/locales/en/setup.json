@@ -305,6 +305,7 @@
       "totalRequests": "Total requests",
       "fullObjectRequests": "Full object requests",
       "rangeRequests": "Range requests",
+      "versionCheckRequests": "Version check requests",
       "totalBytesServed": "Bytes served",
       "activeReplicas": "Active replicas",
       "replicaBytesSynced": "Bytes synced to replicas",

@@ -69,6 +69,9 @@ pub async fn read_resource(
         "pontemesh://metrics/offload" => {
             json!(state.catalog.egress_offload_summary(None, None).await?)
         }
+        "pontemesh://metrics/version-checks" => {
+            json!(state.catalog.version_check_metrics(None, None).await?)
+        }
         _ if uri.starts_with("pontemesh://buckets/") && uri.ends_with("/policy") => {
             let bucket = uri
                 .trim_start_matches("pontemesh://buckets/")
@@ -150,6 +153,11 @@ fn resource_definitions() -> Vec<ResourceDefinition> {
         ResourceDefinition {
             uri: "pontemesh://metrics/offload",
             name: "Egress offload metrics",
+            permission: ToolPermission::Read,
+        },
+        ResourceDefinition {
+            uri: "pontemesh://metrics/version-checks",
+            name: "Software version check metrics",
             permission: ToolPermission::Read,
         },
     ]

@@ -845,6 +845,16 @@ pub struct OriginTrafficSummary {
     pub peer_offload_ratio_percent: f64,
     pub replica_offload_ratio_percent: f64,
     pub estimated_cost_saved_usd: f64,
+    pub version_check_requests: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionCheckMetricsSummary {
+    pub total_requests: i64,
+    pub updates_available: i64,
+    pub up_to_date: i64,
+    pub not_found: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -5809,7 +5819,14 @@ impl Catalog {
                     FROM fragment_transfer_events
                     WHERE ($1::timestamptz IS NULL OR created_at >= $1)
                       AND ($2::timestamptz IS NULL OR created_at <= $2)
-                ) AS replica_bytes_served
+                ) AS replica_bytes_served,
+                (
+                    SELECT COALESCE(COUNT(*), 0)::bigint
+                    FROM audit_events
+                    WHERE event_type = 'software_update_checked'
+                      AND ($1::timestamptz IS NULL OR created_at >= $1)
+                      AND ($2::timestamptz IS NULL OR created_at <= $2)
+                ) AS version_check_requests
             FROM origin_transfer_events
             WHERE ($1::timestamptz IS NULL OR served_at >= $1)
               AND ($2::timestamptz IS NULL OR served_at <= $2)
@@ -5859,6 +5876,39 @@ impl Catalog {
             peer_offload_ratio_percent: (peer_offload_ratio_percent * 100.0).round() / 100.0,
             replica_offload_ratio_percent: (replica_offload_ratio_percent * 100.0).round() / 100.0,
             estimated_cost_saved_usd: (estimated_cost_saved_usd * 100.0).round() / 100.0,
+            version_check_requests: row.get("version_check_requests"),
+        })
+    }
+
+    pub async fn version_check_metrics(
+        &self,
+        since: Option<DateTime<Utc>>,
+        until: Option<DateTime<Utc>>,
+    ) -> anyhow::Result<VersionCheckMetricsSummary> {
+        let row = query(
+            r#"
+            SELECT
+                COUNT(*)::bigint AS total_requests,
+                COALESCE(SUM(CASE WHEN metadata->>'detail' LIKE '%has_update=true%' THEN 1 ELSE 0 END), 0)::bigint AS updates_available,
+                COALESCE(SUM(CASE WHEN metadata->>'detail' LIKE '%has_update=false%' THEN 1 ELSE 0 END), 0)::bigint AS up_to_date,
+                COALESCE(SUM(CASE WHEN metadata->>'outcome' = 'not_found' OR metadata->>'detail' LIKE '%no_release=true%' THEN 1 ELSE 0 END), 0)::bigint AS not_found
+            FROM audit_events
+            WHERE event_type = 'software_update_checked'
+              AND ($1::timestamptz IS NULL OR created_at >= $1)
+              AND ($2::timestamptz IS NULL OR created_at <= $2)
+            "#,
+        )
+        .bind(since)
+        .bind(until)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to query version check metrics")?;
+
+        Ok(VersionCheckMetricsSummary {
+            total_requests: row.get("total_requests"),
+            updates_available: row.get("updates_available"),
+            up_to_date: row.get("up_to_date"),
+            not_found: row.get("not_found"),
         })
     }
 

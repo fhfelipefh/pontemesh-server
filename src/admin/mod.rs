@@ -1267,6 +1267,17 @@ pub async fn object_traffic_metrics(
     }
 }
 
+pub async fn version_check_metrics(
+    State(state): State<AppState>,
+    Query(query): Query<MetricsQuery>,
+) -> Response {
+    let (since, until) = resolve_metrics_time_window(&query);
+    match state.catalog.version_check_metrics(since, until).await {
+        Ok(summary) => Json(summary).into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
 pub async fn replica_detail_metrics(
     State(state): State<AppState>,
     Path(replica_id): Path<String>,

@@ -149,12 +149,15 @@ pontemesh_export_configuration
 pontemesh_get_ai_connection_guide
 pontemesh_speed_test
 pontemesh_get_offload_metrics
+pontemesh_get_version_check_metrics
 pontemesh_list_storage_drives
 ```
 
 `pontemesh_list_storage_drives` lista todos os discos locais que compõem o pool de armazenamento, status de saúde DiskGuard, espaço livre, utilizado e estratégia de alocação ativa.
 
 `pontemesh_get_offload_metrics` consulta métricas consolidadas de desoneração de saída (egress offload), decompondo tráfego servido por Origin, réplicas e peers, taxa de offload percentual e economia financeira estimada em USD para um período opcional (`1h`, `24h`, `7d`, `30d`, `all`).
+
+`pontemesh_get_version_check_metrics` consulta métricas consolidadas de consultas de novas versões de software/jogos recebidas pelo servidor, detalhando total de requisições, atualizações disponíveis, versões atualizadas e softwares não encontrados para um período opcional (`1h`, `24h`, `7d`, `30d`, `all`).
 
 `pontemesh_get_bucket_policy` consulta a política híbrida, limites S3 e o esquema
 de versionamento (`releaseVersioningScheme`) de um bucket.
@@ -241,6 +244,7 @@ pontemesh://buckets/{bucket}/policy
 pontemesh://buckets/{bucket}/objects
 pontemesh://audit/recent
 pontemesh://metrics/offload
+pontemesh://metrics/version-checks
 ```
 
 O recurso `pontemesh://storage/drives` expõe a lista completa de discos configurados no pool, espaço livre/usado, níveis DiskGuard e estratégia de alocação ativa.
@@ -250,6 +254,8 @@ configurações S3 e o esquema de versionamento configurado para o bucket.
 
 O recurso `pontemesh://metrics/offload` expõe o resumo em tempo real da eficiência de
 desoneração de egress e economia estimada.
+
+O recurso `pontemesh://metrics/version-checks` expõe o resumo em tempo real do volume de consultas de versões de software e jogos recebidas pelo servidor.
 
 ## Prompts
 

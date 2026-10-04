@@ -408,6 +408,14 @@ pub async fn check_software_update(
     {
         Ok(Some(release)) => release,
         Ok(None) => {
+            record_mesh_audit(
+                &state,
+                "software_update_checked",
+                &application.name,
+                "not_found",
+                &format!("bucket={bucket_name}; software={software_id}; no_release=true"),
+            )
+            .await;
             return (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({
