@@ -385,6 +385,7 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
         totalRequests: 24,
         fullObjectRequests: 18,
         rangeRequests: 6,
+        versionCheckRequests: 10,
         totalBytesServed: 4096,
         originOffloadBytes: 12288,
         peerBytesServed: 8192,
@@ -394,6 +395,15 @@ export async function installAdminApiFixtures(page: Page, options: AdminFixtureO
         peerOffloadRatioPercent: 50.0,
         replicaOffloadRatioPercent: 25.0,
         estimatedCostSavedUsd: 0.000983
+      });
+    }
+
+    if (path === "/api/admin/metrics/version-checks") {
+      return json(route, {
+        totalRequests: 10,
+        updatesAvailable: 7,
+        upToDate: 2,
+        notFound: 1
       });
     }
 

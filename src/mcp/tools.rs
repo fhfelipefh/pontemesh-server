@@ -169,6 +169,20 @@ fn tool_definitions() -> Vec<ToolDefinition> {
             permission: ToolPermission::Read,
         },
         ToolDefinition {
+            name: "pontemesh_get_version_check_metrics",
+            description: "Consulta metricas de requisicoes de verificacao de versoes de software/jogos recebidas pelo servidor por periodo.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "string",
+                        "enum": ["1h", "24h", "7d", "30d", "all"]
+                    }
+                }
+            }),
+            permission: ToolPermission::Read,
+        },
+        ToolDefinition {
             name: "pontemesh_create_bucket",
             description: "Cria um bucket usando o servico real.",
             schema: json!({"type":"object","properties":{"bucket":{"type":"string"}},"required":["bucket"]}),
@@ -453,11 +467,25 @@ pub async fn call_tool(
                 bail!("release versioning scheme is disabled for bucket: {bucket}");
             }
 
-            let latest_release = state
+            let latest_release = match state
                 .catalog
                 .find_latest_software_release(bucket, software_id, &scheme, channel)
                 .await?
-                .ok_or_else(|| anyhow::anyhow!("no release found for software: {software_id}"))?;
+            {
+                Some(release) => release,
+                None => {
+                    let _ = state
+                        .catalog
+                        .record_audit_event(
+                            "software_update_checked",
+                            Some("mcp"),
+                            "not_found",
+                            &format!("bucket={bucket}; software={software_id}; no_release=true"),
+                        )
+                        .await;
+                    bail!("no release found for software: {software_id}");
+                }
+            };
 
             let (has_update, current) = match current_version {
                 Some(current) if !current.trim().is_empty() => {
@@ -470,6 +498,19 @@ pub async fn call_tool(
                 }
                 _ => (true, None),
             };
+
+            let _ = state
+                .catalog
+                .record_audit_event(
+                    "software_update_checked",
+                    Some("mcp"),
+                    "success",
+                    &format!(
+                        "bucket={bucket}; software={software_id}; latest={}; has_update={has_update}",
+                        latest_release.version
+                    ),
+                )
+                .await;
 
             json!({
                 "bucket": bucket,
@@ -570,6 +611,17 @@ pub async fn call_tool(
                 _ => (None, None),
             };
             json!(state.catalog.egress_offload_summary(since, until).await?)
+        }
+        "pontemesh_get_version_check_metrics" => {
+            let period = arguments.get("period").and_then(Value::as_str);
+            let (since, until) = match period {
+                Some("1h") => (Some(chrono::Utc::now() - chrono::Duration::hours(1)), None),
+                Some("24h") => (Some(chrono::Utc::now() - chrono::Duration::hours(24)), None),
+                Some("7d") => (Some(chrono::Utc::now() - chrono::Duration::days(7)), None),
+                Some("30d") => (Some(chrono::Utc::now() - chrono::Duration::days(30)), None),
+                _ => (None, None),
+            };
+            json!(state.catalog.version_check_metrics(since, until).await?)
         }
         "pontemesh_export_configuration" => {
             let mcp_settings = state.catalog.get_mcp_settings().await?;

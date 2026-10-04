@@ -289,6 +289,10 @@ fn admin_routes(state: AppState) -> Router<AppState> {
             get(admin::object_traffic_metrics),
         )
         .route(
+            "/api/admin/metrics/version-checks",
+            get(admin::version_check_metrics),
+        )
+        .route(
             "/api/admin/speed-test/download",
             get(admin::speed_test::download),
         )
@@ -836,7 +840,26 @@ mod tests {
                 "totalBytesDemanded",
                 "totalBytesServed",
                 "totalRequests",
+                "versionCheckRequests",
             ],
+        );
+
+        let version_checks_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/metrics/version-checks")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(version_checks_res.status(), StatusCode::OK);
+        let version_checks_body = json_body(version_checks_res).await;
+        assert_json_object_keys(
+            &version_checks_body,
+            &["notFound", "totalRequests", "upToDate", "updatesAvailable"],
         );
 
         let offload_metrics = app
@@ -6797,6 +6820,44 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(update_check_no_auth.status(), StatusCode::UNAUTHORIZED);
+
+        let admin_cookie = login_cookie(app.clone()).await;
+        let metrics_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/metrics/origin-traffic")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(metrics_res.status(), StatusCode::OK);
+        let metrics_json: serde_json::Value =
+            serde_json::from_str(&response_text(metrics_res).await).expect("metrics JSON");
+        assert_eq!(metrics_json["versionCheckRequests"], 3);
+
+        let version_checks_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/metrics/version-checks?period=1h")
+                    .header(header::COOKIE, &admin_cookie)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(version_checks_res.status(), StatusCode::OK);
+        let version_checks_json: serde_json::Value =
+            serde_json::from_str(&response_text(version_checks_res).await).expect("metrics JSON");
+        assert_eq!(version_checks_json["totalRequests"], 3);
+        assert_eq!(version_checks_json["updatesAvailable"], 1);
+        assert_eq!(version_checks_json["upToDate"], 1);
+        assert_eq!(version_checks_json["notFound"], 1);
     }
 
     #[tokio::test]
@@ -7076,6 +7137,37 @@ mod tests {
                 .as_str()
                 .expect("description")
                 .contains("pontemesh_check_software_update")
+        );
+
+        let version_metrics_tool = mcp_call(
+            app.clone(),
+            secret,
+            "tools/call",
+            serde_json::json!({
+                "name": "pontemesh_get_version_check_metrics",
+                "arguments": { "period": "24h" }
+            }),
+        )
+        .await;
+        assert_eq!(
+            version_metrics_tool["result"]["totalRequests"]
+                .as_i64()
+                .unwrap_or(0),
+            2
+        );
+
+        let version_resource = mcp_call(
+            app.clone(),
+            secret,
+            "resources/read",
+            serde_json::json!({ "uri": "pontemesh://metrics/version-checks" }),
+        )
+        .await;
+        assert!(
+            version_resource["result"]["contents"][0]["text"]
+                .as_str()
+                .expect("resource text")
+                .contains("totalRequests")
         );
     }
 

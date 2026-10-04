@@ -29,7 +29,7 @@ pub fn get_prompt(name: &str) -> anyhow::Result<Value> {
             "Use pontemesh://audit/recent para identificar falhas recentes, sem expor tokens ou credenciais."
         }
         "check_software_releases" => {
-            "Use pontemesh_get_bucket_policy para verificar o esquema de versionamento e pontemesh_check_software_update para checar novas versoes de jogos/softwares."
+            "Use pontemesh_get_bucket_policy para verificar o esquema de versionamento, pontemesh_check_software_update para checar novas versoes de jogos/softwares e pontemesh_get_version_check_metrics ou pontemesh://metrics/version-checks para auditar o volume de consultas recebidas."
         }
         "analyze_egress_offload" => {
             "Use pontemesh://metrics/offload e pontemesh_get_offload_metrics para analisar a porcentagem de dados transferidos por Peers e Replicas, calculando a economia de banda em relacao ao Origin."

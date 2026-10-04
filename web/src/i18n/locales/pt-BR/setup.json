@@ -305,6 +305,7 @@
       "totalRequests": "Total de requisições",
       "fullObjectRequests": "Requisições de objeto completo",
       "rangeRequests": "Requisições por intervalo",
+      "versionCheckRequests": "Consultas de novas versões",
       "totalBytesServed": "Bytes servidos",
       "activeReplicas": "Réplicas ativas",
       "replicaBytesSynced": "Bytes sincronizados para réplicas",

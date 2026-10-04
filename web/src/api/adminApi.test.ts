@@ -21,7 +21,8 @@ import {
   getObjectTrafficMetrics,
   getOriginTrafficMetrics,
   getReplicaDetailMetrics,
-  getReplicaTrafficMetrics
+  getReplicaTrafficMetrics,
+  getVersionCheckMetrics
 } from "./dashboardApi";
 import { HttpError } from "./http";
 import { createReplicaCredential, listReplicas, revokeReplica } from "./replicasApi";
@@ -298,6 +299,29 @@ describe("admin API clients", () => {
 
     expect(metrics.totalBytesServed).toBe(42);
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/metrics/origin-traffic", {
+      headers: {
+        accept: "application/json"
+      }
+    });
+  });
+
+  it("fetches version check metrics with optional period filtering", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        totalRequests: 8,
+        updatesAvailable: 5,
+        upToDate: 2,
+        notFound: 1
+      })
+    );
+
+    const metrics = await getVersionCheckMetrics("24h");
+
+    expect(metrics.totalRequests).toBe(8);
+    expect(metrics.updatesAvailable).toBe(5);
+    expect(metrics.upToDate).toBe(2);
+    expect(metrics.notFound).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/metrics/version-checks?period=24h", {
       headers: {
         accept: "application/json"
       }
