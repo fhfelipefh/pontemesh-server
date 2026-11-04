@@ -532,7 +532,15 @@ pub async fn call_tool(
             json!(
                 state
                     .catalog
-                    .list_objects_page(bucket, query, None, None, None, None, page, page_size)
+                    .list_objects_page(
+                        bucket,
+                        crate::catalog::ListObjectsPageOptions {
+                            query_text: query,
+                            page,
+                            page_size,
+                            ..Default::default()
+                        }
+                    )
                     .await?
             )
         }

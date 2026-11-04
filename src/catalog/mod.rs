@@ -89,6 +89,17 @@ pub struct ListObjectsV2Options {
     pub start_after: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ListObjectsPageOptions<'a> {
+    pub query_text: Option<&'a str>,
+    pub prefix: Option<&'a str>,
+    pub delimiter: Option<&'a str>,
+    pub sort_by: Option<&'a str>,
+    pub sort_order: Option<&'a str>,
+    pub page: u32,
+    pub page_size: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct S3ListObjectsPage {
     pub items: Vec<ObjectSummary>,
@@ -1929,17 +1940,11 @@ impl Catalog {
     pub async fn list_objects_page(
         &self,
         bucket_name: &str,
-        query_text: Option<&str>,
-        prefix: Option<&str>,
-        delimiter: Option<&str>,
-        sort_by: Option<&str>,
-        sort_order: Option<&str>,
-        page: u32,
-        page_size: u32,
+        options: ListObjectsPageOptions<'_>,
     ) -> anyhow::Result<PaginatedObjects> {
         validate_bucket_name(bucket_name)?;
-        let normalized_query = normalize_optional_name(query_text.unwrap_or(""));
-        let effective_prefix: Option<String> = prefix.filter(|p| !p.is_empty()).map(|p| {
+        let normalized_query = normalize_optional_name(options.query_text.unwrap_or(""));
+        let effective_prefix: Option<String> = options.prefix.filter(|p| !p.is_empty()).map(|p| {
             if p.ends_with('/') {
                 p.to_owned()
             } else {
@@ -1982,7 +1987,7 @@ impl Catalog {
         let effective_delimiter = if normalized_query.is_some() {
             None
         } else {
-            match delimiter {
+            match options.delimiter {
                 Some("") => None,
                 Some(custom) => Some(custom),
                 None => Some("/"),
@@ -1994,10 +1999,10 @@ impl Catalog {
             rows.into_iter().map(object_summary_from_row).collect(),
             prefix_str,
             effective_delimiter,
-            sort_by,
-            sort_order,
-            page,
-            page_size,
+            options.sort_by,
+            options.sort_order,
+            options.page,
+            options.page_size,
         );
 
         Ok(PaginatedObjects {
@@ -2005,7 +2010,7 @@ impl Catalog {
             common_prefixes,
             prefixes,
             page,
-            page_size,
+            page_size: options.page_size,
             total_items: total,
             total_pages,
         })
@@ -7212,7 +7217,9 @@ fn split_and_paginate(
         }
     }
 
-    let is_desc = sort_order.map(|o| o.eq_ignore_ascii_case("desc")).unwrap_or(false);
+    let is_desc = sort_order
+        .map(|o| o.eq_ignore_ascii_case("desc"))
+        .unwrap_or(false);
     let sort_col = sort_by.unwrap_or("key");
     match sort_col {
         "size" => {
@@ -7567,8 +7574,7 @@ mod tests {
         assert_eq!(page1.len(), 10);
         assert_eq!(page1[0].key, "file00.txt");
 
-        let (page3, _, _, _, _, _) =
-            split_and_paginate(objects, "", Some("/"), None, None, 3, 10);
+        let (page3, _, _, _, _, _) = split_and_paginate(objects, "", Some("/"), None, None, 3, 10);
         assert_eq!(page3.len(), 5);
         assert_eq!(page3[0].key, "file20.txt");
     }

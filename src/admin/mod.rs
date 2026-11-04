@@ -1660,13 +1660,15 @@ pub async fn list_objects(
         .catalog
         .list_objects_page(
             &bucket_name,
-            query.query.as_deref(),
-            query.prefix.as_deref(),
-            effective_delimiter,
-            query.sort_by.as_deref(),
-            query.sort_order.as_deref(),
-            page,
-            page_size,
+            crate::catalog::ListObjectsPageOptions {
+                query_text: query.query.as_deref(),
+                prefix: query.prefix.as_deref(),
+                delimiter: effective_delimiter,
+                sort_by: query.sort_by.as_deref(),
+                sort_order: query.sort_order.as_deref(),
+                page,
+                page_size,
+            },
         )
         .await
     {

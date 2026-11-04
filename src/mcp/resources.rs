@@ -85,7 +85,14 @@ pub async fn read_resource(
             json!(
                 state
                     .catalog
-                    .list_objects_page(bucket, None, None, None, None, None, 1, 100)
+                    .list_objects_page(
+                        bucket,
+                        crate::catalog::ListObjectsPageOptions {
+                            page: 1,
+                            page_size: 100,
+                            ..Default::default()
+                        }
+                    )
                     .await?
             )
         }

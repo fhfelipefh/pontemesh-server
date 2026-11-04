@@ -100,8 +100,13 @@ jobs:
 
   build:
     name: Build server ${{ matrix.target.name }}
-    needs: [validate, web]
-    if: needs.validate.outputs.should_release == 'true'
+    needs: [validate, web, quality]
+    if: >-
+      always() &&
+      needs.validate.result == 'success' &&
+      needs.web.result == 'success' &&
+      (needs.quality.result == 'success' || (github.event_name == 'workflow_dispatch' && needs.quality.result == 'skipped')) &&
+      needs.validate.outputs.should_release == 'true'
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
     strategy:
