@@ -532,7 +532,7 @@ pub async fn call_tool(
             json!(
                 state
                     .catalog
-                    .list_objects_page(bucket, query, None, page, page_size)
+                    .list_objects_page(bucket, query, None, None, None, None, page, page_size)
                     .await?
             )
         }

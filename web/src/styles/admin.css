@@ -3344,19 +3344,99 @@
 }
 
 .objects-toolbar {
-  display: grid;
-  grid-template-columns: minmax(320px, 1fr) auto auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--pm-gap-md);
   flex: 0 0 auto;
 }
 
+.objects-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--pm-surface);
+  border: 1px solid var(--pm-border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+  height: var(--pm-control-height);
+  box-sizing: border-box;
+}
+
+.objects-view-toggle__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--pm-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.objects-view-toggle__btn:hover {
+  color: var(--pm-deep-navy);
+  background: var(--pm-bg-elevated);
+}
+
+.objects-view-toggle__btn--active {
+  background: var(--pm-primary-blue);
+  color: var(--pm-surface);
+}
+
+.objects-view-toggle__btn--active:hover {
+  background: var(--pm-primary-blue-strong);
+  color: var(--pm-surface);
+}
+
+.objects-sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  min-width: 32px;
+  background: transparent;
+  border: 0;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.objects-sort-header:hover {
+  color: var(--pm-accent-cyan-blue);
+}
+
+.objects-sort-header__idle {
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+
+.objects-sort-header:hover .objects-sort-header__idle {
+  opacity: 0.8;
+}
+
 .objects-search {
-  min-width: 0;
+  flex: 1 1 320px;
+  min-width: 300px;
 }
 
 .objects-search label {
-  min-width: 280px;
+  width: 100%;
+  min-width: 300px;
   height: var(--pm-control-height);
   display: flex;
   align-items: center;
@@ -3370,7 +3450,7 @@
 
 .objects-search input {
   width: 100%;
-  min-width: 0;
+  min-width: 280px;
   height: 100%;
   border: 0;
   color: var(--pm-deep-navy);

@@ -20,6 +20,7 @@ export function emptyObjectsPage(pageSize: number): ObjectsPage {
   return {
     items: [],
     commonPrefixes: [],
+    prefixes: [],
     page: 1,
     pageSize,
     totalItems: 0,

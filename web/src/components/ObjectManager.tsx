@@ -1,5 +1,19 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, Download, Folder, Home, Search, Trash2, UploadCloud, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronRight,
+  Download,
+  Folder,
+  FolderTree,
+  Home,
+  List,
+  Search,
+  Trash2,
+  UploadCloud,
+  X
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   ObjectsPage,
@@ -14,7 +28,7 @@ import { useUploadProgress } from "./uploadProgressContext";
 import { emptyObjectsPage, formatBytes, formatDate } from "../utils/adminFormat";
 import { buildBreadcrumb, navigateUpFrom, prefixLabel } from "../utils/objectNavigation";
 
-const OBJECT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const OBJECT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200];
 
 type ObjectManagerProps = {
   bucketName: string;
@@ -39,6 +53,9 @@ export function ObjectManager({
   const [objectSearch, setObjectSearch] = useState("");
   const [objectPageNumber, setObjectPageNumber] = useState(1);
   const [objectPageSize, setObjectPageSize] = useState(20);
+  const [viewMode, setViewMode] = useState<"folders" | "flat">("folders");
+  const [sortBy, setSortBy] = useState<"key" | "size" | "updatedAt">("key");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [loadingObjects, setLoadingObjects] = useState(true);
   const [objectError, setObjectError] = useState("");
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
@@ -61,9 +78,14 @@ export function ObjectManager({
     setLoadingObjects(true);
     setObjectError("");
     try {
+      const isFlat = viewMode === "flat";
       setObjectsPage(await listObjects(bucketName, {
         query: objectSearch,
         prefix: currentPrefix || undefined,
+        flat: isFlat,
+        delimiter: isFlat ? "" : "/",
+        sortBy,
+        sortOrder,
         page: objectPageNumber,
         pageSize: objectPageSize
       }));
@@ -72,13 +94,16 @@ export function ObjectManager({
     } finally {
       setLoadingObjects(false);
     }
-  }, [bucketName, currentPrefix, objectPageNumber, objectPageSize, objectSearch, t]);
+  }, [bucketName, currentPrefix, objectPageNumber, objectPageSize, objectSearch, sortBy, sortOrder, t, viewMode]);
 
   useEffect(() => {
     setCurrentPrefix("");
     setObjectPageNumber(1);
     setObjectQuery("");
     setObjectSearch("");
+    setViewMode("folders");
+    setSortBy("key");
+    setSortOrder("asc");
     setUploadModalOpen(false);
     resetUploadForm();
   }, [bucketName, resetUploadForm]);
@@ -92,6 +117,16 @@ export function ObjectManager({
   useEffect(() => {
     refreshObjects();
   }, [refreshObjects, refreshNonce]);
+
+  function handleSort(column: "key" | "size" | "updatedAt") {
+    setObjectPageNumber(1);
+    if (sortBy === column) {
+      setSortOrder((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(column);
+      setSortOrder(column === "updatedAt" || column === "size" ? "desc" : "asc");
+    }
+  }
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -161,6 +196,10 @@ export function ObjectManager({
   const hasFiles = objectsPage.items.length > 0;
   const hasContent = hasDirectories || hasFiles;
 
+  const displayTotalItems = viewMode === "flat" || objectSearchActive
+    ? objectsPage.totalItems
+    : objectsPage.commonPrefixes.length + objectsPage.totalItems;
+
   return (
     <div className="object-manager">
       <div className="objects-toolbar">
@@ -176,6 +215,38 @@ export function ObjectManager({
             />
           </label>
         </form>
+        <div className="objects-view-toggle" role="group" aria-label={t("setup.objects.viewMode")}>
+          <button
+            type="button"
+            className={`objects-view-toggle__btn ${viewMode === "folders" ? "objects-view-toggle__btn--active" : ""}`}
+            onClick={() => {
+              if (viewMode !== "folders") {
+                setViewMode("folders");
+                setObjectPageNumber(1);
+              }
+            }}
+            title={t("setup.objects.viewModeFolders")}
+            aria-pressed={viewMode === "folders"}
+          >
+            <FolderTree size={16} aria-hidden="true" />
+            <span>{t("setup.objects.viewModeFolders")}</span>
+          </button>
+          <button
+            type="button"
+            className={`objects-view-toggle__btn ${viewMode === "flat" ? "objects-view-toggle__btn--active" : ""}`}
+            onClick={() => {
+              if (viewMode !== "flat") {
+                setViewMode("flat");
+                setObjectPageNumber(1);
+              }
+            }}
+            title={t("setup.objects.viewModeFlat")}
+            aria-pressed={viewMode === "flat"}
+          >
+            <List size={16} aria-hidden="true" />
+            <span>{t("setup.objects.viewModeFlat")}</span>
+          </button>
+        </div>
         <PageSizeSelect
           label={t("setup.common.itemsPerPage")}
           value={objectPageSize}
@@ -254,14 +325,56 @@ export function ObjectManager({
           ) : (
             <div className="objects-table" data-testid="object-list" role="table" aria-label={t("setup.objects.title")}>
               <div className="objects-table-row objects-table-row--head" role="row">
-                <span role="columnheader">{t("setup.objects.key")}</span>
-                <span role="columnheader">{t("setup.objects.size")}</span>
+                <span role="columnheader">
+                  <button
+                    type="button"
+                    className="objects-sort-header"
+                    onClick={() => handleSort("key")}
+                    title={sortBy === "key" && sortOrder === "asc" ? t("setup.objects.sortDesc") : t("setup.objects.sortAsc")}
+                  >
+                    <span>{t("setup.objects.key")}</span>
+                    {sortBy === "key" ? (
+                      sortOrder === "asc" ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />
+                    ) : (
+                      <ArrowUpDown size={13} className="objects-sort-header__idle" aria-hidden="true" />
+                    )}
+                  </button>
+                </span>
+                <span role="columnheader">
+                  <button
+                    type="button"
+                    className="objects-sort-header"
+                    onClick={() => handleSort("size")}
+                    title={sortBy === "size" && sortOrder === "asc" ? t("setup.objects.sortDesc") : t("setup.objects.sortAsc")}
+                  >
+                    <span>{t("setup.objects.size")}</span>
+                    {sortBy === "size" ? (
+                      sortOrder === "asc" ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />
+                    ) : (
+                      <ArrowUpDown size={13} className="objects-sort-header__idle" aria-hidden="true" />
+                    )}
+                  </button>
+                </span>
                 <span role="columnheader">{t("setup.objects.contentType")}</span>
-                <span role="columnheader">{t("setup.objects.updatedAt")}</span>
+                <span role="columnheader">
+                  <button
+                    type="button"
+                    className="objects-sort-header"
+                    onClick={() => handleSort("updatedAt")}
+                    title={sortBy === "updatedAt" && sortOrder === "asc" ? t("setup.objects.sortDesc") : t("setup.objects.sortAsc")}
+                  >
+                    <span>{t("setup.objects.updatedAt")}</span>
+                    {sortBy === "updatedAt" ? (
+                      sortOrder === "asc" ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />
+                    ) : (
+                      <ArrowUpDown size={13} className="objects-sort-header__idle" aria-hidden="true" />
+                    )}
+                  </button>
+                </span>
                 <span role="columnheader">{t("setup.common.actions")}</span>
               </div>
 
-              {currentPrefix && !objectSearchActive ? (
+              {currentPrefix && !objectSearchActive && viewMode === "folders" ? (
                 <div
                   className="objects-table-row objects-table-row--dir objects-table-row--up"
                   role="row"
@@ -287,6 +400,9 @@ export function ObjectManager({
 
               {objectsPage.commonPrefixes.map((prefix) => {
                 const label = prefixLabel(prefix, currentPrefix);
+                const summary = objectsPage.prefixes?.find((p) => p.prefix === prefix);
+                const folderSize = summary ? formatBytes(summary.sizeBytes) : "—";
+                const folderDate = summary?.updatedAt ? formatDate(summary.updatedAt) : "—";
                 return (
                   <div
                     className="objects-table-row objects-table-row--dir"
@@ -305,9 +421,9 @@ export function ObjectManager({
                         <span>{label}</span>
                       </button>
                     </span>
-                    <span role="cell">—</span>
+                    <span role="cell">{folderSize}</span>
                     <span role="cell">{t("setup.objects.directory")}</span>
-                    <span role="cell">—</span>
+                    <span role="cell">{folderDate}</span>
                     <span className="objects-table-actions" role="cell" />
                   </div>
                 );
@@ -348,7 +464,7 @@ export function ObjectManager({
         <Pagination
           page={objectsPage.page}
           totalPages={objectsPage.totalPages}
-          totalItems={objectsPage.totalItems}
+          totalItems={displayTotalItems}
           onPrevious={() => setObjectPageNumber((page) => Math.max(1, page - 1))}
           onNext={() => setObjectPageNumber((page) => Math.min(objectsPage.totalPages, page + 1))}
         />

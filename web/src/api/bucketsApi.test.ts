@@ -196,11 +196,15 @@ describe("bucketsApi", () => {
       );
     });
 
-    it("returns commonPrefixes from the response", async () => {
+    it("returns commonPrefixes and prefixes with sizes and dates", async () => {
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
         jsonResponse({
           items: [{ key: "images/logo.png", sizeBytes: 512, contentType: "image/png", sha256: "x", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", state: "AVAILABLE" }],
           commonPrefixes: ["images/icons/", "images/banners/"],
+          prefixes: [
+            { prefix: "images/icons/", sizeBytes: 1024, objectCount: 4, updatedAt: "2026-02-01T00:00:00Z" },
+            { prefix: "images/banners/", sizeBytes: 2048, objectCount: 2, updatedAt: "2026-03-01T00:00:00Z" }
+          ],
           page: 1,
           pageSize: 20,
           totalItems: 1,
@@ -208,10 +212,38 @@ describe("bucketsApi", () => {
         })
       );
 
-      const page = await listObjects("assets", { page: 1, pageSize: 20, prefix: "images/" });
+      const page = await listObjects("assets", {
+        page: 1,
+        pageSize: 20,
+        prefix: "images/",
+        sortBy: "updatedAt",
+        sortOrder: "desc",
+        flat: false
+      });
 
       expect(page.commonPrefixes).toEqual(["images/icons/", "images/banners/"]);
+      expect(page.prefixes).toHaveLength(2);
+      expect(page.prefixes?.[0].sizeBytes).toBe(1024);
       expect(page.items).toHaveLength(1);
+    });
+
+    it("passes flat, sortBy and sortOrder parameters in the query string", async () => {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        jsonResponse({ items: [], commonPrefixes: [], prefixes: [], page: 1, pageSize: 50, totalItems: 0, totalPages: 1 })
+      );
+
+      await listObjects("assets", {
+        page: 1,
+        pageSize: 50,
+        flat: true,
+        sortBy: "size",
+        sortOrder: "desc"
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/admin/buckets/assets/objects?flat=true&sortBy=size&sortOrder=desc&page=1&pageSize=50",
+        { headers: { accept: "application/json" } }
+      );
     });
   });
 

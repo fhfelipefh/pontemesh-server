@@ -105,8 +105,16 @@ export type PaginatedResponse<T> = {
   totalPages: number;
 };
 
+export type PrefixSummary = {
+  prefix: string;
+  sizeBytes: number;
+  objectCount: number;
+  updatedAt: string | null;
+};
+
 export type ObjectsPage = PaginatedResponse<ObjectSummary> & {
   commonPrefixes: string[];
+  prefixes?: PrefixSummary[];
 };
 
 export type PageParams = {
@@ -117,6 +125,10 @@ export type PageParams = {
 
 export type ObjectPageParams = PageParams & {
   prefix?: string;
+  delimiter?: string;
+  flat?: boolean;
+  sortBy?: "key" | "size" | "updatedAt";
+  sortOrder?: "asc" | "desc";
 };
 
 export async function listBuckets(params: PageParams): Promise<PaginatedResponse<BucketSummary>> {
@@ -301,7 +313,16 @@ function paginationQuery({ query, page, pageSize }: PageParams): string {
   return `?${params.toString()}`;
 }
 
-function objectPaginationQuery({ query, page, pageSize, prefix }: ObjectPageParams): string {
+function objectPaginationQuery({
+  query,
+  page,
+  pageSize,
+  prefix,
+  delimiter,
+  flat,
+  sortBy,
+  sortOrder
+}: ObjectPageParams): string {
   const params = new URLSearchParams();
   const trimmedQuery = query?.trim();
   if (trimmedQuery) {
@@ -309,6 +330,18 @@ function objectPaginationQuery({ query, page, pageSize, prefix }: ObjectPagePara
   }
   if (prefix) {
     params.set("prefix", prefix);
+  }
+  if (delimiter !== undefined) {
+    params.set("delimiter", delimiter);
+  }
+  if (flat) {
+    params.set("flat", "true");
+  }
+  if (sortBy) {
+    params.set("sortBy", sortBy);
+  }
+  if (sortOrder) {
+    params.set("sortOrder", sortOrder);
   }
   params.set("page", String(page));
   params.set("pageSize", String(pageSize));

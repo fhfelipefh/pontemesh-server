@@ -31,7 +31,7 @@ use tokio::io::AsyncWriteExt;
 const DEFAULT_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 10;
 const MAX_S3_ACCESS_KEYS_PAGE_SIZE: u32 = 100;
 const DEFAULT_STORAGE_PAGE_SIZE: u32 = 20;
-const MAX_STORAGE_PAGE_SIZE: u32 = 100;
+const MAX_STORAGE_PAGE_SIZE: u32 = 500;
 const DEFAULT_APPLICATION_LOGS_LIMIT: usize = 80;
 const MAX_APPLICATION_LOGS_LIMIT: usize = 200;
 
@@ -98,10 +98,16 @@ pub struct ListBucketsQuery {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListObjectsQuery {
-    query: Option<String>,
-    prefix: Option<String>,
-    page: Option<u32>,
-    page_size: Option<u32>,
+    pub query: Option<String>,
+    pub prefix: Option<String>,
+    pub delimiter: Option<String>,
+    #[serde(alias = "sort_by")]
+    pub sort_by: Option<String>,
+    #[serde(alias = "sort_order")]
+    pub sort_order: Option<String>,
+    pub flat: Option<bool>,
+    pub page: Option<u32>,
+    pub page_size: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1645,12 +1651,20 @@ pub async fn list_objects(
         return bad_request(error);
     }
     let (page, page_size) = normalize_storage_pagination(query.page, query.page_size);
+    let effective_delimiter = if query.flat.unwrap_or(false) {
+        Some("")
+    } else {
+        query.delimiter.as_deref()
+    };
     match state
         .catalog
         .list_objects_page(
             &bucket_name,
             query.query.as_deref(),
             query.prefix.as_deref(),
+            effective_delimiter,
+            query.sort_by.as_deref(),
+            query.sort_order.as_deref(),
             page,
             page_size,
         )

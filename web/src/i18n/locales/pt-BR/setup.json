@@ -292,7 +292,12 @@
       "directory": "Diretório",
       "goUp": "Subir um nível",
       "breadcrumbLabel": "Navegação de pastas",
-      "breadcrumbRoot": "Raiz do bucket"
+      "breadcrumbRoot": "Raiz do bucket",
+      "viewMode": "Modo de visualização",
+      "viewModeFolders": "Navegação por pastas",
+      "viewModeFlat": "Todos os objetos",
+      "sortAsc": "Ordenar crescente",
+      "sortDesc": "Ordenar decrescente"
     },
     "metrics": {
       "title": "Tráfego do Origin",

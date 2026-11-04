@@ -292,7 +292,12 @@
       "directory": "Directory",
       "goUp": "Go up one level",
       "breadcrumbLabel": "Folder navigation",
-      "breadcrumbRoot": "Bucket root"
+      "breadcrumbRoot": "Bucket root",
+      "viewMode": "View mode",
+      "viewModeFolders": "Folder view",
+      "viewModeFlat": "All objects",
+      "sortAsc": "Sort ascending",
+      "sortDesc": "Sort descending"
     },
     "metrics": {
       "title": "Origin traffic",

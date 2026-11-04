@@ -17,6 +17,7 @@ describe("emptyObjectsPage", () => {
     const page = emptyObjectsPage(20);
     expect(page.items).toEqual([]);
     expect(page.commonPrefixes).toEqual([]);
+    expect(page.prefixes).toEqual([]);
     expect(page.page).toBe(1);
     expect(page.pageSize).toBe(20);
     expect(page.totalItems).toBe(0);

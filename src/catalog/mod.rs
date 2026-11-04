@@ -59,11 +59,21 @@ pub struct ObjectSummary {
     pub created_by: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefixSummary {
+    pub prefix: String,
+    pub size_bytes: i64,
+    pub object_count: i64,
+    pub updated_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaginatedObjects {
     pub items: Vec<ObjectSummary>,
     pub common_prefixes: Vec<String>,
+    pub prefixes: Vec<PrefixSummary>,
     pub page: u32,
     pub page_size: u32,
     pub total_items: i64,
@@ -1921,6 +1931,9 @@ impl Catalog {
         bucket_name: &str,
         query_text: Option<&str>,
         prefix: Option<&str>,
+        delimiter: Option<&str>,
+        sort_by: Option<&str>,
+        sort_order: Option<&str>,
         page: u32,
         page_size: u32,
     ) -> anyhow::Result<PaginatedObjects> {
@@ -1966,12 +1979,23 @@ impl Catalog {
         .await
         .context("failed to list objects")?;
 
-        let delimiter = "/";
+        let effective_delimiter = if normalized_query.is_some() {
+            None
+        } else {
+            match delimiter {
+                Some("") => None,
+                Some(custom) => Some(custom),
+                None => Some("/"),
+            }
+        };
+
         let prefix_str = effective_prefix.as_deref().unwrap_or("");
-        let (paged_items, common_prefixes, total, total_pages, page) = split_and_paginate(
+        let (paged_items, common_prefixes, prefixes, total, total_pages, page) = split_and_paginate(
             rows.into_iter().map(object_summary_from_row).collect(),
             prefix_str,
-            normalized_query.is_none().then_some(delimiter),
+            effective_delimiter,
+            sort_by,
+            sort_order,
             page,
             page_size,
         );
@@ -1979,6 +2003,7 @@ impl Catalog {
         Ok(PaginatedObjects {
             items: paged_items,
             common_prefixes,
+            prefixes,
             page,
             page_size,
             total_items: total,
@@ -7150,22 +7175,76 @@ fn split_and_paginate(
     objects: Vec<ObjectSummary>,
     prefix: &str,
     delimiter: Option<&str>,
+    sort_by: Option<&str>,
+    sort_order: Option<&str>,
     page: u32,
     page_size: u32,
-) -> (Vec<ObjectSummary>, Vec<String>, i64, u32, u32) {
-    let mut common_prefixes: Vec<String> = Vec::new();
+) -> (
+    Vec<ObjectSummary>,
+    Vec<String>,
+    Vec<PrefixSummary>,
+    i64,
+    u32,
+    u32,
+) {
+    let mut prefixes: Vec<PrefixSummary> = Vec::new();
     let mut file_items: Vec<ObjectSummary> = Vec::new();
     for object in objects {
         match delimiter.and_then(|delimiter| common_prefix_for_key(prefix, delimiter, &object.key))
         {
             Some(cp) => {
-                if !common_prefixes.contains(&cp) {
-                    common_prefixes.push(cp);
+                if let Some(existing) = prefixes.iter_mut().find(|p| p.prefix == cp) {
+                    existing.size_bytes = existing.size_bytes.saturating_add(object.size_bytes);
+                    existing.object_count = existing.object_count.saturating_add(1);
+                    if existing.updated_at.as_deref().unwrap_or("") < object.updated_at.as_str() {
+                        existing.updated_at = Some(object.updated_at.clone());
+                    }
+                } else {
+                    prefixes.push(PrefixSummary {
+                        prefix: cp,
+                        size_bytes: object.size_bytes,
+                        object_count: 1,
+                        updated_at: Some(object.updated_at.clone()),
+                    });
                 }
             }
             None => file_items.push(object),
         }
     }
+
+    let is_desc = sort_order.map(|o| o.eq_ignore_ascii_case("desc")).unwrap_or(false);
+    let sort_col = sort_by.unwrap_or("key");
+    match sort_col {
+        "size" => {
+            if is_desc {
+                prefixes.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+                file_items.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+            } else {
+                prefixes.sort_by(|a, b| a.size_bytes.cmp(&b.size_bytes));
+                file_items.sort_by(|a, b| a.size_bytes.cmp(&b.size_bytes));
+            }
+        }
+        "updatedAt" | "updated_at" | "date" => {
+            if is_desc {
+                prefixes.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+                file_items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            } else {
+                prefixes.sort_by(|a, b| a.updated_at.cmp(&b.updated_at));
+                file_items.sort_by(|a, b| a.updated_at.cmp(&b.updated_at));
+            }
+        }
+        _ => {
+            if is_desc {
+                prefixes.sort_by(|a, b| b.prefix.cmp(&a.prefix));
+                file_items.sort_by(|a, b| b.key.cmp(&a.key));
+            } else {
+                prefixes.sort_by(|a, b| a.prefix.cmp(&b.prefix));
+                file_items.sort_by(|a, b| a.key.cmp(&b.key));
+            }
+        }
+    }
+
+    let common_prefixes: Vec<String> = prefixes.iter().map(|p| p.prefix.clone()).collect();
     let total = i64::try_from(file_items.len()).unwrap_or(i64::MAX);
     let pages = total_pages(total, page_size);
     let clamped_page = page.min(pages).max(1);
@@ -7173,7 +7252,7 @@ fn split_and_paginate(
         * usize::try_from(page_size).unwrap_or(20);
     let limit = usize::try_from(page_size).unwrap_or(20);
     let paged = file_items.into_iter().skip(offset).take(limit).collect();
-    (paged, common_prefixes, total, pages, clamped_page)
+    (paged, common_prefixes, prefixes, total, pages, clamped_page)
 }
 
 fn map_unique_violation(message: &'static str) -> impl Fn(sqlx_core::Error) -> anyhow::Error {
@@ -7446,8 +7525,8 @@ mod tests {
             make_object("images/logo.png"),
             make_object("root.txt"),
         ];
-        let (files, prefixes, total, _pages, _page) =
-            split_and_paginate(objects, "", Some("/"), 1, 20);
+        let (files, prefixes, summaries, total, _pages, _page) =
+            split_and_paginate(objects, "", Some("/"), None, None, 1, 20);
 
         assert_eq!(total, 1);
         assert_eq!(files.len(), 1);
@@ -7455,6 +7534,7 @@ mod tests {
         assert_eq!(prefixes.len(), 2);
         assert!(prefixes.contains(&"docs/".to_string()));
         assert!(prefixes.contains(&"images/".to_string()));
+        assert_eq!(summaries.len(), 2);
     }
 
     #[test]
@@ -7464,10 +7544,13 @@ mod tests {
             make_object("a/file2.txt"),
             make_object("a/file3.txt"),
         ];
-        let (_files, prefixes, _total, _pages, _page) =
-            split_and_paginate(objects, "", Some("/"), 1, 20);
+        let (_files, prefixes, summaries, _total, _pages, _page) =
+            split_and_paginate(objects, "", Some("/"), None, None, 1, 20);
 
         assert_eq!(prefixes, vec!["a/".to_string()]);
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].object_count, 3);
+        assert_eq!(summaries[0].size_bytes, 300);
     }
 
     #[test]
@@ -7476,15 +7559,16 @@ mod tests {
             .map(|i| make_object(&format!("file{i:02}.txt")))
             .collect();
 
-        let (page1, _, total, total_pages, page_num) =
-            split_and_paginate(objects.clone(), "", Some("/"), 1, 10);
+        let (page1, _, _, total, total_pages, page_num) =
+            split_and_paginate(objects.clone(), "", Some("/"), None, None, 1, 10);
         assert_eq!(total, 25);
         assert_eq!(total_pages, 3);
         assert_eq!(page_num, 1);
         assert_eq!(page1.len(), 10);
         assert_eq!(page1[0].key, "file00.txt");
 
-        let (page3, _, _, _, _) = split_and_paginate(objects, "", Some("/"), 3, 10);
+        let (page3, _, _, _, _, _) =
+            split_and_paginate(objects, "", Some("/"), None, None, 3, 10);
         assert_eq!(page3.len(), 5);
         assert_eq!(page3[0].key, "file20.txt");
     }
@@ -7495,7 +7579,8 @@ mod tests {
             .map(|i| make_object(&format!("file{i}.txt")))
             .collect();
 
-        let (items, _, _, _, page_num) = split_and_paginate(objects, "", Some("/"), 99, 10);
+        let (items, _, _, _, _, page_num) =
+            split_and_paginate(objects, "", Some("/"), None, None, 99, 10);
         assert_eq!(page_num, 1);
         assert_eq!(items.len(), 5);
     }
@@ -7503,23 +7588,81 @@ mod tests {
     #[test]
     fn split_and_paginate_with_prefix_only_counts_direct_children() {
         let objects = vec![make_object("a/b/deep.txt"), make_object("a/direct.txt")];
-        let (files, prefixes, total, _, _) = split_and_paginate(objects, "a/", Some("/"), 1, 20);
+        let (files, prefixes, summaries, total, _, _) =
+            split_and_paginate(objects, "a/", Some("/"), None, None, 1, 20);
 
         assert_eq!(total, 1);
         assert_eq!(files[0].key, "a/direct.txt");
         assert_eq!(prefixes, vec!["a/b/".to_string()]);
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].prefix, "a/b/");
     }
 
     #[test]
     fn split_and_paginate_without_delimiter_keeps_nested_keys_as_items() {
         let objects = vec![make_object("docs/readme.md"), make_object("root.txt")];
-        let (files, prefixes, total, _, _) = split_and_paginate(objects, "", None, 1, 20);
+        let (files, prefixes, summaries, total, _, _) =
+            split_and_paginate(objects, "", None, None, None, 1, 20);
 
         assert_eq!(total, 2);
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].key, "docs/readme.md");
         assert_eq!(files[1].key, "root.txt");
         assert!(prefixes.is_empty());
+        assert!(summaries.is_empty());
+    }
+
+    #[test]
+    fn split_and_paginate_sorts_by_updated_at_descending() {
+        let mut obj1 = make_object("a/f1.txt");
+        obj1.updated_at = "2024-01-01T00:00:00Z".to_string();
+        let mut obj2 = make_object("b/f2.txt");
+        obj2.updated_at = "2024-06-01T00:00:00Z".to_string();
+        let mut file1 = make_object("old.txt");
+        file1.updated_at = "2024-02-01T00:00:00Z".to_string();
+        let mut file2 = make_object("new.txt");
+        file2.updated_at = "2024-07-01T00:00:00Z".to_string();
+
+        let (files, prefixes, summaries, _, _, _) = split_and_paginate(
+            vec![obj1, obj2, file1, file2],
+            "",
+            Some("/"),
+            Some("updatedAt"),
+            Some("desc"),
+            1,
+            10,
+        );
+
+        assert_eq!(prefixes, vec!["b/".to_string(), "a/".to_string()]);
+        assert_eq!(summaries[0].prefix, "b/");
+        assert_eq!(files[0].key, "new.txt");
+        assert_eq!(files[1].key, "old.txt");
+    }
+
+    #[test]
+    fn split_and_paginate_sorts_by_size_descending() {
+        let mut obj1 = make_object("small/f.txt");
+        obj1.size_bytes = 50;
+        let mut obj2 = make_object("large/f.txt");
+        obj2.size_bytes = 5000;
+        let mut file1 = make_object("small.txt");
+        file1.size_bytes = 10;
+        let mut file2 = make_object("large.txt");
+        file2.size_bytes = 9999;
+
+        let (files, prefixes, _, _, _, _) = split_and_paginate(
+            vec![obj1, obj2, file1, file2],
+            "",
+            Some("/"),
+            Some("size"),
+            Some("desc"),
+            1,
+            10,
+        );
+
+        assert_eq!(prefixes, vec!["large/".to_string(), "small/".to_string()]);
+        assert_eq!(files[0].key, "large.txt");
+        assert_eq!(files[1].key, "small.txt");
     }
 }
 
