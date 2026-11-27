@@ -11,6 +11,51 @@ use sqlx::{PgPool, PgPoolOptions, PgRow, Postgres};
 use sqlx_core::{query::query, query_scalar::query_scalar, row::Row, transaction::Transaction};
 use std::{net::IpAddr, path::Path};
 
+static EMBEDDED_MIGRATIONS: include_dir::Dir<'_> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/migrations");
+
+#[derive(Debug)]
+struct EmbeddedMigrations;
+
+impl sqlx_core::migrate::MigrationSource<'static> for EmbeddedMigrations {
+    fn resolve(
+        self,
+    ) -> futures_util::future::BoxFuture<
+        'static,
+        Result<Vec<sqlx_core::migrate::Migration>, sqlx_core::error::BoxDynError>,
+    > {
+        Box::pin(async move {
+            let mut migrations = Vec::new();
+            for file in EMBEDDED_MIGRATIONS.files() {
+                let Some(name) = file.path().file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if !name.ends_with(".sql") {
+                    continue;
+                }
+                let Some((version_str, description_raw)) = name.split_once('_') else {
+                    continue;
+                };
+                let Ok(version) = version_str.parse::<i64>() else {
+                    continue;
+                };
+                let description = description_raw.trim_end_matches(".sql").replace('_', " ");
+                let sql = std::str::from_utf8(file.contents())
+                    .map_err(|e| format!("invalid UTF-8 in migration {name}: {e}"))?;
+                migrations.push(sqlx_core::migrate::Migration::new(
+                    version,
+                    std::borrow::Cow::Owned(description),
+                    sqlx_core::migrate::MigrationType::Simple,
+                    std::borrow::Cow::Owned(sql.to_owned()),
+                    false,
+                ));
+            }
+            migrations.sort_by_key(|m| m.version);
+            Ok(migrations)
+        })
+    }
+}
+
 pub mod release;
 pub use release::SoftwareRelease;
 
@@ -932,9 +977,16 @@ impl Catalog {
             .await
             .context("failed to connect to PostgreSQL using PONTEMESH_DATABASE_URL")?;
 
-        sqlx_core::migrate::Migrator::new(Path::new("./migrations"))
-            .await
-            .context("failed to load PostgreSQL migrations")?
+        let migrator = if Path::new("./migrations").is_dir() {
+            sqlx_core::migrate::Migrator::new(Path::new("./migrations"))
+                .await
+                .context("failed to load PostgreSQL migrations")?
+        } else {
+            sqlx_core::migrate::Migrator::new(EmbeddedMigrations)
+                .await
+                .context("failed to load embedded PostgreSQL migrations")?
+        };
+        migrator
             .run(&pool)
             .await
             .context("failed to run PostgreSQL migrations")?;
@@ -7074,8 +7126,14 @@ fn validate_peer_endpoint(endpoint: &str) -> anyhow::Result<()> {
     if endpoint.len() > 2048 {
         bail!("peer endpoint is too long");
     }
-    if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
-        bail!("peer endpoint must be an HTTP or HTTPS URL");
+    let is_http_or_peer = endpoint.starts_with("http://")
+        || endpoint.starts_with("https://")
+        || endpoint.starts_with("peer://");
+    let is_multiaddr = endpoint.starts_with('/')
+        && !endpoint.chars().any(char::is_whitespace)
+        && endpoint.split('/').filter(|s| !s.is_empty()).count() >= 4;
+    if !(is_http_or_peer || is_multiaddr) {
+        bail!("peer endpoint must be an HTTP/HTTPS URL, peer:// URI, or libp2p multiaddr");
     }
     Ok(())
 }
@@ -7380,6 +7438,7 @@ mod tests {
         assert!(validate_replica_endpoint("").is_err());
 
         assert!(validate_peer_endpoint("http://peer.local:9000").is_ok());
+        assert!(validate_peer_endpoint("/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWTest").is_ok());
         assert!(validate_peer_endpoint("invalid-url").is_err());
 
         assert!(validate_peer_id("peer-node-1").is_ok());

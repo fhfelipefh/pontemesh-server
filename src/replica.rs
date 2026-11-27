@@ -262,7 +262,7 @@ async fn serve_access_package_object_inner(
                 &format!("bucket={bucket_name}; key={object_key}; reason=revalidation_denied"),
             )
             .await;
-            return forbidden("access package is invalid, expired or revoked");
+            return unauthorized("access package is invalid, expired or revoked");
         }
         RevalidationOutcome::OriginUnavailable(error) => {
             tracing::warn!(
@@ -290,7 +290,7 @@ async fn serve_access_package_object_inner(
         }
     };
 
-    let object = match load_local_object(&storage_path, &bucket_name, &object_key).await {
+    let object = match load_local_object_metadata(&storage_path, &bucket_name, &object_key).await {
         Ok(Some(object)) => object,
         Ok(None) => {
             record_local_audit(
@@ -354,6 +354,26 @@ async fn serve_access_package_object_inner(
         }
         None => None,
     };
+
+    if include_body {
+        if let Err(error) = verify_local_fragments(&object, range).await {
+            record_local_audit(
+                &state,
+                "replica_object_missing",
+                Some(&package_id),
+                "failure",
+                &format!("bucket={bucket_name}; key={object_key}; reason={error}"),
+            )
+            .await;
+            return (
+                StatusCode::CONFLICT,
+                Json(ErrorResponse {
+                    error: "local replica object is not readable".to_owned(),
+                }),
+            )
+                .into_response();
+        }
+    }
 
     let (status, content_length) = if let Some(range) = range {
         (
@@ -466,7 +486,7 @@ async fn revalidate_with_origin(
     }
 }
 
-async fn load_local_object(
+async fn load_local_object_metadata(
     storage_path: &std::path::Path,
     bucket_name: &str,
     object_key: &str,
@@ -492,47 +512,17 @@ async fn load_local_object(
         return Ok(None);
     }
 
-    let mut object_hasher = Sha256::new();
-    let mut object_size = 0_i64;
+    let mut declared_size = 0_i64;
     for fragment in &fragments {
         if fragment.size_bytes < 0 {
             bail!("replica local fragment size is invalid");
         }
-        let path = PathBuf::from(&fragment.path);
-        let mut file = tokio_fs::File::open(&path)
-            .await
-            .with_context(|| format!("failed to read local replica fragment {}", path.display()))?;
-        let mut fragment_hasher = Sha256::new();
-        let mut actual_size = 0_i64;
-        let mut buffer = vec![0_u8; 64 * 1024];
-        loop {
-            let read = file.read(&mut buffer).await?;
-            if read == 0 {
-                break;
-            }
-            actual_size = actual_size
-                .checked_add(i64::try_from(read)?)
-                .context("local replica fragment is too large")?;
-            fragment_hasher.update(&buffer[..read]);
-            object_hasher.update(&buffer[..read]);
-        }
-        if actual_size != fragment.size_bytes {
-            bail!("local replica fragment size mismatch");
-        }
-        let actual_hash = format!("{:x}", fragment_hasher.finalize());
-        if actual_hash != fragment.sha256 {
-            bail!("local replica fragment hash mismatch");
-        }
-        object_size = object_size
-            .checked_add(actual_size)
+        declared_size = declared_size
+            .checked_add(fragment.size_bytes)
             .context("local replica object is too large")?;
     }
-    if object_size != local.size_bytes {
+    if declared_size != local.size_bytes {
         bail!("local replica object size mismatch");
-    }
-    let actual_hash = format!("{:x}", object_hasher.finalize());
-    if actual_hash != local.sha256 {
-        bail!("local replica object hash mismatch");
     }
 
     Ok(Some(ServedLocalObject {
@@ -543,6 +533,69 @@ async fn load_local_object(
         fragments: fragments.into_iter().cloned().collect(),
         election_leader_id: local.election_leader_id.clone(),
     }))
+}
+
+async fn verify_local_fragments(
+    object: &ServedLocalObject,
+    range: Option<ResolvedRange>,
+) -> anyhow::Result<()> {
+    let mut object_hasher = range.is_none().then(Sha256::new);
+    let mut offset = 0_u64;
+    let mut buffer = vec![0_u8; 64 * 1024];
+
+    for fragment in &object.fragments {
+        let frag_size = u64::try_from(fragment.size_bytes)
+            .context("replica local fragment size is invalid")?;
+        let frag_start = offset;
+        let frag_end = offset
+            .checked_add(frag_size)
+            .context("local replica object is too large")?;
+        offset = frag_end;
+
+        let should_verify = match range {
+            Some(r) => frag_size > 0 && frag_end > r.start && frag_start <= r.end,
+            None => true,
+        };
+        if !should_verify {
+            continue;
+        }
+
+        let path = PathBuf::from(&fragment.path);
+        let mut file = tokio_fs::File::open(&path)
+            .await
+            .with_context(|| format!("failed to read local replica fragment {}", path.display()))?;
+        let mut fragment_hasher = Sha256::new();
+        let mut actual_size = 0_i64;
+        loop {
+            let read = file.read(&mut buffer).await?;
+            if read == 0 {
+                break;
+            }
+            actual_size = actual_size
+                .checked_add(i64::try_from(read)?)
+                .context("local replica fragment is too large")?;
+            fragment_hasher.update(&buffer[..read]);
+            if let Some(hasher) = object_hasher.as_mut() {
+                hasher.update(&buffer[..read]);
+            }
+        }
+        if actual_size != fragment.size_bytes {
+            bail!("local replica fragment size mismatch");
+        }
+        let actual_hash = format!("{:x}", fragment_hasher.finalize());
+        if actual_hash != fragment.sha256 {
+            bail!("local replica fragment hash mismatch");
+        }
+    }
+
+    if let Some(hasher) = object_hasher {
+        let actual_hash = format!("{:x}", hasher.finalize());
+        if actual_hash != object.sha256 {
+            bail!("local replica object hash mismatch");
+        }
+    }
+
+    Ok(())
 }
 
 fn replica_state_path(storage_path: &std::path::Path) -> PathBuf {
@@ -1118,7 +1171,7 @@ fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
             .parse()
             .map_err(|_| anyhow::anyhow!("invalid suffix byte range"))?;
         if suffix_len == 0 {
-            bail!("suffix byte range must be greater than zero");
+            bail!("requested range is not satisfiable");
         }
         (total_size.saturating_sub(suffix_len), total_size - 1)
     } else {
@@ -1193,6 +1246,16 @@ fn internal_error(error: anyhow::Error) -> Response {
         .into_response()
 }
 
+fn unauthorized(message: &str) -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            error: message.to_owned(),
+        }),
+    )
+        .into_response()
+}
+
 fn forbidden(message: &str) -> Response {
     (
         StatusCode::FORBIDDEN,
@@ -1201,4 +1264,81 @@ fn forbidden(message: &str) -> Response {
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn verify_local_fragments_skips_fragments_outside_requested_range() {
+        let dir = std::env::temp_dir().join(format!(
+            "pontemesh_replica_range_test_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+
+        let frag0_path = dir.join("frag0.bin");
+        let frag0_bytes = b"hello-frag-0";
+        std::fs::write(&frag0_path, frag0_bytes).expect("write frag0");
+        let frag0_hash = format!("{:x}", Sha256::digest(frag0_bytes));
+
+        // Fragment 1 is intentionally missing on disk; a range within fragment 0 must still succeed.
+        let frag1_path = dir.join("frag1_missing.bin");
+
+        let object = ServedLocalObject {
+            manifest_id: "man-1".to_owned(),
+            sha256: "unused-for-range".to_owned(),
+            content_type: "application/octet-stream".to_owned(),
+            size_bytes: (frag0_bytes.len() + 10) as u64,
+            fragments: vec![
+                LocalFragmentState {
+                    index: 0,
+                    path: frag0_path.to_string_lossy().into_owned(),
+                    size_bytes: frag0_bytes.len() as i64,
+                    sha256: frag0_hash,
+                },
+                LocalFragmentState {
+                    index: 1,
+                    path: frag1_path.to_string_lossy().into_owned(),
+                    size_bytes: 10,
+                    sha256: "0".repeat(64),
+                },
+            ],
+            election_leader_id: None,
+        };
+
+        // Range strictly inside fragment 0 succeeds without reading fragment 1.
+        verify_local_fragments(
+            &object,
+            Some(ResolvedRange {
+                start: 0,
+                end: (frag0_bytes.len() - 1) as u64,
+            }),
+        )
+        .await
+        .expect("range inside fragment 0 should succeed");
+
+        // Range touching fragment 1 detects the missing fragment.
+        let err = verify_local_fragments(
+            &object,
+            Some(ResolvedRange {
+                start: frag0_bytes.len() as u64,
+                end: (frag0_bytes.len() + 5) as u64,
+            }),
+        )
+        .await;
+        assert!(err.is_err());
+
+        // Corrupting fragment 0 causes range inside fragment 0 to fail.
+        std::fs::write(&frag0_path, b"corrupt-fr0!").expect("corrupt frag0");
+        let corrupt_err = verify_local_fragments(
+            &object,
+            Some(ResolvedRange { start: 0, end: 4 }),
+        )
+        .await;
+        assert!(corrupt_err.is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

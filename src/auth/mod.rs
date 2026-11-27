@@ -228,7 +228,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
     .await;
     (
         StatusCode::OK,
-        [(header::SET_COOKIE, clear_auth_cookie())],
+        [(header::SET_COOKIE, clear_auth_cookie(&headers))],
         Json(serde_json::json!({ "ok": true })),
     )
         .into_response()
@@ -575,11 +575,34 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     left.ct_eq(right).into()
 }
 
+pub fn session_cookie_name(headers: &HeaderMap) -> String {
+    let port = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .and_then(extract_host_port);
+    match port {
+        Some(port) => format!("{AUTH_SESSION_COOKIE}_{port}"),
+        None => AUTH_SESSION_COOKIE.to_owned(),
+    }
+}
+
+fn extract_host_port(host: &str) -> Option<&str> {
+    let host = host.trim();
+    let port = if let Some(rest) = host.strip_prefix('[') {
+        rest.split_once("]:")?.1
+    } else {
+        let (_, port) = host.rsplit_once(':')?;
+        port
+    };
+    (!port.is_empty() && port.bytes().all(|b| b.is_ascii_digit())).then_some(port)
+}
+
 pub fn read_auth_session(headers: &HeaderMap) -> Option<String> {
+    let cookie_name = session_cookie_name(headers);
     let cookie = headers.get(header::COOKIE)?.to_str().ok()?;
     cookie.split(';').find_map(|part| {
         let (name, value) = part.trim().split_once('=')?;
-        (name == AUTH_SESSION_COOKIE).then(|| value.to_owned())
+        (name == cookie_name).then(|| value.to_owned())
     })
 }
 
@@ -612,16 +635,37 @@ fn read_bearer_token(headers: &HeaderMap) -> Option<String> {
 }
 
 fn session_cookie(headers: &HeaderMap, token: &str) -> HeaderValue {
+    let cookie_name = session_cookie_name(headers);
     let secure = request_is_https(headers) || !request_is_localhost(headers);
     let cookie = format!(
-        "{AUTH_SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax{}",
+        "{cookie_name}={token}; Path=/; HttpOnly; SameSite=Lax{}",
         if secure { "; Secure" } else { "" }
     );
     HeaderValue::from_str(&cookie).expect("valid auth cookie")
 }
 
-pub(crate) fn clear_auth_cookie() -> HeaderValue {
-    HeaderValue::from_static("pm_admin_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+pub(crate) fn clear_auth_cookie(headers: &HeaderMap) -> HeaderValue {
+    let cookie_name = session_cookie_name(headers);
+    let cookie = format!("{cookie_name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+    HeaderValue::from_str(&cookie).expect("valid auth clear cookie")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_cookie_name_isolates_by_host_port() {
+        let mut h_origin = HeaderMap::new();
+        h_origin.insert(header::HOST, HeaderValue::from_static("127.0.0.1:18080"));
+        let mut h_replica = HeaderMap::new();
+        h_replica.insert(header::HOST, HeaderValue::from_static("127.0.0.1:18081"));
+        let h_default = HeaderMap::new();
+
+        assert_eq!(session_cookie_name(&h_origin), "pm_admin_session_18080");
+        assert_eq!(session_cookie_name(&h_replica), "pm_admin_session_18081");
+        assert_eq!(session_cookie_name(&h_default), "pm_admin_session");
+    }
 }
 
 pub(crate) fn request_is_https(headers: &HeaderMap) -> bool {

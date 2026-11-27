@@ -2988,7 +2988,7 @@ fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
     let (start, end) = if start.is_empty() {
         let suffix_len: u64 = end.parse().context("invalid suffix byte range")?;
         if suffix_len == 0 {
-            bail!("suffix byte range must be greater than zero");
+            bail!("requested range is not satisfiable");
         }
         let start = total_size.saturating_sub(suffix_len);
         (start, total_size - 1)

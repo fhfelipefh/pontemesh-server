@@ -51,7 +51,7 @@ impl GcRuntime {
         }
     }
 
-    pub async fn run(self) {
+    pub async fn run(self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         if !self.config.enabled {
             info!("gc: disabled by configuration");
             return;
@@ -61,11 +61,17 @@ impl GcRuntime {
         let mut full_gc_due = tokio::time::Instant::now();
 
         loop {
+            if *shutdown.borrow() {
+                break;
+            }
             let storage_dir = match config::configured_storage_dir(&self.paths) {
                 Ok(path) => path,
                 Err(error) => {
                     error!(error = %error, "gc: failed to resolve storage dir, skipping cycle");
-                    sleep(scan_interval).await;
+                    tokio::select! {
+                        _ = sleep(scan_interval) => {}
+                        _ = shutdown.changed() => break,
+                    }
                     continue;
                 }
             };
@@ -92,7 +98,10 @@ impl GcRuntime {
                 }
             }
 
-            sleep(scan_interval).await;
+            tokio::select! {
+                _ = sleep(scan_interval) => {}
+                _ = shutdown.changed() => break,
+            }
         }
     }
 

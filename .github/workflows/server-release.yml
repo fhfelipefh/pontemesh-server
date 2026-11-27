@@ -154,7 +154,7 @@ jobs:
           test -f target/release/pontemesh-server
           mkdir -p "dist/$package"
           cp target/release/pontemesh-server README.md docs/CONFIGURATION.md "dist/$package/"
-          cp -R deploy "dist/$package/"
+          cp -R deploy migrations "dist/$package/"
           chmod +x "dist/$package/pontemesh-server"
           tar -C dist -czf "dist/$package.tar.gz" "$package"
           python3 -c "import hashlib,pathlib,sys; p=pathlib.Path(sys.argv[1]); pathlib.Path(str(p)+'.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'\n')" "dist/$package.tar.gz"
@@ -174,6 +174,7 @@ jobs:
           Copy-Item "README.md" "dist/$package/"
           Copy-Item "docs/CONFIGURATION.md" "dist/$package/"
           Copy-Item "deploy" "dist/$package/" -Recurse
+          Copy-Item "migrations" "dist/$package/" -Recurse
           Compress-Archive -Path "dist/$package/*" -DestinationPath "dist/$package.zip" -Force
           (Get-FileHash -Algorithm SHA256 "dist/$package.zip").Hash.ToLowerInvariant() | Set-Content "dist/$package.zip.sha256"
 

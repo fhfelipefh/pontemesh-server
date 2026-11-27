@@ -95,7 +95,7 @@ pub fn build_payload(paths: &PontemeshHome) -> anyhow::Result<OperationalWebhook
     })
 }
 
-pub async fn run(paths: PontemeshHome) {
+pub async fn run(paths: PontemeshHome, mut shutdown: tokio::sync::watch::Receiver<bool>) {
     let client = match Client::builder()
         .timeout(Duration::from_secs(10))
         .redirect(Policy::limited(3))
@@ -110,7 +110,16 @@ pub async fn run(paths: PontemeshHome) {
     };
     let mut last_checked = Utc::now();
     loop {
-        sleep(WEBHOOK_POLL_INTERVAL).await;
+        if *shutdown.borrow() {
+            break;
+        }
+        tokio::select! {
+            _ = sleep(WEBHOOK_POLL_INTERVAL) => {}
+            _ = shutdown.changed() => break,
+        }
+        if *shutdown.borrow() {
+            break;
+        }
         let now = Utc::now();
         if deliver_if_due(&client, &paths, last_checked, now)
             .await

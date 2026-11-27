@@ -2044,6 +2044,7 @@ pub async fn delete_admin_user(
 pub async fn update_my_credentials(
     State(state): State<AppState>,
     Extension(session): Extension<AdminSession>,
+    headers: HeaderMap,
     Json(payload): Json<UpdateMyCredentialsRequest>,
 ) -> Response {
     let username = payload.username.trim();
@@ -2089,7 +2090,7 @@ pub async fn update_my_credentials(
             .await;
             (
                 StatusCode::NO_CONTENT,
-                [(header::SET_COOKIE, crate::auth::clear_auth_cookie())],
+                [(header::SET_COOKIE, crate::auth::clear_auth_cookie(&headers))],
             )
                 .into_response()
         }
@@ -2789,7 +2790,7 @@ fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
     let (start, end) = if start.is_empty() {
         let suffix_len: u64 = end.parse().context("invalid suffix byte range")?;
         if suffix_len == 0 {
-            bail!("suffix byte range must be greater than zero");
+            bail!("requested range is not satisfiable");
         }
         let start = total_size.saturating_sub(suffix_len);
         (start, total_size - 1)

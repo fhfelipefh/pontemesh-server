@@ -1450,7 +1450,7 @@ fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
             .parse()
             .map_err(|_| anyhow::anyhow!("invalid suffix byte range"))?;
         if suffix_len == 0 {
-            bail!("suffix byte range must be greater than zero");
+            bail!("requested range is not satisfiable");
         }
         (total_size.saturating_sub(suffix_len), total_size - 1)
     } else {

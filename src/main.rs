@@ -93,16 +93,21 @@ async fn run_servers(
     let gc_metrics = gc::metrics::new_shared();
     let webhook_paths = paths.clone();
     let gc_runtime = gc::scheduler::GcRuntime::new(&catalog, paths, gc_config, gc_metrics);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_tx.send(true);
+    });
 
     tokio::try_join!(
-        axum::serve(web_listener, web_app).with_graceful_shutdown(shutdown_signal()),
-        axum::serve(s3_listener, s3_app).with_graceful_shutdown(shutdown_signal()),
+        axum::serve(web_listener, web_app).with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone())),
+        axum::serve(s3_listener, s3_app).with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone())),
         async {
-            gc_runtime.run().await;
+            gc_runtime.run(shutdown_rx.clone()).await;
             Ok(())
         },
         async {
-            system::webhook::run(webhook_paths).await;
+            system::webhook::run(webhook_paths, shutdown_rx.clone()).await;
             Ok(())
         },
     )
@@ -168,6 +173,13 @@ fn init_tracing() {
         .with_env_filter(env_filter)
         .with_target(false)
         .init();
+}
+
+async fn wait_for_shutdown(mut shutdown: tokio::sync::watch::Receiver<bool>) {
+    if *shutdown.borrow() {
+        return;
+    }
+    let _ = shutdown.changed().await;
 }
 
 async fn shutdown_signal() {
