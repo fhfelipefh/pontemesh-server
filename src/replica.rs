@@ -310,21 +310,8 @@ async fn serve_access_package_object_inner(
                 .into_response();
         }
         Err(error) => {
-            record_local_audit(
-                &state,
-                "replica_object_missing",
-                Some(&package_id),
-                "failure",
-                &format!("bucket={bucket_name}; key={object_key}; reason={error}"),
-            )
-            .await;
-            return (
-                StatusCode::CONFLICT,
-                Json(ErrorResponse {
-                    error: "local replica object is not readable".to_owned(),
-                }),
-            )
-                .into_response();
+            return unreadable_local_object(&state, &package_id, &bucket_name, &object_key, error)
+                .await;
         }
     };
 
@@ -354,6 +341,11 @@ async fn serve_access_package_object_inner(
         }
         None => None,
     };
+
+    if let Err(error) = verify_local_fragments(&object, range).await {
+        return unreadable_local_object(&state, &package_id, &bucket_name, &object_key, error)
+            .await;
+    }
 
     let (status, content_length) = if let Some(range) = range {
         (
@@ -466,6 +458,30 @@ async fn revalidate_with_origin(
     }
 }
 
+async fn unreadable_local_object(
+    state: &AppState,
+    package_id: &str,
+    bucket_name: &str,
+    object_key: &str,
+    error: anyhow::Error,
+) -> Response {
+    record_local_audit(
+        state,
+        "replica_object_missing",
+        Some(package_id),
+        "failure",
+        &format!("bucket={bucket_name}; key={object_key}; reason={error}"),
+    )
+    .await;
+    (
+        StatusCode::CONFLICT,
+        Json(ErrorResponse {
+            error: "local replica object is not readable".to_owned(),
+        }),
+    )
+        .into_response()
+}
+
 async fn load_local_object(
     storage_path: &std::path::Path,
     bucket_name: &str,
@@ -492,47 +508,17 @@ async fn load_local_object(
         return Ok(None);
     }
 
-    let mut object_hasher = Sha256::new();
     let mut object_size = 0_i64;
-    for fragment in &fragments {
-        if fragment.size_bytes < 0 {
-            bail!("replica local fragment size is invalid");
-        }
-        let path = PathBuf::from(&fragment.path);
-        let mut file = tokio_fs::File::open(&path)
-            .await
-            .with_context(|| format!("failed to read local replica fragment {}", path.display()))?;
-        let mut fragment_hasher = Sha256::new();
-        let mut actual_size = 0_i64;
-        let mut buffer = vec![0_u8; 64 * 1024];
-        loop {
-            let read = file.read(&mut buffer).await?;
-            if read == 0 {
-                break;
-            }
-            actual_size = actual_size
-                .checked_add(i64::try_from(read)?)
-                .context("local replica fragment is too large")?;
-            fragment_hasher.update(&buffer[..read]);
-            object_hasher.update(&buffer[..read]);
-        }
-        if actual_size != fragment.size_bytes {
-            bail!("local replica fragment size mismatch");
-        }
-        let actual_hash = format!("{:x}", fragment_hasher.finalize());
-        if actual_hash != fragment.sha256 {
-            bail!("local replica fragment hash mismatch");
+    for (index, fragment) in fragments.iter().enumerate() {
+        if fragment.size_bytes < 0 || fragment.index != i64::try_from(index)? {
+            bail!("local replica fragment layout is invalid");
         }
         object_size = object_size
-            .checked_add(actual_size)
+            .checked_add(fragment.size_bytes)
             .context("local replica object is too large")?;
     }
     if object_size != local.size_bytes {
         bail!("local replica object size mismatch");
-    }
-    let actual_hash = format!("{:x}", object_hasher.finalize());
-    if actual_hash != local.sha256 {
-        bail!("local replica object hash mismatch");
     }
 
     Ok(Some(ServedLocalObject {
@@ -543,6 +529,57 @@ async fn load_local_object(
         fragments: fragments.into_iter().cloned().collect(),
         election_leader_id: local.election_leader_id.clone(),
     }))
+}
+
+async fn verify_local_fragments(
+    object: &ServedLocalObject,
+    range: Option<ResolvedRange>,
+) -> anyhow::Result<()> {
+    let covers_object =
+        range.is_none_or(|range| range.start == 0 && range.end + 1 == object.size_bytes);
+    let mut object_hasher = covers_object.then(Sha256::new);
+    let mut offset = 0_u64;
+    let mut buffer = vec![0_u8; 64 * 1024];
+    for fragment in &object.fragments {
+        let start = offset;
+        offset += u64::try_from(fragment.size_bytes)?;
+        if range.is_some_and(|range| range.start >= offset || range.end < start) {
+            continue;
+        }
+
+        let mut file = tokio_fs::File::open(&fragment.path)
+            .await
+            .with_context(|| format!("failed to read local replica fragment {}", fragment.path))?;
+        let mut fragment_hasher = Sha256::new();
+        let mut actual_size = 0_i64;
+        loop {
+            let read = file.read(&mut buffer).await?;
+            if read == 0 {
+                break;
+            }
+            actual_size = actual_size
+                .checked_add(i64::try_from(read)?)
+                .context("local replica fragment is too large")?;
+            fragment_hasher.update(&buffer[..read]);
+            if let Some(hasher) = object_hasher.as_mut() {
+                hasher.update(&buffer[..read]);
+            }
+        }
+        if actual_size != fragment.size_bytes {
+            bail!("local replica fragment size mismatch");
+        }
+        let actual_hash = format!("{:x}", fragment_hasher.finalize());
+        if actual_hash != fragment.sha256 {
+            bail!("local replica fragment hash mismatch");
+        }
+    }
+    if let Some(hasher) = object_hasher {
+        let actual_hash = format!("{:x}", hasher.finalize());
+        if actual_hash != object.sha256 {
+            bail!("local replica object hash mismatch");
+        }
+    }
+    Ok(())
 }
 
 fn replica_state_path(storage_path: &std::path::Path) -> PathBuf {
@@ -1201,4 +1238,61 @@ fn forbidden(message: &str) -> Response {
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn partial_reads_verify_only_overlapping_fragments() {
+        let root = std::env::temp_dir().join(format!("pontemesh-replica-{}", uuid::Uuid::new_v4()));
+        tokio_fs::create_dir(&root).await.unwrap();
+        let fragments: Vec<_> = [b"abc", b"def", b"ghi"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, data)| LocalFragmentState {
+                index: index as i64,
+                sha256: format!("{:x}", Sha256::digest(data)),
+                size_bytes: data.len() as i64,
+                path: root.join(index.to_string()).to_str().unwrap().to_owned(),
+            })
+            .collect();
+        let mut object = ServedLocalObject {
+            manifest_id: "manifest".to_owned(),
+            sha256: format!("{:x}", Sha256::digest(b"abcdefghi")),
+            content_type: "application/octet-stream".to_owned(),
+            size_bytes: 9,
+            fragments,
+            election_leader_id: None,
+        };
+        for (fragment, data) in object.fragments.iter().zip([b"abc", b"def", b"ghi"]) {
+            tokio_fs::write(&fragment.path, data).await.unwrap();
+        }
+        verify_local_fragments(&object, None).await.unwrap();
+        let correct_hash = std::mem::take(&mut object.sha256);
+        let error = verify_local_fragments(&object, None).await.unwrap_err();
+        assert_eq!(error.to_string(), "local replica object hash mismatch");
+        object.sha256 = correct_hash;
+
+        // A range spanning the first two fragments must succeed even if the third file is missing.
+        tokio_fs::remove_file(&object.fragments[2].path)
+            .await
+            .unwrap();
+        let crossing = Some(ResolvedRange { start: 2, end: 3 });
+        verify_local_fragments(&object, crossing).await.unwrap();
+        assert!(verify_local_fragments(&object, None).await.is_err());
+
+        // A fragment beginning exactly after the inclusive end need not be opened.
+        tokio_fs::write(&object.fragments[1].path, b"dxf")
+            .await
+            .unwrap();
+        verify_local_fragments(&object, Some(ResolvedRange { start: 0, end: 2 }))
+            .await
+            .unwrap();
+        let error = verify_local_fragments(&object, crossing).await.unwrap_err();
+        assert_eq!(error.to_string(), "local replica fragment hash mismatch");
+
+        tokio_fs::remove_dir_all(root).await.unwrap();
+    }
 }
