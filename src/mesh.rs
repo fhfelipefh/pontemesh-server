@@ -1450,7 +1450,7 @@ fn parse_range(raw: &str, total_size: u64) -> anyhow::Result<ResolvedRange> {
             .parse()
             .map_err(|_| anyhow::anyhow!("invalid suffix byte range"))?;
         if suffix_len == 0 {
-            bail!("suffix byte range must be greater than zero");
+            bail!("requested range is not satisfiable");
         }
         (total_size.saturating_sub(suffix_len), total_size - 1)
     } else {
@@ -1557,6 +1557,20 @@ fn forbidden(message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn access_package_suffix_ranges_distinguish_zero_from_the_last_byte() {
+        let Err(error) = parse_range("bytes=-0", 11) else {
+            panic!("a zero-length suffix must be unsatisfiable");
+        };
+        assert_eq!(
+            bad_request(error).status(),
+            StatusCode::RANGE_NOT_SATISFIABLE
+        );
+
+        let range = parse_range("bytes=-1", 11).expect("one-byte suffix");
+        assert_eq!((range.start, range.end), (10, 10));
+    }
 
     #[test]
     fn wildcard_is_not_an_application_scope() {
